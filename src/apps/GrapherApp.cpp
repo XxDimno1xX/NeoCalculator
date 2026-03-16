@@ -68,7 +68,7 @@ GrapherApp::GrapherApp()
     , _addRow(nullptr), _addLabel(nullptr)
     , _exprHint(nullptr), _plotBtn(nullptr), _tableBtn(nullptr)
     , _graphToolbar(nullptr), _graphArea(nullptr)
-    , _axisLineX(nullptr), _axisLineY(nullptr)
+    , _graphCanvas(nullptr), _graphBuf(nullptr), _graphImgDsc{}
     , _traceDot(nullptr), _traceLineH(nullptr), _traceLineV(nullptr)
     , _tracePill(nullptr), _tracePillDot(nullptr), _tracePillLabel(nullptr)
     , _infoBar(nullptr), _infoLabel(nullptr)
@@ -92,9 +92,6 @@ GrapherApp::GrapherApp()
         _funcs[i].len = 0;
         _funcs[i].valid = false;
         _funcs[i].color = FUNC_COLORS[i];
-        _funcLines[i] = nullptr;
-        _funcPts[i] = nullptr;
-        _funcPtCount[i] = 0;
     }
     for (int i = 0; i < 4; ++i) _toolLabels[i] = nullptr;
     for (int i = 0; i < CALC_MENU_ITEMS; ++i) _calcMenuRows[i] = nullptr;
@@ -149,10 +146,7 @@ void GrapherApp::end() {
         _tplAST[i].reset();
     }
 
-    for (int i = 0; i < MAX_FUNCS; ++i) {
-        if (_funcPts[i]) { heap_caps_free(_funcPts[i]); _funcPts[i] = nullptr; }
-        _funcPtCount[i] = 0;
-    }
+    if (_graphBuf) { heap_caps_free(_graphBuf); _graphBuf = nullptr; }
     _statusBar.destroy();
     if (_screen) {
         lv_obj_delete(_screen);
@@ -165,7 +159,7 @@ void GrapherApp::end() {
         _addRow = nullptr; _addLabel = nullptr;
         _exprHint = nullptr; _plotBtn = nullptr; _tableBtn = nullptr;
         _graphToolbar = nullptr; _graphArea = nullptr;
-        _axisLineX = nullptr; _axisLineY = nullptr;
+        _graphCanvas = nullptr;
         _traceDot = nullptr; _traceLineH = nullptr; _traceLineV = nullptr;
         _tracePill = nullptr; _tracePillDot = nullptr; _tracePillLabel = nullptr;
         _infoBar = nullptr; _infoLabel = nullptr;
@@ -180,7 +174,6 @@ void GrapherApp::end() {
         for (int i = 0; i < MAX_FUNCS; ++i) {
             _exprRows[i] = nullptr; _exprDots[i] = nullptr;
             _tplBtns[i] = nullptr;
-            _funcLines[i] = nullptr;
         }
         for (int i = 0; i < 4; ++i) _toolLabels[i] = nullptr;
         _tplModal = nullptr; _tplOpen = false;
@@ -411,9 +404,57 @@ static float niceStep(float range, int maxTicks) {
     return nice * mag;
 }
 
-// ── Graph grid + axis draw callback ─────────────────────────────────────
-// ── Graph tick labels use light color for dark background ──
-static void graphGridDrawCb(lv_event_t* e) {
+// ── Kandinsky: RGB888 → RGB565 ────────────────────────────────────────────
+uint16_t GrapherApp::rgb888to565(uint32_t rgb) {
+    uint8_t r = (rgb >> 16) & 0xFF;
+    uint8_t g = (rgb >>  8) & 0xFF;
+    uint8_t b =  rgb        & 0xFF;
+    return (uint16_t)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+}
+
+// ── Kandinsky: Bresenham line into RGB565 buffer ──────────────────────────
+// Trivial-rejection clipping: if both endpoints are outside the same screen
+// edge, the line is fully off-screen and can be skipped immediately.
+void GrapherApp::fastDrawLine(uint16_t* buf, int bufW, int bufH,
+                               int x0, int y0, int x1, int y1, uint16_t color)
+{
+    // Early exit: both points outside the same edge
+    if ((x0 < 0 && x1 < 0) || (x0 >= bufW && x1 >= bufW) ||
+        (y0 < 0 && y1 < 0) || (y0 >= bufH && y1 >= bufH)) return;
+
+    int dx =  abs(x1 - x0);
+    int dy = -abs(y1 - y0);
+    int sx = (x0 < x1) ? 1 : -1;
+    int sy = (y0 < y1) ? 1 : -1;
+    int err = dx + dy;
+
+    // Fast path: both endpoints are inside — skip per-pixel bounds check
+    if ((unsigned)x0 < (unsigned)bufW && (unsigned)x1 < (unsigned)bufW &&
+        (unsigned)y0 < (unsigned)bufH && (unsigned)y1 < (unsigned)bufH) {
+        for (;;) {
+            buf[y0 * bufW + x0] = color;
+            if (x0 == x1 && y0 == y1) break;
+            int e2 = err * 2;
+            if (e2 >= dy) { err += dy; x0 += sx; }
+            if (e2 <= dx) { err += dx; y0 += sy; }
+        }
+    } else {
+        // Clipping path: check each pixel before writing
+        for (;;) {
+            if ((unsigned)x0 < (unsigned)bufW && (unsigned)y0 < (unsigned)bufH)
+                buf[y0 * bufW + x0] = color;
+            if (x0 == x1 && y0 == y1) break;
+            int e2 = err * 2;
+            if (e2 >= dy) { err += dy; x0 += sx; }
+            if (e2 <= dx) { err += dx; y0 += sy; }
+        }
+    }
+}
+
+// ── Graph tick-label draw callback (DRAW_MAIN_END on _graphCanvas) ────────
+// Grid lines and axes are rasterized directly into _graphBuf in replot();
+// this callback only adds the numeric tick labels on top of the image.
+static void graphTickLabelsCb(lv_event_t* e) {
     lv_layer_t* layer = lv_event_get_layer(e);
     lv_obj_t* obj = lv_event_get_target_obj(e);
     GrapherApp* app = static_cast<GrapherApp*>(lv_event_get_user_data(e));
@@ -434,140 +475,49 @@ static void graphGridDrawCb(lv_event_t* e) {
     auto toSX = [&](float wx) -> int32_t { return coords.x1 + (int32_t)((wx - xMin) / xRange * aW); };
     auto toSY = [&](float wy) -> int32_t { return coords.y1 + (int32_t)((1.0f - (wy - yMin) / yRange) * aH); };
 
-    // ── Sub-grid lines ──
+    lv_draw_label_dsc_t ldsc;
+    lv_draw_label_dsc_init(&ldsc);
+    ldsc.color = lv_color_hex(0x666666);
+    ldsc.font  = &lv_font_montserrat_10;
+
+    char buf[16];
     float mainStep = niceStep(xRange, 8);
-    float subStep  = mainStep / 5.0f;
-    {
-        lv_draw_line_dsc_t dsc;
-        lv_draw_line_dsc_init(&dsc);
-        dsc.color = lv_color_hex(COL_GRID_SUB);
-        dsc.opa   = LV_OPA_COVER;
-        dsc.width = 1;
+    int32_t ay = toSY(0.0f);
 
-        // Vertical sub-grid
-        float start = floorf(xMin / subStep) * subStep;
-        for (float v = start; v <= xMax; v += subStep) {
-            int32_t sx = toSX(v);
-            if (sx < coords.x1 || sx > coords.x2) continue;
-            dsc.p1.x = sx; dsc.p1.y = coords.y1;
-            dsc.p2.x = sx; dsc.p2.y = coords.y2;
-            lv_draw_line(layer, &dsc);
-        }
-        // Horizontal sub-grid
-        float yMainStep = niceStep(yRange, 6);
-        float ySubStep  = yMainStep / 5.0f;
-        start = floorf(yMin / ySubStep) * ySubStep;
-        for (float v = start; v <= yMax; v += ySubStep) {
-            int32_t sy = toSY(v);
-            if (sy < coords.y1 || sy > coords.y2) continue;
-            dsc.p1.x = coords.x1; dsc.p1.y = sy;
-            dsc.p2.x = coords.x2; dsc.p2.y = sy;
-            lv_draw_line(layer, &dsc);
-        }
+    // X-axis tick labels
+    float start = floorf(xMin / mainStep) * mainStep;
+    for (float v = start; v <= xMax; v += mainStep) {
+        if (fabsf(v) < mainStep * 0.01f) continue;
+        int32_t sx = toSX(v);
+        if (sx < coords.x1 + 5 || sx > coords.x2 - 15) continue;
+        if (fabsf(v - roundf(v)) < 0.001f)
+            snprintf(buf, sizeof(buf), "%d", (int)roundf(v));
+        else
+            snprintf(buf, sizeof(buf), "%.1g", (double)v);
+        int32_t ly = (ay >= coords.y1 && ay <= coords.y2 - 12) ? ay + 2 : coords.y2 - 12;
+        lv_area_t la = { sx - 10, ly, sx + 20, ly + 12 };
+        ldsc.text = buf;
+        ldsc.text_local = 1;
+        lv_draw_label(layer, &ldsc, &la);
     }
 
-    // ── Main grid lines ──
-    {
-        lv_draw_line_dsc_t dsc;
-        lv_draw_line_dsc_init(&dsc);
-        dsc.color = lv_color_hex(COL_GRID_MAIN);
-        dsc.opa   = LV_OPA_COVER;
-        dsc.width = 1;
-
-        // Vertical main grid
-        float start = floorf(xMin / mainStep) * mainStep;
-        for (float v = start; v <= xMax; v += mainStep) {
-            int32_t sx = toSX(v);
-            if (sx < coords.x1 || sx > coords.x2) continue;
-            dsc.p1.x = sx; dsc.p1.y = coords.y1;
-            dsc.p2.x = sx; dsc.p2.y = coords.y2;
-            lv_draw_line(layer, &dsc);
-        }
-        // Horizontal main grid
-        float yMainStep = niceStep(yRange, 6);
-        start = floorf(yMin / yMainStep) * yMainStep;
-        for (float v = start; v <= yMax; v += yMainStep) {
-            int32_t sy = toSY(v);
-            if (sy < coords.y1 || sy > coords.y2) continue;
-            dsc.p1.x = coords.x1; dsc.p1.y = sy;
-            dsc.p2.x = coords.x2; dsc.p2.y = sy;
-            lv_draw_line(layer, &dsc);
-        }
-    }
-
-    // ── Axes (on top of grid) ──
-    {
-        lv_draw_line_dsc_t dsc;
-        lv_draw_line_dsc_init(&dsc);
-        dsc.color = lv_color_hex(COL_AXIS);
-        dsc.opa   = LV_OPA_COVER;
-        dsc.width = 1;
-
-        // X axis (y=0)
-        int32_t ay = toSY(0);
-        if (ay >= coords.y1 && ay <= coords.y2) {
-            dsc.p1.x = coords.x1; dsc.p1.y = ay;
-            dsc.p2.x = coords.x2; dsc.p2.y = ay;
-            lv_draw_line(layer, &dsc);
-        }
-        // Y axis (x=0)
-        int32_t ax = toSX(0);
-        if (ax >= coords.x1 && ax <= coords.x2) {
-            dsc.p1.x = ax; dsc.p1.y = coords.y1;
-            dsc.p2.x = ax; dsc.p2.y = coords.y2;
-            lv_draw_line(layer, &dsc);
-        }
-    }
-
-    // ── Tick labels (light color on dark background) ──
-    {
-        lv_draw_label_dsc_t ldsc;
-        lv_draw_label_dsc_init(&ldsc);
-        ldsc.color = lv_color_hex(0x666666);  // Medium gray — visible on white bg
-        ldsc.font  = &lv_font_montserrat_10;
-
-        char buf[16];
-        int32_t ay = toSY(0);  // Y axis screen position
-
-        // X-axis tick labels
-        float start = floorf(xMin / mainStep) * mainStep;
-        for (float v = start; v <= xMax; v += mainStep) {
-            if (fabsf(v) < mainStep * 0.01f) continue; // skip 0
-            int32_t sx = toSX(v);
-            if (sx < coords.x1 + 5 || sx > coords.x2 - 15) continue;
-
-            if (fabsf(v - roundf(v)) < 0.001f)
-                snprintf(buf, sizeof(buf), "%d", (int)roundf(v));
-            else
-                snprintf(buf, sizeof(buf), "%.1g", (double)v);
-
-            int32_t ly = (ay >= coords.y1 && ay <= coords.y2 - 12) ? ay + 2 : coords.y2 - 12;
-            lv_area_t la = { sx - 10, ly, sx + 20, ly + 12 };
-            ldsc.text = buf;
-            ldsc.text_local = 1;
-            lv_draw_label(layer, &ldsc, &la);
-        }
-
-        // Y-axis tick labels
-        float yMainStep = niceStep(yRange, 6);
-        start = floorf(yMin / yMainStep) * yMainStep;
-        for (float v = start; v <= yMax; v += yMainStep) {
-            if (fabsf(v) < yMainStep * 0.01f) continue; // skip 0
-            int32_t sy = toSY(v);
-            if (sy < coords.y1 + 5 || sy > coords.y2 - 5) continue;
-
-            if (fabsf(v - roundf(v)) < 0.001f)
-                snprintf(buf, sizeof(buf), "%d", (int)roundf(v));
-            else
-                snprintf(buf, sizeof(buf), "%.1g", (double)v);
-
-            int32_t ax = toSX(0);
-            int32_t lx = (ax >= coords.x1 + 25 && ax <= coords.x2) ? ax - 24 : coords.x1 + 2;
-            lv_area_t la = { lx, sy - 5, lx + 22, sy + 7 };
-            ldsc.text = buf;
-            ldsc.text_local = 1;
-            lv_draw_label(layer, &ldsc, &la);
-        }
+    // Y-axis tick labels
+    float yMainStep = niceStep(yRange, 6);
+    start = floorf(yMin / yMainStep) * yMainStep;
+    for (float v = start; v <= yMax; v += yMainStep) {
+        if (fabsf(v) < yMainStep * 0.01f) continue;
+        int32_t sy = toSY(v);
+        if (sy < coords.y1 + 5 || sy > coords.y2 - 5) continue;
+        if (fabsf(v - roundf(v)) < 0.001f)
+            snprintf(buf, sizeof(buf), "%d", (int)roundf(v));
+        else
+            snprintf(buf, sizeof(buf), "%.1g", (double)v);
+        int32_t ax = toSX(0.0f);
+        int32_t lx = (ax >= coords.x1 + 25 && ax <= coords.x2) ? ax - 24 : coords.x1 + 2;
+        lv_area_t la = { lx, sy - 5, lx + 22, sy + 7 };
+        ldsc.text = buf;
+        ldsc.text_local = 1;
+        lv_draw_label(layer, &ldsc, &la);
     }
 }
 
@@ -593,38 +543,31 @@ void GrapherApp::createGraphPanel() {
     _graphArea = makeContainer(_panelGraph, 0, graphY, SCREEN_W, graphH);
     lv_obj_set_style_bg_color(_graphArea, lv_color_hex(COL_GRAPH_BG), LV_PART_MAIN);
 
-    // Grid + axes drawn via custom callback (uses viewport from GrapherApp)
-    lv_obj_add_event_cb(_graphArea, graphGridDrawCb, LV_EVENT_DRAW_MAIN_BEGIN, this);
-
-    // Hidden axis lv_line objects kept for compatibility (grid callback draws them)
-    _axisLineX = lv_line_create(_graphArea);
-    lv_obj_add_flag(_axisLineX, LV_OBJ_FLAG_HIDDEN);
-    _axisLineY = lv_line_create(_graphArea);
-    lv_obj_add_flag(_axisLineY, LV_OBJ_FLAG_HIDDEN);
-
-    // Function lv_line objects — allocate point buffers in PSRAM (8MB free)
-    for (int i = 0; i < MAX_FUNCS; ++i) {
-        size_t ptsSz = GRAPH_MAX_PTS * sizeof(lv_point_precise_t);
-        _funcPts[i] = (lv_point_precise_t*)heap_caps_malloc(ptsSz, MALLOC_CAP_SPIRAM);
-        if (_funcPts[i]) {
-            memset(_funcPts[i], 0, ptsSz);
-        } else {
-            Serial.printf("[GRAPHER] FAIL: PSRAM alloc funcPts[%d] (%u bytes)\n", i, (unsigned)ptsSz);
-        }
-
-        _funcLines[i] = lv_line_create(_graphArea);
-        lv_obj_set_style_line_color(_funcLines[i], lv_color_hex(_funcs[i].color), LV_PART_MAIN);
-        lv_obj_set_style_line_width(_funcLines[i], 2, LV_PART_MAIN);
-        lv_obj_add_flag(_funcLines[i], LV_OBJ_FLAG_HIDDEN);
-
-        // Set valid dummy points so lv_line never has stale internal data
-        if (_funcPts[i]) {
-            lv_line_set_points(_funcLines[i], _funcPts[i], 2);
-        }
-        _funcPtCount[i] = 0;
+    // ── Kandinsky canvas: single RGB565 PSRAM buffer for grid + curves ──
+    size_t bufSz = (size_t)GRAPH_CANVAS_W * GRAPH_CANVAS_H * sizeof(uint16_t);
+    _graphBuf = (uint16_t*)heap_caps_malloc(bufSz, MALLOC_CAP_SPIRAM);
+    if (_graphBuf) {
+        memset(_graphBuf, 0xFF, bufSz);  // Fill white (0xFFFF in RGB565)
+        Serial.printf("[GRAPHER] Kandinsky buffer %u bytes in PSRAM, free=%u\n",
+                      (unsigned)bufSz,
+                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    } else {
+        Serial.printf("[GRAPHER] FAIL: Kandinsky PSRAM alloc %u bytes\n", (unsigned)bufSz);
     }
-    Serial.printf("[GRAPHER] funcPts allocated in PSRAM, free=%u\n",
-                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+
+    // Set up the LVGL image descriptor pointing at our raw buffer
+    _graphImgDsc.header.w  = GRAPH_CANVAS_W;
+    _graphImgDsc.header.h  = GRAPH_CANVAS_H;
+    _graphImgDsc.header.cf = LV_COLOR_FORMAT_RGB565;
+    _graphImgDsc.data_size = (uint32_t)bufSz;
+    _graphImgDsc.data      = (const uint8_t*)_graphBuf;
+
+    // lv_image widget — displays the canvas; tick labels drawn on DRAW_MAIN_END
+    _graphCanvas = lv_image_create(_graphArea);
+    lv_obj_set_pos(_graphCanvas, 0, 0);
+    lv_obj_set_size(_graphCanvas, GRAPH_CANVAS_W, GRAPH_CANVAS_H);
+    if (_graphBuf) lv_image_set_src(_graphCanvas, &_graphImgDsc);
+    lv_obj_add_event_cb(_graphCanvas, graphTickLabelsCb, LV_EVENT_DRAW_MAIN_END, this);
 
     // Trace cursor dot
     _traceDot = lv_obj_create(_graphArea);
@@ -1615,24 +1558,24 @@ void GrapherApp::preCacheFuncRPN(int idx) {
     _funcs[idx].valid = true;
 }
 
-double GrapherApp::evalAt(int idx, double x) {
+float GrapherApp::evalAt(int idx, float x) {
     if (idx < 0 || idx >= _numFuncs || !_funcs[idx].valid) return NAN;
     // Use cached RPN if available; otherwise fall back to full parse
     if (_rpnCacheValid[idx] && !_cachedRPN[idx].empty()) {
-        _vars.setVar('x', x);
+        _vars.setVar('x', (double)x);
         EvalResult er = _evaluator.evaluateRPN(_cachedRPN[idx], _vars);
-        return er.ok ? er.value : NAN;
+        return er.ok ? (float)er.value : NAN;
     }
     // Fallback: tokenize + parse RHS only (happens before first cache)
     const char* rhs = getExprRHS(_funcs[idx].text);
     if (!rhs) return NAN;
-    _vars.setVar('x', x);
+    _vars.setVar('x', (double)x);
     TokenizeResult tr = _tokenizer.tokenize(rhs);
     if (!tr.ok) return NAN;
     ParseResult pr = _parser.toRPN(tr.tokens);
     if (!pr.ok) return NAN;
     EvalResult er = _evaluator.evaluateRPN(pr.outputRPN, _vars);
-    return er.ok ? er.value : NAN;
+    return er.ok ? (float)er.value : NAN;
 }
 
 // ── Adaptive sampling helpers ────────────────────────────────────────────
@@ -1647,20 +1590,20 @@ void GrapherApp::adaptSeg(GrapherApp* app, int fi,
                            float wx0, float sy0,
                            float wx1, float sy1,
                            int depth,
-                           lv_point_precise_t* pts, int& n, int maxN)
+                           PlotPt* pts, int& n, int maxN)
 {
     if (depth <= 0 || n >= maxN - 1) return;
     float mwx = (wx0 + wx1) * 0.5f;
-    double mwyd = app->evalAt(fi, mwx);
-    if (std::isnan(mwyd) || std::isinf(mwyd)) return;
-    float msy = (1.0f - ((float)mwyd - yMin) / yRange) * areaH;
+    float mwy = app->evalAt(fi, mwx);
+    if (std::isnan(mwy) || std::isinf(mwy)) return;
+    float msy = (1.0f - (mwy - yMin) / yRange) * areaH;
     float interpSy = (sy0 + sy1) * 0.5f;
     if (fabsf(msy - interpSy) > ADAPT_THRESHOLD_PX) {
         float msx = (mwx - xMin) / xRange * areaW;
         adaptSeg(app, fi, xMin, xRange, yMin, yRange, areaW, areaH,
                  wx0, sy0, mwx, msy, depth - 1, pts, n, maxN);
         if (n < maxN) {
-            pts[n++] = { (lv_value_precise_t)(int)msx, (lv_value_precise_t)(int)msy };
+            pts[n++] = { (int16_t)(int)msx, (int16_t)(int)msy };
         }
         adaptSeg(app, fi, xMin, xRange, yMin, yRange, areaW, areaH,
                  mwx, msy, wx1, sy1, depth - 1, pts, n, maxN);
@@ -1668,13 +1611,12 @@ void GrapherApp::adaptSeg(GrapherApp* app, int fi,
     // else: segment smooth enough — no midpoint needed
 }
 
-// Sample function fi adaptively; returns point count (also fills _funcPts[fi])
-int GrapherApp::sampleFuncAdaptive(int fi, int areaW, int areaH) {
+// Sample function fi adaptively into pts[]; returns point count.
+int GrapherApp::sampleFuncAdaptive(int fi, PlotPt* pts, int areaW, int areaH) {
     float xRange = _xMax - _xMin;
     float yRange = _yMax - _yMin;
     if (xRange <= 0 || yRange <= 0) return 0;
 
-    lv_point_precise_t* pts = _funcPts[fi];
     int maxN = GRAPH_MAX_PTS;
     int n = 0;
 
@@ -1685,11 +1627,11 @@ int GrapherApp::sampleFuncAdaptive(int fi, int areaW, int areaH) {
     float step = xRange / INIT_SAMPLE_N;
     for (int i = 0; i <= INIT_SAMPLE_N; ++i) {
         float wx = _xMin + i * step;
-        double wy = evalAt(fi, wx);
+        float wy = evalAt(fi, wx);
         bool ok = !std::isnan(wy) && !std::isinf(wy);
         float sy = 0, sx = (wx - _xMin) / xRange * areaW;
         if (ok) {
-            sy = (1.0f - ((float)wy - _yMin) / yRange) * areaH;
+            sy = (1.0f - (wy - _yMin) / yRange) * areaH;
             if (sy < -(float)areaH || sy > 2.0f * areaH) ok = false;  // Off-screen clip margin
         }
         coarse[i] = { wx, sy, sx, ok };
@@ -1702,8 +1644,8 @@ int GrapherApp::sampleFuncAdaptive(int fi, int areaW, int areaH) {
         if (!coarse[i].ok) { prevOk = false; continue; }
         if (!prevOk) {
             // Start a new run: add this point
-            pts[n++] = { (lv_value_precise_t)(int)coarse[i].sx,
-                         (lv_value_precise_t)(int)coarse[i].sy };
+            pts[n++] = { (int16_t)(int)coarse[i].sx,
+                         (int16_t)(int)coarse[i].sy };
         } else {
             // Refine segment coarse[i-1] → coarse[i]
             adaptSeg(this, fi, _xMin, xRange, _yMin, yRange, areaW, areaH,
@@ -1712,8 +1654,8 @@ int GrapherApp::sampleFuncAdaptive(int fi, int areaW, int areaH) {
                      ADAPT_DEPTH, pts, n, maxN);
             // Add endpoint
             if (n < maxN) {
-                pts[n++] = { (lv_value_precise_t)(int)coarse[i].sx,
-                             (lv_value_precise_t)(int)coarse[i].sy };
+                pts[n++] = { (int16_t)(int)coarse[i].sx,
+                             (int16_t)(int)coarse[i].sy };
             }
         }
         prevOk = true;
@@ -1722,36 +1664,91 @@ int GrapherApp::sampleFuncAdaptive(int fi, int areaW, int areaH) {
 }
 
 void GrapherApp::replot() {
-    if (!_plotDirty || !_graphArea) return;
+    if (!_plotDirty || !_graphArea || !_graphCanvas) return;
     _plotDirty = false;
 
-    int areaW = SCREEN_W;
+    int areaW = GRAPH_CANVAS_W;
     int areaH = lv_obj_get_height(_graphArea);
-    if (areaH < 2) return;  // Layout not yet computed — skip
+    if (areaH < 2 || !_graphBuf) return;  // Layout not yet computed or buffer missing
+    uint16_t* buf = _graphBuf;
 
-    // Force redraw of grid + axes via the custom draw callback
-    lv_obj_invalidate(_graphArea);
+    // ── 1. Clear canvas to white ──────────────────────────────────────────
+    // 0xFF in every byte gives 0xFFFF (white) in every RGB565 pixel
+    memset(buf, 0xFF, (size_t)areaW * areaH * sizeof(uint16_t));
 
-    // ── Plot each function using adaptive sampling ──
-    for (int f = 0; f < MAX_FUNCS; ++f) {
-        if (!_funcLines[f] || !_funcPts[f]) continue;
+    float xRange = _xMax - _xMin;
+    float yRange = _yMax - _yMin;
+    if (xRange <= 0 || yRange <= 0) { lv_obj_invalidate(_graphCanvas); return; }
 
-        if (f >= _numFuncs || !_funcs[f].valid) {
-            lv_obj_add_flag(_funcLines[f], LV_OBJ_FLAG_HIDDEN);
-            _funcPtCount[f] = 0;
-            continue;
+    auto toSX = [&](float wx) -> int { return (int)((wx - _xMin) / xRange * areaW); };
+    auto toSY = [&](float wy) -> int { return (int)((1.0f - (wy - _yMin) / yRange) * areaH); };
+
+    // ── 2. Sub-grid lines ─────────────────────────────────────────────────
+    {
+        uint16_t col = rgb888to565(COL_GRID_SUB);
+        float mainStep = niceStep(xRange, 8);
+        float subStep  = mainStep / 5.0f;
+
+        float start = floorf(_xMin / subStep) * subStep;
+        for (float v = start; v <= _xMax; v += subStep) {
+            int sx = toSX(v);
+            fastDrawLine(buf, areaW, areaH, sx, 0, sx, areaH - 1, col);
         }
-        lv_obj_remove_flag(_funcLines[f], LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_style_line_color(_funcLines[f], lv_color_hex(_funcs[f].color), LV_PART_MAIN);
-
-        int count = sampleFuncAdaptive(f, areaW, areaH);
-        _funcPtCount[f] = count;
-        if (count >= 2) {
-            lv_line_set_points(_funcLines[f], _funcPts[f], count);
-        } else {
-            lv_obj_add_flag(_funcLines[f], LV_OBJ_FLAG_HIDDEN);
+        float yMainStep = niceStep(yRange, 6);
+        float ySubStep  = yMainStep / 5.0f;
+        start = floorf(_yMin / ySubStep) * ySubStep;
+        for (float v = start; v <= _yMax; v += ySubStep) {
+            int sy = toSY(v);
+            fastDrawLine(buf, areaW, areaH, 0, sy, areaW - 1, sy, col);
         }
     }
+
+    // ── 3. Main grid lines ────────────────────────────────────────────────
+    {
+        uint16_t col = rgb888to565(COL_GRID_MAIN);
+        float mainStep = niceStep(xRange, 8);
+
+        float start = floorf(_xMin / mainStep) * mainStep;
+        for (float v = start; v <= _xMax; v += mainStep) {
+            int sx = toSX(v);
+            fastDrawLine(buf, areaW, areaH, sx, 0, sx, areaH - 1, col);
+        }
+        float yMainStep = niceStep(yRange, 6);
+        start = floorf(_yMin / yMainStep) * yMainStep;
+        for (float v = start; v <= _yMax; v += yMainStep) {
+            int sy = toSY(v);
+            fastDrawLine(buf, areaW, areaH, 0, sy, areaW - 1, sy, col);
+        }
+    }
+
+    // ── 4. Axes ───────────────────────────────────────────────────────────
+    {
+        uint16_t col = rgb888to565(COL_AXIS);
+        int ay = toSY(0.0f);
+        fastDrawLine(buf, areaW, areaH, 0, ay, areaW - 1, ay, col);
+        int ax = toSX(0.0f);
+        fastDrawLine(buf, areaW, areaH, ax, 0, ax, areaH - 1, col);
+    }
+
+    // ── 5. Function curves ────────────────────────────────────────────────
+    // Static scratch buffer (LVGL is single-threaded — safe to reuse)
+    static PlotPt s_plotBuf[GRAPH_MAX_PTS];
+
+    for (int f = 0; f < _numFuncs && f < MAX_FUNCS; ++f) {
+        if (!_funcs[f].valid) continue;
+        int count = sampleFuncAdaptive(f, s_plotBuf, areaW, areaH);
+        if (count < 2) continue;
+        uint16_t col = rgb888to565(_funcs[f].color);
+        for (int k = 1; k < count; ++k) {
+            fastDrawLine(buf, areaW, areaH,
+                         s_plotBuf[k-1].x, s_plotBuf[k-1].y,
+                         s_plotBuf[k].x,   s_plotBuf[k].y, col);
+        }
+    }
+
+    // ── 6. Push canvas to LVGL ────────────────────────────────────────────
+    lv_image_set_src(_graphCanvas, &_graphImgDsc);
+    lv_obj_invalidate(_graphCanvas);
 
     updateInfoBar();
 }
@@ -1771,7 +1768,7 @@ void GrapherApp::drawTraceCursor() {
     float xRange = _xMax - _xMin;
     float yRange = _yMax - _yMin;
 
-    double wy = evalAt(_traceFn, _traceX);
+    float wy = evalAt(_traceFn, _traceX);
     if (std::isnan(wy) || std::isinf(wy)) {
         if (_traceDot)   lv_obj_add_flag(_traceDot, LV_OBJ_FLAG_HIDDEN);
         if (_traceLineH) lv_obj_add_flag(_traceLineH, LV_OBJ_FLAG_HIDDEN);
@@ -1781,7 +1778,7 @@ void GrapherApp::drawTraceCursor() {
     }
 
     float sx = (_traceX - _xMin) / xRange * areaW;
-    float sy = (1.0f - ((float)wy - _yMin) / yRange) * areaH;
+    float sy = (1.0f - (wy - _yMin) / yRange) * areaH;
 
     // Trace dot
     lv_obj_remove_flag(_traceDot, LV_OBJ_FLAG_HIDDEN);
@@ -1825,8 +1822,8 @@ void GrapherApp::updateInfoBar() {
     if (!_infoLabel) return;
     char buf[64];
     if (_grMode == GrMode::TRACE && _traceFn >= 0 && _traceFn < _numFuncs) {
-        double y = evalAt(_traceFn, _traceX);
-        snprintf(buf, sizeof(buf), "Trace: x=%.3f  y=%.3f", (double)_traceX, y);
+        float y = evalAt(_traceFn, _traceX);
+        snprintf(buf, sizeof(buf), "Trace: x=%.3f  y=%.3f", (double)_traceX, (double)y);
     } else {
         snprintf(buf, sizeof(buf), "x:[%.2g,%.2g] y:[%.2g,%.2g]  ENTER=trace",
                  (double)_xMin, (double)_xMax, (double)_yMin, (double)_yMax);
@@ -1855,10 +1852,10 @@ void GrapherApp::autoFit() {
         if (!_funcs[f].valid) continue;
         for (int px = 0; px < SCREEN_W; px += 4) {
             float wx = _xMin + (float)px / SCREEN_W * (_xMax - _xMin);
-            double wy = evalAt(f, wx);
-            if (!std::isnan(wy) && !std::isinf(wy) && fabs(wy) < 1e6) {
-                if ((float)wy < globalYMin) globalYMin = (float)wy;
-                if ((float)wy > globalYMax) globalYMax = (float)wy;
+            float wy = evalAt(f, wx);
+            if (!std::isnan(wy) && !std::isinf(wy) && fabsf(wy) < 1e6f) {
+                if (wy < globalYMin) globalYMin = wy;
+                if (wy > globalYMax) globalYMax = wy;
                 hasData = true;
             }
         }
@@ -1882,34 +1879,34 @@ void GrapherApp::computePOIs(int fi) {
 
     // Y-intercept (x=0): only add if x=0 is in viewport
     if (_xMin <= 0.0f && _xMax >= 0.0f && _numPOIs < MAX_POIS) {
-        double y0 = evalAt(fi, 0.0f);
+        float y0 = evalAt(fi, 0.0f);
         if (!std::isnan(y0) && !std::isinf(y0)) {
             auto& p = _pois[_numPOIs++];
             p.x = 0.0f;
-            p.y = (float)y0;
+            p.y = y0;
             strncpy(p.label, "Intercept", sizeof(p.label) - 1);
             p.label[sizeof(p.label) - 1] = '\0';
         }
     }
 
     // Scan intervals for sign changes (roots) and local extrema
-    double yPrev = evalAt(fi, _xMin);
-    double yPrev2 = yPrev;
+    float yPrev = evalAt(fi, _xMin);
+    float yPrev2 = yPrev;
     for (int i = 1; i <= N && _numPOIs < MAX_POIS - 2; ++i) {
         float x1 = _xMin + i * step;
-        double y1 = evalAt(fi, x1);
+        float y1 = evalAt(fi, x1);
         if ((i & 7) == 0) yield();
 
         if (!std::isnan(yPrev) && !std::isnan(y1)) {
             // Root: sign change → bisect to refine
-            if (yPrev * y1 < 0.0 && _numPOIs < MAX_POIS) {
+            if (yPrev * y1 < 0.0f && _numPOIs < MAX_POIS) {
                 float lo = x1 - step, hi = x1;
-                double ylo = yPrev;
+                float ylo = yPrev;
                 for (int iter = 0; iter < BISECTION_ITER; ++iter) {
                     float mid = (lo + hi) * 0.5f;
-                    double ym = evalAt(fi, mid);
+                    float ym = evalAt(fi, mid);
                     if (std::isnan(ym)) break;
-                    if (ym * ylo < 0.0) { hi = mid; }
+                    if (ym * ylo < 0.0f) { hi = mid; }
                     else { lo = mid; ylo = ym; }
                 }
                 float rx = (lo + hi) * 0.5f;
@@ -1937,7 +1934,7 @@ void GrapherApp::computePOIs(int fi) {
                     }
                     if (!dup) {
                         auto& p = _pois[_numPOIs++];
-                        p.x = xm; p.y = (float)yPrev;
+                        p.x = xm; p.y = yPrev;
                         strncpy(p.label, isMin ? "Min" : "Max", sizeof(p.label) - 1);
                         p.label[sizeof(p.label) - 1] = '\0';
                     }
@@ -1979,10 +1976,10 @@ void GrapherApp::syncViewportToCursor() {
     _xMin = _traceX - xRange / 2.0f;
     _xMax = _traceX + xRange / 2.0f;
 
-    double traceY = (_traceFn >= 0) ? evalAt(_traceFn, _traceX) : NAN;
-    if (!isnan(traceY) && !isinf(traceY)) {
-        _yMin = (float)traceY - yRange / 2.0f;
-        _yMax = (float)traceY + yRange / 2.0f;
+    float traceY = (_traceFn >= 0) ? evalAt(_traceFn, _traceX) : NAN;
+    if (!std::isnan(traceY) && !std::isinf(traceY)) {
+        _yMin = traceY - yRange / 2.0f;
+        _yMax = traceY + yRange / 2.0f;
     }
 
     _plotDirty = true;
@@ -2066,12 +2063,12 @@ void GrapherApp::rebuildTable() {
         // Function value columns
         if (numActive > 0) {
             for (int c = 0; c < numActive && c + 1 < cols; ++c) {
-                double yVal = evalAt(activeFuncs[c], xVal);
+                float yVal = evalAt(activeFuncs[c], xVal);
                 char yBuf[16];
                 if (std::isnan(yVal) || std::isinf(yVal))
                     snprintf(yBuf, sizeof(yBuf), "--");
                 else
-                    snprintf(yBuf, sizeof(yBuf), "%.6g", yVal);
+                    snprintf(yBuf, sizeof(yBuf), "%.6g", (double)yVal);
                 lv_table_set_cell_value(_tblTable, r, c + 1, yBuf);
             }
         } else {
@@ -2433,6 +2430,7 @@ void GrapherApp::handleGraphNav(const KeyEvent& ev) {
         break;
     }
     if (_plotDirty) replot();
+    lv_refr_now(NULL);  // Force synchronous screen update — bypasses LVGL timer delay
 }
 
 // ── Graph trace keys ────────────────────────────────────────────────────
@@ -2506,6 +2504,7 @@ void GrapherApp::handleGraphTrace(const KeyEvent& ev) {
     }
     drawTraceCursor();
     updateInfoBar();
+    lv_refr_now(NULL);  // Force synchronous screen update — bypasses LVGL timer delay
 }
 
 // ── Table keys ──────────────────────────────────────────────────────────
@@ -2681,7 +2680,7 @@ void GrapherApp::executeCalcOption(int option) {
 
     // Build evaluator lambda for the current traced function
     auto evalFunc = [this](double x) -> double {
-        return evalAt(_traceFn, x);
+        return (double)evalAt(_traceFn, (float)x);
     };
 
     math::AnalysisResult res = { false, 0.0, 0.0 };
@@ -2721,7 +2720,7 @@ void GrapherApp::executeCalcOption(int option) {
             return;
         }
         auto evalFunc2 = [this, otherFn](double x) -> double {
-            return evalAt(otherFn, x);
+            return (double)evalAt(otherFn, (float)x);
         };
         res = math::findIntersection(evalFunc, evalFunc2,
                                      (double)_xMin, (double)_xMax);
@@ -2795,10 +2794,10 @@ void GrapherApp::drawIntegralShading(int funcIdx, float shadeXMin, float shadeXM
         float wx = _xMin + (float)px / areaW * xRange;
         if (wx < shadeXMin || wx > shadeXMax) continue;
 
-        double wy = evalAt(funcIdx, wx);
+        float wy = evalAt(funcIdx, wx);
         if (std::isnan(wy) || std::isinf(wy)) continue;
 
-        float sy = (1.0f - ((float)wy - _yMin) / yRange) * areaH;
+        float sy = (1.0f - (wy - _yMin) / yRange) * areaH;
 
         // Clip to visible area
         if (sy < 0) sy = 0;

@@ -140,15 +140,20 @@ private:
     int             _tplCardW;          // Card width (cached for lazy loader)
     int             _tplRowH;           // Row height (cached for lazy loader)
 
+    // ── Kandinsky canvas constants (compile-time) ────────────────────
+    static constexpr int GRAPH_CANVAS_W = SCREEN_W;
+    static constexpr int GRAPH_CANVAS_H = SCREEN_H - BAR_H - TAB_H - TOOLBAR_H - INFO_BAR_H;
+
+    // Lightweight integer point (replaces lv_point_precise_t in sampling)
+    struct PlotPt { int16_t x, y; };
+
     // ── Graph panel widgets ──────────────────────────────────────────
     lv_obj_t*       _graphToolbar;
     lv_obj_t*       _toolLabels[4];     // Auto  Axes  Pan  Trace
     lv_obj_t*       _graphArea;         // Plain container for plots
-    lv_obj_t*       _axisLineX;         // lv_line for X axis
-    lv_obj_t*       _axisLineY;         // lv_line for Y axis
-    lv_obj_t*       _funcLines[MAX_FUNCS]; // lv_line per function
-    lv_point_precise_t* _funcPts[MAX_FUNCS]; // Point arrays (heap)
-    int             _funcPtCount[MAX_FUNCS]; // Valid point count per func
+    lv_obj_t*       _graphCanvas;       // lv_image showing the raw pixel canvas
+    uint16_t*       _graphBuf;          // PSRAM RGB565 pixel buffer (Kandinsky)
+    lv_image_dsc_t  _graphImgDsc;       // LVGL image descriptor for _graphBuf
     lv_obj_t*       _traceDot;          // Small circle for trace cursor
     lv_obj_t*       _traceLineH;        // Crosshair horizontal lv_line
     lv_obj_t*       _traceLineV;        // Crosshair vertical lv_line
@@ -262,7 +267,7 @@ private:
     void autoFit();
 
     // Adaptive sampling: replaces pixel-by-pixel plotFunc
-    int  sampleFuncAdaptive(int fi, int areaW, int areaH);
+    int  sampleFuncAdaptive(int fi, PlotPt* pts, int areaW, int areaH);
     static void adaptSeg(GrapherApp* app, int fi,
                          float xMin, float xRange,
                          float yMin, float yRange,
@@ -270,7 +275,12 @@ private:
                          float wx0, float sy0,
                          float wx1, float sy1,
                          int depth,
-                         lv_point_precise_t* pts, int& n, int maxN);
+                         PlotPt* pts, int& n, int maxN);
+
+    // Kandinsky direct-pixel helpers
+    static uint16_t rgb888to565(uint32_t rgb);
+    static void fastDrawLine(uint16_t* buf, int bufW, int bufH,
+                             int x0, int y0, int x1, int y1, uint16_t color);
 
     // POI (snap-to-point) helpers
     void preCacheFuncRPN(int idx);
@@ -292,7 +302,7 @@ private:
     void rebuildTable();
 
     // ── Math ─────────────────────────────────────────────────────────
-    double evalAt(int funcIdx, double x);
+    float evalAt(int funcIdx, float x);
 
     // ── Key dispatchers ──────────────────────────────────────────────
     void handleTabBar(const KeyEvent& ev);
