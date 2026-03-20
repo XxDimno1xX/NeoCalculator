@@ -24,13 +24,15 @@
 <br>
 
 > *A real open-source alternative to commercial scientific calculators.*
-> *Inspired by NumWorks · TI-84 Plus · HP Prime G2 — built from scratch in C++17.*
+> *Inspired by NumWorks · TI-84 Plus · HP Prime G2, built from scratch in C++17.*
 
 <br>
 
 </div>
 
 ---
+
+![Image](https://github.com/user-attachments/assets/e1b1df29-362b-4f5c-b824-bacb8e9a28f4)
 
 ## Table of Contents
 
