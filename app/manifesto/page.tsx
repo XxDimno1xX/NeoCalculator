@@ -22,7 +22,7 @@ export default function ManifestoPage() {
         <div className="my-16 pl-8 border-l-4 border-[#ccff00]">
           <h3 className="text-2xl font-bold text-white mb-4">Hardware Decolonization</h3>
           <p className="text-gray-400 font-mono text-sm leading-loose">
-            By leveraging the raw, terrifying power of the ESP32-S3 microcontroller, and writing a bare-metal custom operating system (NumOS) injected directly into its veins, we achieved pure computational sovereignty.
+            By leveraging the raw, terrifying power of the ESP32-S3 microcontroller, and writing a custom operating system (NumOS) injected directly into its veins, we achieved pure computational sovereignty.
           </p>
         </div>
 
