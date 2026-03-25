@@ -20,6 +20,8 @@
 [![Status](https://img.shields.io/badge/Status-Pro--CAS%20Production-brightgreen)](#project-status)
 [![RAM](https://img.shields.io/badge/RAM-29.7%25%20%E2%80%94%2097.2%20KB-informational)](#build-stats)
 [![Flash](https://img.shields.io/badge/Flash-23.2%25%20%E2%80%94%201.52%20MB-informational)](#build-stats)
+[![GitHub Stars](https://img.shields.io/github/stars/El-EnderJ/NeoCalculator?style=social)](https://github.com/El-EnderJ/NeoCalculator)
+[![GitHub Forks](https://img.shields.io/github/forks/El-EnderJ/NeoCalculator?style=social)](https://github.com/El-EnderJ/NeoCalculator)
 
 <br>
 
