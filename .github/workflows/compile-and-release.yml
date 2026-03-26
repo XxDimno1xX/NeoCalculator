@@ -1,0 +1,52 @@
+name: Build and Release NumOS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    # Se ejecuta SIEMPRE, a menos que el mensaje contenga [skip ci] o [no build]
+    if: "!contains(github.event.head_commit.message, '[skip ci]') && !contains(github.event.head_commit.message, '[no build]')"
+    
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get Current Date
+        id: date
+        # Genera la fecha en formato día-mes-año
+        run: echo "DATE=$(date +'%d-%m-%Y')" >> $GITHUB_ENV
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install -U platformio
+
+      - name: Build NumOS (PlatformIO)
+        run: pio run -e esp32s3_n16r8
+
+      - name: Create Release
+        uses: ncipollo/release-action@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # Usamos la fecha y el SHA corto para que el Tag sea único
+          tag: "v1.0-${{ env.DATE }}-${{ github.run_number }}"
+          name: "NumOS v1.0 [${{ env.DATE }}]"
+          artifacts: ".pio/build/esp32s3_n16r8/firmware.bin"
+          allowUpdates: true
+          body: |
+            ### Release Automática de NumOS
+            **Fecha:** ${{ env.DATE }}
+            **Commit:** ${{ github.event.head_commit.message }}
+            **Build Number:** ${{ github.run_number }}
