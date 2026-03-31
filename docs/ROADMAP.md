@@ -469,6 +469,283 @@ build_src_filter = +<*> +<../tests/CASTest.cpp>
 
 ---
 
+# Future Apps:
+
+## 🔐 CipherForge (Complete Cryptography Lab)
+
+### 📝 General Description
+**CipherForge** is the expanded successor to CryptoLearn, designed to simultaneously be the best cryptography educational resource available on embedded hardware **and** a functional tool that a cryptographer, security researcher, or CTF competitor can seriously use. Each module operates in two selectable modes:
+
+* **Educational Mode** (`EDU`): Step-by-step animations, inline explanations, visualization of internal structures. To learn.
+* **Tool Mode** (`TOOL`): Direct input/output, without pedagogy. To work.
+
+The underlying engine is `CASInt` (Arbitrary Precision BigNum) from NumOS, which enables RSA, factorization, and modular arithmetic with 512–2048-bit real numbers.
+
+---
+
+### 🧩 Module 1: Classic Ciphers
+
+The most comprehensive historical cryptography lab available on a calculator. All ciphers are bidirectional (encrypt/decrypt) and work on text entered by the user.
+
+#### 🔤 Replacement
+| Encryptor | Features |
+| :--- | :--- |
+| **Caesar / ROT-N** | Displacement $k$ configurable (ROT-13 as a special case). Brute force attack with automatic scoring by language frequency (Spanish/English selectable). |
+| **Affine** | Clue $(a, b)$ with automatic verification of $\gcd(a, 26) = 1$. Shows the function $E(x) = (ax + b) \mod 26$ and its inverse. |
+| **Vigenère / Beaufort / Autoclave** | Three variants of the same common key scheme. Visualization of the Vigenère tableau with the key highlighted letter by letter. |
+| **Hill cipher** | Block encryption $\mathbb{Z}_{26}$ using 2×2 or 3×3 matrices. EDU mode shows modulo 26 matrix multiplication step by step, including calculating the modular inverse of the matrix to decipher. Requires engine `CASInt`. |
+| **Playfair** | Display of the 5x5 grid built from the key. The peer-to-peer process is animated letter by letter showing which rule applies (same row, same column, rectangle). |
+| **Four-Square** | Double grid, bifid polybio. |
+| **Polybius** | Grid coordinates with configurable alphabet. |
+
+#### 🔀 Transposition
+| Encryptor | Features |
+| :--- | :--- |
+| **Columnar** | Visual layout of the plain text table with the columns reordered according to the key. TOOL mode allows numerical or alphabetical key. |
+| **Rail Fence** | Zigzag animation with $n$ Configurable rails. Displays text diagonals before reading rows. |
+| **Route Cipher** | Spiral, snake or diagonal reading of the matrix. |
+| **Double Transposition** | Composition of two Columnars with different keys (one of the most resistant of the pre-computational era). |
+
+#### ⚙️ Enigma Machine (Full Simulation)
+The jewel of the classic module. Complete simulation of the 3-rotor Enigma Wehrmacht.
+
+* **Simulated Hardware**: 3-rotor selector (I–V), initial position (Grundstellung), adjustment ring (Ringstellung) and plugboard (Steckerbrett) with up to 10 pairs of interchanged letters.
+* **Internal Display**: The EDU mode shows the path of the electrical signal letter by letter: input → plugboard → right rotor → central rotor → left rotor → reflector → turn → plugboard → output. Each stage lights up in sequence.
+* **Rotor Advance**: Animation of the "double advance" (real mechanical anomaly of the Enigma) with the three rotors visibly rotating.
+* **Historical**: Presets of documented historical military configurations (Wehrmacht Feb 1942, Luftwaffe, etc.) to play real decrypted messages.
+* **Bidirectional**: Like the real Enigma, the same ciphertext is decrypted using the same configuration (involution).
+
+---
+
+### 🧩 Module 2: Classic Cryptanalysis
+
+Not just encrypt, but **break**. This module turns NumOS into an active analysis tool.
+
+* **Frequency Analysis**: Interactive letter frequency histogram of the ciphertext, superimposed on the standard distribution of the selected language (Spanish, English, French, German). The user drags letters to propose substitutions and the partially deciphered text is updated in real time.
+
+* **Coincidence Index (CI)**: Automatic calculation of the CI of the text. A CI ≈ 0.065 suggests monoalphabetic substitution; CI ≈ 0.038 suggests Vigenère. The visual marker indicates where the text falls on the spectrum.
+
+* **Kasiski Test**: Automatically detects repeated sequences (trigrams or more) in the ciphertext and lists the distances between repetitions. The module factors these distances and suggests the most likely key length for Vigenère.
+
+* **Automatic Vigenère Solver**: With the key length estimated by Kasiski, separates the text into $k$ monoalphabetic flows, applies frequency analysis to each one and proposes the complete key. The user can correct individual letters of the proposed key.
+
+* **XOR Key Recovery**: For repeated key XOR ciphertext (very common scheme in CTF), detects the key period (autocorrelation), extracts each key byte by frequency analysis of the most common byte and displays the recovered key in hex/ASCII.
+
+* **Bigrams and Trigrams**: Frequency of sequences of 2–3 characters compared against language tables. Useful for breaking transposition and confirming substitutions.
+
+* **CTF mode**: Compact view that launches all analyzes in parallel and scores the readability of the result (ratio of recognized words from the embedded dictionary). The candidate with the highest score is automatically highlighted.
+
+---
+
+### 🧩 Module 3: Coding and Representation
+
+Reference tool for conversion and encoding. All in a single multi-base display.
+
+* **Universal Converter**: Enter a value in any base and all others are updated in real time.
+
+| Base | Format |
+| :--- | :--- |
+| Binary (base 2) | With or without spaces every 8 bits |
+| Octal (base 8) | |
+| Decimal (base 10) | With thousands separators |
+| Hexadecimal (base 16) | Uppercase/lowercase, with or without `0x` |
+| Base32 | RFC4648 |
+| Base58 | Bitcoin variant (without 0, O, I, l) |
+| Base64 | Standard and URL-safe (`+/` vs `-_`) |
+| Base85 | ASCII85 variant |
+| ASCII/UTF-8 | View of raw bytes in hex |
+
+* **URL Encoding / HTML Entities**: Encodes and decodes special characters in both standards.
+* **Morse**: Text ↔ Morse in both directions. Audible playback through the hardware buzzer (if available).
+* **Leetspeak / Full ROT-N**: All rotations from 0 to 25 in a single table for ROT-N; useful for CTF.
+* **Endianness**: View any 1–8 byte value in little-endian and big-endian simultaneously.
+
+---
+
+### 🧩 Module 4: Number Theory (Mathematical Engine)
+
+The mathematical core of asymmetric cryptography, exposed as a standalone tool. use the engine `CASInt` for arbitrary precision.
+
+#### Modular Operations
+* **Modular exponentiation**: $a^b \mod n$ with fast exponentiation (square-and-multiply). EDU mode displays the bit-by-bit algorithm.
+* **Modular inverse**: $a^{-1} \mod n$ using the extended Euclid algorithm. Shows the Bezout coefficients $s, t$ such that $as + nt = \gcd(a,n)$.
+* **GCD / Extended Euclid**: Table of algorithm steps, row by row.
+* **Chinese Remainder Theorem (CRT)**: Given a system $x \equiv a_i \pmod{n_i}$, calculates the unique solution modulo $\prod n_i$. Up to 6 congruencies.
+
+#### Primality and Factorization
+* **Miller-Rabin test**: First determine if $n$ is cousin (with $k$ configurable rounds). EDU mode explains witnesses and decay $n-1 = 2^s \cdot d$.
+* **Solovay-Strassen test**: Based on the Jacobi symbol. Useful to compare with Miller-Rabin in educational context.
+* **Pollard ρ factorization**: For composite numbers up to ~60 bits factorable in seconds on S3. Floyd cycle animation visible.
+* **Sieve of Eratosthenes**: Visual and interactive up to $n \leq 10^6$, stored in PSRAM.
+* **Euler function φ(n)**: Calculated from factorization.
+* **Discrete Logarithm (Baby-Step Giant-Step)**: Solve $g^x \equiv h \pmod{p}$ for $p$ little. Essential to understand the security of DH and ElGamal.
+* **Prime Generator**: Generate cousins of $k$ bits (configurable) using Miller-Rabin iterated over random candidates. It uses the hardware noise generator as a source of entropy.
+
+---
+
+### 🧩 Module 5: Modern Symmetric Cryptography
+
+#### 🟦 AES (Full Internal Display)
+The star module of symmetric cryptography. It doesn't just encrypt: **opens the AES black box**.
+
+* **Modes**: AES-128 (10 rounds), AES-192 (12) and AES-256 (14).
+* **Round by Round Display**: The screen shows the 4x4 byte block of status updated after each operation:
+    - **SubBytes**: Substitution using the S-box in $GF(2^8)$. The EDU mode explains the construction of the S-box as an inversion in the finite field plus an affine transformation.
+    - **ShiftRows**: The state rows cyclically shift $0, 1, 2, 3$ positions. Animation of the rows moving.
+    - **MixColumns**: Multiplication of columns by the circulating matrix in $GF(2^8)$. EDU mode shows multiplication of polynomials modulo $x^4+1$ step by step — the only really complex part of AES.
+    - **AddRoundKey**: XOR the state with the round subkey. Displays the key expansion (Key Schedule) as a drop-down tree.
+* **Operation Modes**: ECB, CBC, CTR. In ECB mode with input image, visually shows why ECB is insecure (the "ECB penguin" — plaintext patterns survive).
+* **Avalanche Effect**: Change 1 bit of the plaintext or key and a counter shows how many bits of the encrypted block have changed per round. Visualization as heatmap of the block.
+
+#### 🔁 Feistel Network (DES Educational)
+* **Feistel Structure**: Interactive diagram of the 16-round network. User can "open" each round and see the feature $f$ applied (E expansion, XOR with subkey, S-boxes, P permutation).
+* **DES S-boxes**: Interactive tables where the user enters a 6-bit value and traces the path to the 4-bit output.
+* **Double and Triple DES**: Demonstration of the Meet-in-the-Middle attack that makes 2DES almost as weak as single DES.
+
+#### 🌊 ChaCha20 / Salsa20
+* **Quarter Round**: Animation of the 4 ARX operations (Add, Rotate, XOR) that form the basic block.
+* **Keystream**: Visualization of the 512-bit state block evolving in 20 rounds until producing the keystream.
+* **AES vs ChaCha20 comparison**: Side-by-side panel showing why ChaCha20 is resistant to timing attacks (without lookup table operations).
+
+---
+
+### 🧩 Module 6: Asymmetric Cryptography
+
+#### 🔑 RSA (Real Step by Step)
+use the engine `CASInt` to run RSA with real key sizes (up to 512 bits in demo, full structure for 2048 bits with estimated times).
+
+* **Key Generation**:
+    1. Generate two large primes $p, q$ (Miller-Rabin).
+    2. Calculate $n = pq$, $\phi(n) = (p-1)(q-1)$.
+    3. Choose $e$ (65537 by default) and calculate $d = e^{-1} \mod \phi(n)$ via extended Euclid.
+    4. Sample public key pair $(n, e)$ and private $(n, d)$ in hex
+* **Encryption/Decryption**: Execute $c = m^e \mod n$ and $m = c^d \mod n$ with real text.
+* **RSA Digital Signature**: $s = h^d \mod n$, verification $s^e \mod n = h$.
+* **Factorization Attack**: For small keys (<64 bits), cast Pollard ρ live and show how long it takes to factor $n$ — making tangible why small modules are insecure.
+* **OAEP Padding**: Visual explanation of why RSA textbook (without padding) is insecure and how OAEP randomizes the message.
+
+#### 🔄 Diffie-Hellman (Key Exchange)
+* **Visual Analogy**: The classic animated "color mixing" diagram, showing that the shared secret can be calculated from two different paths.
+* **DH Real**: Simultaneously with the analogy, the bottom panel shows the real math: $g^a \mod p$ and $g^b \mod p$ as hex values, and how $(g^a)^b = (g^b)^a = g^{ab} \mod p$.
+* **Group Parameters**: Predefined RFC 3526 groups (MODP Group 14, 2048 bits) or custom parameters.
+* **Logjam Attack**: Demo of why small or weak groups (512 bits) are vulnerable to discrete logarithm with BSGS.
+
+#### 📐 Elliptic Curves (ECC)
+The most advanced module, with real geometric visualization.
+
+* **Display on ℝ**: The curve $y^2 = x^3 + ax + b$ rendered on screen. The user places two points $P$ and $Q$; The app draws the secant line, finds the intersection and reflects to get $P + Q$ geometrically.
+* **Addition of Points (Algebraic)**: Parallel panel showing slope formulas $\lambda$ and the coordinates of $P + Q$, evaluated numerically.
+* **Curves on $\mathbb{F}_p$**: Switch to switch to modular arithmetic. The curve becomes a discrete set of points. The user can list all the points in the group to $p$ little.
+* **Scalar Multiplication $kP$**: Animation of the double-and-add algorithm, showing each intermediate step in the curve.
+* **ECDH**: Key exchange demo: Alice chooses $k_A$, Bob chooses $k_B$; the shared secret $k_A \cdot k_B \cdot G = k_B \cdot k_A \cdot G$.
+* **Standard Curves**: Predefined parameters of secp256k1 (Bitcoin), P-256 (NIST), Curve25519. Shows the order of the group $n$ and the generator $G$.
+* **ECDSA**: Signature generation $(r, s)$ and verification. Explanation of why to reuse the nonce $k$ compromises the private key (the PlayStation 3 bug).
+
+#### 🔏 ElGamal
+* Cyclic group encryption: key generation, pair encryption $(c_1, c_2)$, deciphered.
+* Direct analogy with DH to see the common structure.
+
+---
+
+### 🧩 Module 7: Hash Functions
+
+#### Functional Implementations
+They all produce the correct and verifiable hash of the entered text or file.
+
+| Hash | Length | Note |
+| :--- | :--- | :--- |
+| MD5 | 128 bit | Marked as "broken" with explanation |
+| SHA-1 | 160 bit | Marked as "deprecated" |
+| SHA-256 | 256 bit | Current standard |
+| SHA-512 | 512 bit | |
+| SHA-3/Keccak | 224/256/384/512 bit | Sponge construction |
+| BLAKE2s | 256 bit | Optimized for 32 bits, ideal on ESP32-S3 |
+| CRC32 | 32 bit | Not cryptographic, but ubiquitous |
+
+#### Views
+
+* **Avalanche Effect**: Enter two texts that differ by 1 bit/character. A 256-bit heatmap shows which bits of the hash change. Counter of bits changed (ideally ~50%).
+* **SHA-256 Compression Step by Step**: The 64 rounds of the animated compression function: the 8 working variables $a$–$h$, the sum of messages $W_i$ and the constants $K_i$.
+* **Sponge Construction (SHA-3)**: Diagram of the "absorb" and "squeeze" phases of the Keccak construction, with internal permutation $f$ represented as a state transformation.
+* **HMAC**: Visualization of the double application of the hash with the keys `ipad`/`opad`. Helpful to understand why just do `hash(clave || mensaje)` is unsafe (length extension attack).
+
+#### Key Derivation
+* **PBKDF2**: Configuration of iterations, salt and output length. Shows why the number of iterations makes the dictionary attack expensive.
+* **bcrypt (Conceptual)**: Explanation of the cost factor and the underlying Blowfish function. Not fully implemented due to computational cost, but the EDU mode explains the structure.
+* **HKDF**: Key extraction and expansion from pseudorandom material.
+
+---
+
+### 🧩 Module 8: Advanced Protocols and Schemes
+
+#### 🤝 Shamir's Shared Secret
+One of the most elegant schemes in cryptography, based on polynomial interpolation.
+
+* **Setup**: The user defines the secret $s$, the threshold $k$ and the total number of participants $n$.
+* **Visualization**: The app draws the random degree polynomial $k-1$ about $\mathbb{F}_p$, mark the $n$ points (the shares) and shows that with less than $k$ points cannot reconstruct the secret.
+* **Reconstruction**: User selects $k$ shares any and interpolates the Lagrange polynomial to recover $f(0) = s$. The Lagrange coefficients are shown numerically.
+* **Real Application**: Demo of how to save a private key divided between 3 people so that 2 of them can recover it.
+
+#### 🎲 One-Time Pad (Perfect Secrecy)
+* Formal Demo of Shannon's Proof: Given Any Ciphertext $c$, there exists exactly one key that maps it to any possible plaintext of the same length.
+* Practical demonstration of why reusing the key breaks the OTP (two-time pad attack with two-message XOR).
+
+#### 🤝 Commitment Schemes
+* Hash Commitment: The user "commits" a secret value by publishing its hash, then reveals it. Useful for understanding basic fair coin and ZKP protocols.
+
+#### 🔐 Introduction to Zero-Knowledge Proofs
+* **Ali Baba's Cave**: Interactive animation of the most famous ZKP protocol. Shows how Peggy demonstrates knowledge of the secret without revealing it, with multiple rounds to reduce the likelihood of deception ($1/2$ per round).
+* **Schnorr Protocol**: Demo of the Schnorr cyclic group identification protocol — the basis of many modern signatures.
+
+---
+
+### 🧩 Module 9: CTF Toolkit
+
+Pure work mode, without pedagogy. Competition tool panel.
+
+| Tool | Function |
+| :--- | :--- |
+| **XOR Brute Force** | Test 1–4 byte XOR keys, score for readability in English/Spanish |
+| **Hex Dump** | Hex+ASCII view of any input, style `xxd` |
+| **ROT-N Table** | All 25 rotations on a single screen table |
+| **Multi-Decoder Chain** | Applies chain decoder sequences (Base64 → XOR → Hex → ASCII) |
+| **String Extractor** | Extract printable ASCII sequences from binary data |
+| **Pattern Generator** | Generates cyclic patterns to detect offsets in buffer overflows |
+| **Byte Frequency Map** | 256-byte histogram of the input; useful for detecting encryption, compression or random data |
+| **Hash Diff** | Compare two hashes and count different bits (Hamming distance) |
+| **Rail Fence Solver** | Try all the values of $n$ rails up to 20 and score the result |
+| **Columnar Auto-Solver** | Test column permutations guided by bigram analysis |
+
+---
+
+### 🛠️ Technical Implementation
+
+| Component | Detail |
+| :--- | :--- |
+| **BigNum Engine** | `CASInt` from NumOS: arbitrary precision integers up to ~4096 bits in PSRAM. Module, modular boosting and GCD in hardware. |
+| **Entropy** | S3 noise ADC + timer jitter as a source of randomness for prime and nonce generation. |
+| **Dual-Core** | Core 0: Heavy cryptographic operations (Miller-Rabin, RSA, Pollard ρ). Core 1: UI, LVGL animations, screen refresh. |
+| **Flash Storage** | AES tables (S-box, MixColumns tables in $GF(2^8)$), SHA constants, language frequency dictionary, constants $K_i$ from SHA — all in LittleFS. |
+| **PSRAM** | Enigma status, intermediate AES blocks, elliptic curve arrays, operational BigNums. |
+| **Sessions** | The current job state (text, parameters, key) is automatically saved to LittleFS when you exit each module to resume the session. |
+
+---
+
+### 🎓 Educational and Professional Value
+
+CipherForge covers the content of three different university courses within a single app:
+
+| Course | Modules covered |
+| :--- | :--- |
+| Classic Cryptography and History | Modules 1, 2, 3 |
+| Mathematical Cryptography (Number Theory) | Module 4 |
+| Modern Cryptography (Bachelor/Master) | Modules 5, 6, 7, 8 |
+| Practical Security and CTF | Modules 3, 9 |
+
+The **"Show Steps"** mode available in all algebraic modules generates a step report exportable to LittleFS, printable or transferable by USB, which can be used directly as a worksheet in an exam or as a reference in a security audit.
+
+---
+
 ## Long-Term Vision — The World's Best Open-Source Calculator
 
 **NumOS aims to demonstrate that a 15 € hardware open-source calculator can surpass the features of 180 € commercial calculators.**
