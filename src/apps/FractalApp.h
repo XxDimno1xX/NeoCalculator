@@ -13,6 +13,23 @@
 #include "../hal/ArduinoCompat.h"
 #endif
 
+#include <atomic>
+
+struct RenderRect {
+    int startX, startY;
+    int endX, endY;
+};
+
+struct RenderJob {
+    float centerX;
+    float centerY;
+    float zoom;
+    int maxIter;
+    bool fullRender;
+    RenderRect rects[2]; // At most 2 rectangles for L-shaped new regions
+    int numRects;
+};
+
 class FractalApp {
 public:
     FractalApp();
@@ -37,6 +54,7 @@ private:
     // UI elements
     lv_obj_t* _canvasArea;
     lv_obj_t* _fractalImage;
+    lv_obj_t* _loadingLabel;
 
     // Image buffer (PSRAM-backed for ESP32-S3)
     utils::PSRAMBuffer<uint16_t> _buffer;
@@ -53,10 +71,21 @@ private:
     lv_timer_t*  _updateTimer      = nullptr;
     volatile bool _renderRequested = false;
     volatile bool _renderComplete  = false;
+    
+    std::atomic<bool> _abortRender{false};
+    std::atomic<bool> _renderAborted{true};
+    std::atomic<bool> _taskShouldExit{false};
+    std::atomic<bool> _taskExited{false};
+
+    RenderJob             _currentJob;
 
     void createUI();
     void initializeBuffer();
-    void renderFractal();
+    // Replaced renderFractal() with these finer-grain methods
+    void requestRender(bool full);
+    void requestRenderRects(const RenderRect& r1, const RenderRect& r2, int count);
+    void shiftBuffer(int dx, int dy);
+    void scaleBuffer(float scaleFactor);
 
     static void renderTaskWrapper(void* param);
     static void checkStatusTimer(lv_timer_t* timer);

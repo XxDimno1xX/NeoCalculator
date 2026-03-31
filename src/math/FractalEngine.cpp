@@ -7,7 +7,9 @@ static inline uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
 
 void FractalEngine::renderMandelbrot(uint16_t* buffer, int width, int height, 
                                      float centerX, float centerY, float zoom, 
-                                     int maxIter, bool invertY) {
+                                     int maxIter, int startX, int startY, int endX, int endY,
+                                     std::atomic<bool>* abortRender,
+                                     bool invertY) {
     // 1.5f and 1.0f are base aspect ratio bounds (roughly 3:2)
     // Scale by 1.0/zoom to get world window size
     float aspect = (float)width / (float)height;
@@ -21,12 +23,23 @@ void FractalEngine::renderMandelbrot(uint16_t* buffer, int width, int height,
     float dx = windowW / (float)width;
     float dy = windowH / (float)height;
 
-    for (int py = 0; py < height; py++) {
+    // Constrain rect to screen bounds
+    if (startX < 0) startX = 0;
+    if (startY < 0) startY = 0;
+    if (endX > width) endX = width;
+    if (endY > height) endY = height;
+
+    for (int py = startY; py < endY; py++) {
+        // Check for strict abort at each row
+        if (abortRender && abortRender->load(std::memory_order_relaxed)) {
+            return;
+        }
+
         // Handle inverted graphics Y axis if necessary
         int screenY = invertY ? (height - 1 - py) : py;
         float cy = yMin + py * dy;
 
-        for (int px = 0; px < width; px++) {
+        for (int px = startX; px < endX; px++) {
             float cx = xMin + px * dx;
             float zx = 0;
             float zy = 0;
