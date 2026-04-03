@@ -17,6 +17,8 @@
 #include <lvgl.h>
 #include <vector>
 #include <memory>
+#include <string>
+#include <cstddef>
 #include "../math/MathAST.h"
 #include "../math/CursorController.h"
 #include "../math/cas/ASTFlattener.h"
@@ -45,6 +47,7 @@ public:
     void begin();
     void end();
     void load();
+    void update();
     void handleKey(const KeyEvent& ev);
 
     bool isActive() const { return _screen != nullptr; }
@@ -139,6 +142,52 @@ private:
     State   _state       = State::EQ_LIST;
     int     _stepScroll  = 0;
 
+    // Epoch coherence: steps can only be shown for the latest solved equation set.
+    uint32_t _equationEpoch = 1;
+    uint32_t _solveEpoch    = 0;
+    uint32_t _stepsEpoch    = 0;
+
+    // ── Staged Steps pipeline (Parse -> Solve -> RenderChunk -> Finalize) ──
+    enum class StepsSource : uint8_t {
+        NONE,
+        LEGACY_LOG,
+        SINGLE_CAS,
+        SYSTEM_CAS,
+    };
+
+    enum class StepsStage : uint8_t {
+        IDLE,
+        PARSE,
+        SOLVE,
+        RENDER_CHUNK,
+        FINALIZE,
+    };
+
+    StepsSource _stepsSource = StepsSource::NONE;
+    StepsStage  _stepsStage  = StepsStage::IDLE;
+    bool        _stepsPipelineActive = false;
+    bool        _stepsReachedFixedPoint = false;
+    bool        _stepsMemoryLimitReached = false;
+    bool        _stepsHeaderRendered = false;
+
+    lv_obj_t*   _stepsProgressLabel = nullptr;
+    std::string _stepsPipelineError;
+    std::string _stepsEqText1;
+    std::string _stepsEqText2;
+    char        _stepsVar1 = 'x';
+    char        _stepsVar2 = 'y';
+
+    cas::NodePtr _stepsParsedEq1;
+    cas::NodePtr _stepsParsedEq2;
+    cas::NodePtr _stepsCurrentTree;
+
+    std::vector<cas::RuleEngine::StepLog> _stepsCasPendingLogs;
+    std::vector<cas::SystemTutorStep>     _stepsSystemPendingLogs;
+
+    std::size_t _stepsSolveIterations = 0;
+    std::size_t _stepsRenderIndex = 0;
+    static constexpr std::size_t STEPS_SOLVE_MAX = 80;
+
     // ── CAS results ──────────────────────────────────────────────────
     cas::SymExprArena  _arena;
     cas::OmniResult    _omniResult;
@@ -190,6 +239,17 @@ private:
     void buildStepsDisplay();
     void buildCASStepsDisplay();         ///< Algebraic TRS step display (RuleEngine)
     void buildSystemCASStepsDisplay();   ///< System of equations TRS step display
+    void invalidateStepsCache();
+    void resetStepsPipeline();
+    bool isValidLvObj(const lv_obj_t* obj) const;
+    bool canAllocStep(std::size_t requiredContiguous) const;
+    void logStepBudget(int stepIndex) const;
+    void failClosedStepRender(std::size_t stepIndex);
+
+    static constexpr std::size_t STEPS_INTERNAL_MAXBLOCK_FLOOR = 40U * 1024U;
+    static constexpr std::size_t STEPS_CHILD_HARD_CAP = 90U;
+    static constexpr std::size_t STEPS_LABEL_BUDGET = 4U * 1024U;
+    static constexpr std::size_t STEPS_CANVAS_BUDGET = 8U * 1024U;
 
     bool splitAtEquals(vpam::NodeRow* row,
                        vpam::NodePtr& outLHS,

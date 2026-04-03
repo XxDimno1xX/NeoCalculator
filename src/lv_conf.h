@@ -50,12 +50,21 @@
     #define LV_MEM_CUSTOM_REALLOC(ptr, size) realloc((ptr), (size))
     #define LV_MEM_CUSTOM_FREE(ptr)          free(ptr)
   #else
-    /* ESP32: alocar en PSRAM (Octal, 8 MB disponibles en el N16R8) */
+    /*
+     * ESP32 allocator policy:
+     * - Small LVGL metadata blocks (objects, child arrays, styles) in INTERNAL RAM.
+     * - Large blocks in PSRAM to preserve internal contiguous space.
+     */
     #define LV_MEM_CUSTOM_INCLUDE <esp_heap_caps.h>
+    #define LV_MEM_INTERNAL_CUTOFF 512U
     #define LV_MEM_CUSTOM_ALLOC(size) \
-        heap_caps_malloc((size), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+      (((size) <= LV_MEM_INTERNAL_CUTOFF) \
+        ? heap_caps_malloc((size), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) \
+        : heap_caps_malloc((size), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT))
     #define LV_MEM_CUSTOM_REALLOC(ptr, size) \
-        heap_caps_realloc((ptr), (size), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+      (((size) <= LV_MEM_INTERNAL_CUTOFF) \
+        ? heap_caps_realloc((ptr), (size), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) \
+        : heap_caps_realloc((ptr), (size), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT))
     #define LV_MEM_CUSTOM_FREE(ptr) free(ptr)
   #endif
 #else

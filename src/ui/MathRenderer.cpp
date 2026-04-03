@@ -65,8 +65,12 @@ FontMetrics MathCanvas::metricsFromFont(const lv_font_t* font) {
 
 void MathCanvas::create(lv_obj_t* parent) {
     if (_obj) return;
+    if (parent == nullptr || !lv_obj_is_valid(parent)) return;
 
+    // LVGL owns object allocation strategy. MathCanvas does not force heap caps
+    // here so small lv_obj metadata can follow the platform allocator policy.
     _obj = lv_obj_create(parent);
+    if (_obj == nullptr) return;
 
     // Fondo blanco, sin bordes, sin scroll
     lv_obj_set_style_bg_color(_obj, lv_color_white(), LV_PART_MAIN);

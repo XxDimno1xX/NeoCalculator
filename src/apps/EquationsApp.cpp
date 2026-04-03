@@ -16,6 +16,7 @@
  */
 
 #include "EquationsApp.h"
+#include "Arduino.h"
 #include "../math/MathAST.h"
 #include "../math/cas/SymToAST.h"
 #include "../math/cas/SymExprToAST.h"
@@ -24,6 +25,9 @@
 #include "../math/cas/CasToVpam.h"
 #include "../math/cas/PersistentAST.h"
 #include "../math/cas/RuleEngine.h"
+#include <esp_heap_caps.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <cstring>
 #include <cstdlib>
 
@@ -346,6 +350,34 @@ void EquationsApp::begin() {
     showEqList();
 }
 
+void EquationsApp::resetStepsPipeline() {
+    _stepsSource = StepsSource::NONE;
+    _stepsStage = StepsStage::IDLE;
+    _stepsPipelineActive = false;
+    _stepsReachedFixedPoint = false;
+    _stepsMemoryLimitReached = false;
+    _stepsHeaderRendered = false;
+    _stepsPipelineError.clear();
+    _stepsEqText1.clear();
+    _stepsEqText2.clear();
+    _stepsVar1 = 'x';
+    _stepsVar2 = 'y';
+    _stepsParsedEq1.reset();
+    _stepsParsedEq2.reset();
+    _stepsCurrentTree.reset();
+    _stepsCasPendingLogs.clear();
+    _stepsSystemPendingLogs.clear();
+    _stepsSolveIterations = 0;
+    _stepsRenderIndex = 0;
+    _stepsProgressLabel = nullptr;
+}
+
+void EquationsApp::invalidateStepsCache() {
+    ++_equationEpoch;
+    _stepsEpoch = 0;
+    resetStepsPipeline();
+}
+
 void EquationsApp::end() {
     _editCanvas.stopCursorBlink();
     _editCanvas.destroy();
@@ -365,6 +397,7 @@ void EquationsApp::end() {
     _statusBar.destroy();
 
     _stepRenderers.clear();
+    resetStepsPipeline();
 
     if (_screen) {
         lv_obj_delete(_screen);
@@ -403,6 +436,9 @@ void EquationsApp::end() {
     _numEquations = 0;
     _listFocus = 0;
     _resultCount = 0;
+    _equationEpoch = 1;
+    _solveEpoch = 0;
+    _stepsEpoch = 0;
 
     _omniResult.steps.clear();
     _systemResult.steps.clear();
@@ -410,13 +446,77 @@ void EquationsApp::end() {
 }
 
 void EquationsApp::load() {
-    if (!_screen) begin();
+    // Lifecycle hardening: if any critical container pointer is missing while
+    // screen exists, rebuild atomically to avoid partial trees after teardown races.
+    if (!_screen || !_listContainer || !_resultContainer || !_stepsContainer) {
+        end();
+        begin();
+    }
     lv_screen_load_anim(_screen, LV_SCREEN_LOAD_ANIM_FADE_IN, 200, 0, false);
     _statusBar.update();
 
-    if (_state == State::EDITING) {
+    if (_state == State::EDITING && _editCanvas.obj()) {
         _editCanvas.startCursorBlink();
     }
+}
+
+bool EquationsApp::isValidLvObj(const lv_obj_t* obj) const {
+    return obj != nullptr && lv_obj_is_valid(obj);
+}
+
+bool EquationsApp::canAllocStep(std::size_t requiredContiguous) const {
+    const uint32_t caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+    const std::size_t internalLargestBlock =
+        static_cast<std::size_t>(heap_caps_get_largest_free_block(caps));
+    const std::size_t internalFree =
+        static_cast<std::size_t>(heap_caps_get_free_size(caps));
+
+    if (isValidLvObj(_stepsContainer)) {
+        const std::size_t childCount =
+            static_cast<std::size_t>(lv_obj_get_child_count(_stepsContainer));
+        if (childCount >= STEPS_CHILD_HARD_CAP) return false;
+    }
+
+    if (internalLargestBlock < STEPS_INTERNAL_MAXBLOCK_FLOOR) return false;
+    if (internalLargestBlock < requiredContiguous) return false;
+    if (internalFree < requiredContiguous) return false;
+    return true;
+}
+
+void EquationsApp::logStepBudget(int stepIndex) const {
+    int children = 0;
+    if (isValidLvObj(_stepsContainer)) {
+        children = static_cast<int>(lv_obj_get_child_count(_stepsContainer));
+    }
+
+    const uint32_t internalFree =
+        static_cast<uint32_t>(
+            heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    const uint32_t internalMaxBlock =
+        static_cast<uint32_t>(
+            heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    const uint32_t freePsram =
+        static_cast<uint32_t>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+
+    Serial.printf(
+        "[DEBUG] Step:%d | Children:%d | InternalFree:%u | InternalMaxBlock:%u | PSRAMFree:%u.\n",
+        stepIndex, children, internalFree, internalMaxBlock, freePsram);
+}
+
+void EquationsApp::failClosedStepRender(std::size_t stepIndex) {
+    _stepsMemoryLimitReached = true;
+    _stepsPipelineError.clear();
+
+    if (isValidLvObj(_stepsProgressLabel)) {
+        char warn[96];
+        snprintf(warn, sizeof(warn),
+                 "\xE2\x9A\xA0\xEF\xB8\x8F Limit reached at step %u. Memory full.",
+                 static_cast<unsigned>(stepIndex));
+        lv_label_set_text(_stepsProgressLabel, warn);
+        lv_obj_remove_flag(_stepsProgressLabel, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    _stepsStage = StepsStage::FINALIZE;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -781,6 +881,7 @@ void EquationsApp::updateListFocus() {
 // ════════════════════════════════════════════════════════════════════════════
 
 void EquationsApp::showEqList() {
+    resetStepsPipeline();
     hideAllContainers();
     _state = State::EQ_LIST;
     _statusBar.setTitle("Equations");
@@ -793,6 +894,7 @@ void EquationsApp::showEqList() {
 }
 
 void EquationsApp::showTemplate() {
+    resetStepsPipeline();
     _state = State::TEMPLATE;
     _templateFocus = 0;
 
@@ -813,6 +915,7 @@ void EquationsApp::showTemplate() {
 }
 
 void EquationsApp::showEditing(int idx) {
+    resetStepsPipeline();
     hideAllContainers();
     _state = State::EDITING;
     _editingIndex = idx;
@@ -840,6 +943,7 @@ void EquationsApp::showEditing(int idx) {
 }
 
 void EquationsApp::showSolving() {
+    resetStepsPipeline();
     hideAllContainers();
     _state = State::SOLVING;
     _statusBar.setTitle("Solving");
@@ -853,6 +957,7 @@ void EquationsApp::showSolving() {
 }
 
 void EquationsApp::showResult() {
+    resetStepsPipeline();
     hideAllContainers();
     _state = State::RESULT;
     _statusBar.setTitle("Result");
@@ -864,30 +969,531 @@ void EquationsApp::showResult() {
 }
 
 void EquationsApp::showSteps() {
+    resetStepsPipeline();
     hideAllContainers();
     _state = State::STEPS;
     _statusBar.setTitle("Steps");
     _stepScroll = 0;
 
-    // For 2-equation systems, use the SystemTutor CAS step display.
-    if (_numEquations == 2 && _eqRowData[0] && _eqRowData[1]) {
-        buildSystemCASStepsDisplay();
-    }
-    // For single-equation solves, try to build algebraic CAS steps
-    // using the RuleEngine.  Fall back to the OmniSolver step log if the
-    // equation cannot be parsed by the simple TRS parser.
-    else if (_isOmniSolve && _numEquations == 1 && _eqRowData[0]) {
-        buildCASStepsDisplay();
-    } else {
-        buildStepsDisplay();
-    }
-
-    if (_stepsContainer == nullptr) {
+    if (_stepsContainer == nullptr || !isValidLvObj(_stepsContainer)) {
+        _stepsContainer = nullptr;
         return;
     }
+
+    lv_obj_clean(_stepsContainer);
+    _stepRenderers.clear();
+
+    auto appendInfoLabel = [&](const char* text, uint32_t colorHex) {
+        if (!isValidLvObj(_stepsContainer)) return;
+        logStepBudget(-1);
+        if (!canAllocStep(STEPS_LABEL_BUDGET)) return;
+        lv_obj_t* lbl = lv_label_create(_stepsContainer);
+        if (!lbl) return;
+        lv_label_set_text(lbl, text);
+        lv_obj_set_width(lbl, SCREEN_W - 2 * PAD - 8);
+        lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, LV_PART_MAIN);
+        lv_obj_set_style_text_color(lbl, lv_color_hex(colorHex), LV_PART_MAIN);
+    };
+
+    // Epoch coherence gate: steps are valid only for the latest solved state.
+    if (_solveEpoch == 0 || _solveEpoch != _equationEpoch) {
+        appendInfoLabel("Re-solve required: equation changed.", COL_ACCENT_HEX);
+        appendInfoLabel("Press AC, solve again, then open STEPS.", COL_HINT_HEX);
+        lv_obj_remove_flag(_stepsContainer, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_scroll_to_y(_stepsContainer, 0, LV_ANIM_OFF);
+        lv_obj_invalidate(_screen);
+        return;
+    }
+
+    logStepBudget(0);
+    _stepsProgressLabel = nullptr;
+    if (canAllocStep(STEPS_LABEL_BUDGET)) {
+        _stepsProgressLabel = lv_label_create(_stepsContainer);
+    }
+    if (_stepsProgressLabel) {
+        lv_label_set_text(_stepsProgressLabel, "Preparing steps...");
+        lv_obj_set_width(_stepsProgressLabel, SCREEN_W - 2 * PAD - 8);
+        lv_label_set_long_mode(_stepsProgressLabel, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_font(_stepsProgressLabel, &lv_font_montserrat_12,
+                                   LV_PART_MAIN);
+        lv_obj_set_style_text_color(_stepsProgressLabel, lv_color_hex(COL_HINT_HEX),
+                                    LV_PART_MAIN);
+    }
+
+    if (_numEquations == 2 && _eqRowData[0] && _eqRowData[1]) {
+        _stepsSource = StepsSource::SYSTEM_CAS;
+    } else if (_isOmniSolve && _numEquations == 1 && _eqRowData[0]) {
+        _stepsSource = StepsSource::SINGLE_CAS;
+    } else {
+        _stepsSource = StepsSource::LEGACY_LOG;
+    }
+
+    _stepsStage = StepsStage::PARSE;
+    _stepsPipelineActive = true;
+
     lv_obj_remove_flag(_stepsContainer, LV_OBJ_FLAG_HIDDEN);
     lv_obj_scroll_to_y(_stepsContainer, 0, LV_ANIM_OFF);
     lv_obj_invalidate(_screen);
+}
+
+void EquationsApp::update() {
+    if (!_screen || _state != State::STEPS || !_stepsPipelineActive) {
+        return;
+    }
+
+    if (!isValidLvObj(_screen) || !isValidLvObj(_stepsContainer)) {
+        _stepsProgressLabel = nullptr;
+        resetStepsPipeline();
+        return;
+    }
+
+    static constexpr int16_t CANVAS_MAX_W =
+        static_cast<int16_t>(SCREEN_W - 2 * PAD - 8);
+
+    auto setProgress = [&](const char* text) {
+        if (isValidLvObj(_stepsProgressLabel)) {
+            lv_label_set_text(_stepsProgressLabel, text);
+        } else {
+            _stepsProgressLabel = nullptr;
+        }
+    };
+
+    auto appendHint = [&](int stepNumber) {
+        if (!isValidLvObj(_stepsContainer)) return false;
+        logStepBudget(stepNumber);
+        if (!canAllocStep(STEPS_LABEL_BUDGET)) return false;
+
+        lv_obj_t* hintLbl = lv_label_create(_stepsContainer);
+        if (!hintLbl) return false;
+        lv_label_set_text(hintLbl,
+                          LV_SYMBOL_UP LV_SYMBOL_DOWN " Scroll    AC: Back");
+        lv_obj_set_style_text_font(hintLbl, &lv_font_montserrat_12, LV_PART_MAIN);
+        lv_obj_set_style_text_color(hintLbl, lv_color_hex(COL_HINT_HEX),
+                                    LV_PART_MAIN);
+        return true;
+    };
+
+    auto appendMessage = [&](int stepNumber, const char* text, uint32_t colorHex) {
+        if (!isValidLvObj(_stepsContainer)) return false;
+        logStepBudget(stepNumber);
+        if (!canAllocStep(STEPS_LABEL_BUDGET)) return false;
+
+        lv_obj_t* lbl = lv_label_create(_stepsContainer);
+        if (!lbl) return false;
+        lv_label_set_text(lbl, text);
+        lv_obj_set_width(lbl, CANVAS_MAX_W);
+        lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, LV_PART_MAIN);
+        lv_obj_set_style_text_color(lbl, lv_color_hex(colorHex), LV_PART_MAIN);
+        return true;
+    };
+
+    auto appendMemoryLimitReached = [&](std::size_t stepNumber) {
+        failClosedStepRender(stepNumber);
+    };
+
+    auto emitCasCanvas = [&](std::size_t stepNumber,
+                             const cas::NodePtr& tree,
+                             const cas::NodePtr& highlight,
+                             lv_color_t hlColor) {
+        if (!tree) return true;
+        if (!isValidLvObj(_stepsContainer)) return false;
+
+        logStepBudget(static_cast<int>(stepNumber));
+        if (!canAllocStep(STEPS_CANVAS_BUDGET)) return false;
+
+        const vpam::MathNode* hlPtr = nullptr;
+        vpam::NodePtr vpamTree;
+        if (highlight) {
+            vpamTree = cas::CasToVpam::convert(tree, highlight, &hlPtr);
+        } else {
+            vpamTree = cas::CasToVpam::convert(tree);
+        }
+        if (!vpamTree) return true;
+
+        if (vpamTree->type() != vpam::NodeType::Row) {
+            auto rowWrap = vpam::makeRow();
+            static_cast<vpam::NodeRow*>(rowWrap.get())
+                ->appendChild(std::move(vpamTree));
+            vpamTree = std::move(rowWrap);
+        }
+
+        auto srd = std::make_unique<StepRenderData>();
+        srd->nodeData = std::move(vpamTree);
+        srd->canvas.create(_stepsContainer);
+        if (!srd->canvas.obj()) {
+            return false;
+        }
+
+        auto* row = static_cast<vpam::NodeRow*>(srd->nodeData.get());
+        srd->canvas.setExpression(row, nullptr);
+        row->calculateLayout(srd->canvas.normalMetrics());
+
+        int16_t w = static_cast<int16_t>(row->layout().width + 24);
+        int16_t h = static_cast<int16_t>(
+            row->layout().ascent + row->layout().descent + 8);
+        if (w > CANVAS_MAX_W) w = CANVAS_MAX_W;
+        if (h < 20) h = 20;
+        lv_obj_set_size(srd->canvas.obj(), w, h);
+
+        if (hlPtr) srd->canvas.setHighlightNode(hlPtr, hlColor);
+        srd->canvas.invalidate();
+        _stepRenderers.push_back(std::move(srd));
+        return true;
+    };
+
+    auto emitSystemCanvas = [&](std::size_t stepNumber, const cas::NodePtr& tree) {
+        if (!tree) return true;
+        if (!isValidLvObj(_stepsContainer)) return false;
+
+        logStepBudget(static_cast<int>(stepNumber));
+        if (!canAllocStep(STEPS_CANVAS_BUDGET)) return false;
+
+        vpam::NodePtr vpamTree = cas::CasToVpam::convert(tree);
+        if (!vpamTree) return true;
+
+        if (vpamTree->type() != vpam::NodeType::Row) {
+            auto rowWrap = vpam::makeRow();
+            static_cast<vpam::NodeRow*>(rowWrap.get())
+                ->appendChild(std::move(vpamTree));
+            vpamTree = std::move(rowWrap);
+        }
+
+        auto srd = std::make_unique<StepRenderData>();
+        srd->nodeData = std::move(vpamTree);
+        srd->canvas.create(_stepsContainer);
+        if (!srd->canvas.obj()) {
+            return false;
+        }
+
+        auto* row = static_cast<vpam::NodeRow*>(srd->nodeData.get());
+        srd->canvas.setExpression(row, nullptr);
+        row->calculateLayout(srd->canvas.normalMetrics());
+
+        int16_t w = static_cast<int16_t>(row->layout().width + 24);
+        int16_t h = static_cast<int16_t>(
+            row->layout().ascent + row->layout().descent + 8);
+        if (w > CANVAS_MAX_W) w = CANVAS_MAX_W;
+        if (h < 20) h = 20;
+        lv_obj_set_size(srd->canvas.obj(), w, h);
+        srd->canvas.invalidate();
+        _stepRenderers.push_back(std::move(srd));
+        return true;
+    };
+
+    switch (_stepsStage) {
+        case StepsStage::PARSE: {
+            _stepsPipelineError.clear();
+            _stepsMemoryLimitReached = false;
+            _stepsReachedFixedPoint = false;
+            _stepsRenderIndex = 0;
+            _stepsSolveIterations = 0;
+            _stepsHeaderRendered = false;
+            _stepsCasPendingLogs.clear();
+            _stepsSystemPendingLogs.clear();
+            _stepsParsedEq1.reset();
+            _stepsParsedEq2.reset();
+            _stepsCurrentTree.reset();
+
+            if (_stepsSource == StepsSource::LEGACY_LOG) {
+                setProgress("Rendering...");
+                _stepsStage = StepsStage::RENDER_CHUNK;
+                break;
+            }
+
+            _casPool.reset();
+            _casEngine.reset();
+            _hasCasResult = false;
+            _casPool = std::make_unique<cas::CasMemoryPool>();
+            if (!_casPool || !_casPool->valid()) {
+                _stepsPipelineError = "Memory Limit Reached";
+                _stepsStage = StepsStage::FINALIZE;
+                break;
+            }
+
+            if (_stepsSource == StepsSource::SINGLE_CAS) {
+                _stepsEqText1.clear();
+                if (_eqRowData[0]) nodeToText(_eqRowData[0], _stepsEqText1);
+
+                if (_stepsEqText1.find('=') == std::string::npos) {
+                    _stepsPipelineError = "Parse error: equation must include '='.";
+                    _stepsStage = StepsStage::FINALIZE;
+                    break;
+                }
+
+                _stepsVar1 = 'x';
+                _stepsParsedEq1 = casParseEquation(_stepsEqText1, *_casPool, _stepsVar1);
+                if (!_stepsParsedEq1) {
+                    _stepsPipelineError = "CAS parse failed: unsupported equation format.";
+                    _stepsStage = StepsStage::FINALIZE;
+                    break;
+                }
+
+                _casEngine = std::make_unique<cas::RuleEngine>(*_casPool);
+                for (auto& rule : cas::makeAlgebraicRules(*_casPool, _stepsVar1)) {
+                    _casEngine->addRule(std::move(rule));
+                }
+
+                _stepsCurrentTree = _stepsParsedEq1;
+                setProgress("Solving... 0/80");
+                _stepsStage = StepsStage::SOLVE;
+            } else {
+                _stepsEqText1.clear();
+                _stepsEqText2.clear();
+                if (_eqRowData[0]) nodeToText(_eqRowData[0], _stepsEqText1);
+                if (_eqRowData[1]) nodeToText(_eqRowData[1], _stepsEqText2);
+
+                if (_stepsEqText1.find('=') == std::string::npos ||
+                    _stepsEqText2.find('=') == std::string::npos) {
+                    _stepsPipelineError = "Parse error: invalid system equations.";
+                    _stepsStage = StepsStage::FINALIZE;
+                    break;
+                }
+
+                _stepsVar1 = 'x';
+                _stepsVar2 = 'y';
+                _stepsParsedEq1 = casParseEquation(_stepsEqText1, *_casPool, _stepsVar1);
+                _stepsParsedEq2 = casParseEquation(_stepsEqText2, *_casPool, _stepsVar2);
+                if (!_stepsParsedEq1 || !_stepsParsedEq2) {
+                    _stepsPipelineError = "CAS parse failed: unsupported system format.";
+                    _stepsStage = StepsStage::FINALIZE;
+                    break;
+                }
+
+                setProgress("Solving system steps...");
+                _stepsStage = StepsStage::SOLVE;
+            }
+            break;
+        }
+
+        case StepsStage::SOLVE: {
+            if (_stepsSource == StepsSource::SINGLE_CAS) {
+                if (!_casEngine || !_stepsCurrentTree) {
+                    _stepsPipelineError = "CAS engine not ready.";
+                    _stepsStage = StepsStage::FINALIZE;
+                    break;
+                }
+
+                constexpr std::size_t kSolveBudgetPerTick = 4;
+                for (std::size_t n = 0; n < kSolveBudgetPerTick; ++n) {
+                    if (_stepsSolveIterations >= STEPS_SOLVE_MAX) {
+                        break;
+                    }
+
+                    cas::RewriteResult r = _casEngine->applyOneStep(_stepsCurrentTree);
+                    if (!r.changed) {
+                        _stepsReachedFixedPoint = true;
+                        break;
+                    }
+
+                    cas::RuleEngine::StepLog log;
+                    log.ruleName = std::move(r.ruleName);
+                    log.ruleDesc = std::move(r.ruleDesc);
+                    log.phase = r.phase;
+                    log.tree = r.newTree;
+                    log.affectedNode = r.affectedNode;
+                    _stepsCasPendingLogs.push_back(std::move(log));
+                    _stepsCurrentTree = r.newTree;
+                    ++_stepsSolveIterations;
+                }
+
+                char prog[40];
+                snprintf(prog, sizeof(prog), "Solving... %u/%u",
+                         static_cast<unsigned>(_stepsSolveIterations),
+                         static_cast<unsigned>(STEPS_SOLVE_MAX));
+                setProgress(prog);
+
+                if (_stepsReachedFixedPoint || _stepsSolveIterations >= STEPS_SOLVE_MAX) {
+                    _casResult.finalTree = _stepsCurrentTree;
+                    _casResult.steps = _stepsCasPendingLogs;
+                    _casResult.reachedFixedPoint = _stepsReachedFixedPoint;
+                    cas::checkNonLinearHandover(_casResult, _stepsVar1);
+                    _hasCasResult = true;
+                    _stepsRenderIndex = 0;
+                    _stepsStage = StepsStage::RENDER_CHUNK;
+                    setProgress("Rendering...");
+                }
+            } else {
+                cas::SystemTutorResult tutorResult = cas::SystemTutor::solveSystem(
+                    _stepsParsedEq1, _stepsParsedEq2, *_casPool, _stepsVar1, _stepsVar2);
+                _stepsSystemPendingLogs = tutorResult.steps;
+                _stepsRenderIndex = 0;
+                _stepsHeaderRendered = false;
+                _stepsStage = StepsStage::RENDER_CHUNK;
+                setProgress("Rendering...");
+            }
+            break;
+        }
+
+        case StepsStage::RENDER_CHUNK: {
+            if (!isValidLvObj(_stepsContainer)) {
+                _stepsProgressLabel = nullptr;
+                resetStepsPipeline();
+                break;
+            }
+
+            if (_stepsSource == StepsSource::LEGACY_LOG) {
+                buildStepsDisplay();
+                _stepsStage = StepsStage::FINALIZE;
+                break;
+            }
+
+            if (_stepsSource == StepsSource::SINGLE_CAS) {
+                if (_stepsRenderIndex == 0) {
+                    if (!appendMessage(0, "0. Original Equation", COL_DESC_HEX) ||
+                        !emitCasCanvas(0, _stepsParsedEq1, nullptr,
+                                       lv_color_hex(0x4FC3F7))) {
+                        appendMemoryLimitReached(0);
+                        break;
+                    }
+                    _stepsRenderIndex = 1;
+                }
+
+                constexpr std::size_t kRenderBudgetPerTick = 2;
+                std::size_t rendered = 0;
+                while (_stepsRenderIndex > 0 &&
+                       (_stepsRenderIndex - 1) < _casResult.steps.size() &&
+                       rendered < kRenderBudgetPerTick)
+                {
+                    const std::size_t idx = _stepsRenderIndex - 1;
+                    const auto& step = _casResult.steps[idx];
+                    const bool isFinal = (idx == _casResult.steps.size() - 1) ||
+                                         (step.ruleName == cas::RULE_NONLINEAR_HANDOVER);
+                    const uint32_t descColHex = isFinal ? COL_ACCENT_HEX : COL_DESC_HEX;
+                    const lv_color_t hlColor = isFinal ? lv_color_hex(0xFFB300)
+                                                       : lv_color_hex(0x4FC3F7);
+
+                    char buf[120];
+                    if (!step.ruleDesc.empty()) {
+                        snprintf(buf, sizeof(buf), "%d. %s", (int)(idx + 1),
+                                 step.ruleDesc.c_str());
+                    } else {
+                        snprintf(buf, sizeof(buf), "%d. %s", (int)(idx + 1),
+                                 step.ruleName.c_str());
+                    }
+
+                    if (!appendMessage(static_cast<int>(idx + 1), buf, descColHex) ||
+                        !emitCasCanvas(idx + 1, step.tree, step.affectedNode, hlColor)) {
+                        appendMemoryLimitReached(idx + 1);
+                        break;
+                    }
+
+                    ++_stepsRenderIndex;
+                    ++rendered;
+                }
+
+                if (_stepsStage == StepsStage::RENDER_CHUNK) {
+                    if ((_stepsRenderIndex - 1) >= _casResult.steps.size()) {
+                        if (!appendHint(static_cast<int>(_stepsRenderIndex - 1))) {
+                            appendMemoryLimitReached(_stepsRenderIndex - 1);
+                        }
+                        if (_stepsStage == StepsStage::RENDER_CHUNK) {
+                            _stepsStage = StepsStage::FINALIZE;
+                        }
+                    } else {
+                        char prog[40];
+                        snprintf(prog, sizeof(prog), "Rendering... %u/%u",
+                                 static_cast<unsigned>(_stepsRenderIndex - 1),
+                                 static_cast<unsigned>(_casResult.steps.size()));
+                        setProgress(prog);
+                    }
+                }
+            } else {
+                if (!_stepsHeaderRendered) {
+                    if (!appendMessage(0, "System of Equations", COL_ACCENT_HEX) ||
+                        !appendMessage(0, "0. Original System", COL_DESC_HEX) ||
+                        !emitSystemCanvas(0, _stepsParsedEq1) ||
+                        !emitSystemCanvas(0, _stepsParsedEq2)) {
+                        appendMemoryLimitReached(0);
+                        break;
+                    }
+                    _stepsHeaderRendered = true;
+                }
+
+                constexpr std::size_t kRenderBudgetPerTick = 1;
+                std::size_t rendered = 0;
+                while (_stepsRenderIndex < _stepsSystemPendingLogs.size() &&
+                       rendered < kRenderBudgetPerTick)
+                {
+                    const auto& step = _stepsSystemPendingLogs[_stepsRenderIndex];
+                    char buf[160];
+                    if (!step.ruleDesc.empty()) {
+                        snprintf(buf, sizeof(buf), "%d. %s", (int)(_stepsRenderIndex + 1),
+                                 step.ruleDesc.c_str());
+                    } else {
+                        snprintf(buf, sizeof(buf), "%d. %s", (int)(_stepsRenderIndex + 1),
+                                 step.ruleName.c_str());
+                    }
+
+                    if (!appendMessage(static_cast<int>(_stepsRenderIndex + 1), buf,
+                                       COL_DESC_HEX) ||
+                        !emitSystemCanvas(_stepsRenderIndex + 1, step.eq1Tree) ||
+                        !emitSystemCanvas(_stepsRenderIndex + 1, step.eq2Tree)) {
+                        appendMemoryLimitReached(_stepsRenderIndex + 1);
+                        break;
+                    }
+
+                    ++_stepsRenderIndex;
+                    ++rendered;
+                }
+
+                if (_stepsStage == StepsStage::RENDER_CHUNK) {
+                    if (_stepsRenderIndex >= _stepsSystemPendingLogs.size()) {
+                        if (!appendHint(static_cast<int>(_stepsRenderIndex))) {
+                            appendMemoryLimitReached(_stepsRenderIndex);
+                        }
+                        if (_stepsStage == StepsStage::RENDER_CHUNK) {
+                            _stepsStage = StepsStage::FINALIZE;
+                        }
+                    } else {
+                        char prog[40];
+                        snprintf(prog, sizeof(prog), "Rendering... %u/%u",
+                                 static_cast<unsigned>(_stepsRenderIndex),
+                                 static_cast<unsigned>(_stepsSystemPendingLogs.size()));
+                        setProgress(prog);
+                    }
+                }
+            }
+            break;
+        }
+
+        case StepsStage::FINALIZE: {
+            if (!_stepsPipelineError.empty()) {
+                if (isValidLvObj(_stepsContainer)) {
+                    lv_obj_clean(_stepsContainer);
+                }
+                _stepRenderers.clear();
+                _stepsProgressLabel = nullptr;
+
+                if (isValidLvObj(_stepsContainer)) {
+                    if (appendMessage(-1, _stepsPipelineError.c_str(), COL_ACCENT_HEX)) {
+                        appendHint(-1);
+                    }
+                }
+            }
+
+            if (isValidLvObj(_stepsProgressLabel)) {
+                if (_stepsMemoryLimitReached) {
+                    lv_obj_remove_flag(_stepsProgressLabel, LV_OBJ_FLAG_HIDDEN);
+                } else {
+                    lv_obj_add_flag(_stepsProgressLabel, LV_OBJ_FLAG_HIDDEN);
+                }
+            }
+
+            _stepsEpoch = _solveEpoch;
+            _stepsPipelineActive = false;
+            _stepsStage = StepsStage::IDLE;
+            if (isValidLvObj(_screen)) {
+                lv_obj_invalidate(_screen);
+            }
+            break;
+        }
+
+        case StepsStage::IDLE:
+        default:
+            break;
+    }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -963,6 +1569,7 @@ void EquationsApp::handleKeyList(const KeyEvent& ev) {
                 if (_listFocus >= listItemCount()) {
                     _listFocus = listItemCount() - 1;
                 }
+                invalidateStepsCache();
                 showEqList();
             }
             break;
@@ -982,11 +1589,13 @@ void EquationsApp::handleKeyTemplate(const KeyEvent& ev) {
             if (_templateFocus > 0) {
                 --_templateFocus;
                 for (int i = 0; i < NUM_TEMPLATES; ++i) {
-                    lv_obj_set_style_text_color(_templateLabels[i],
-                        (i == _templateFocus) ? lv_color_hex(COL_FOCUS_HEX) : lv_color_black(),
-                        LV_PART_MAIN);
+                    if (_templateLabels[i]) {
+                        lv_obj_set_style_text_color(_templateLabels[i],
+                            (i == _templateFocus) ? lv_color_hex(COL_FOCUS_HEX) : lv_color_black(),
+                            LV_PART_MAIN);
+                    }
                 }
-                lv_obj_invalidate(_templateOverlay);
+                if (_templateOverlay) lv_obj_invalidate(_templateOverlay);
             }
             break;
 
@@ -994,11 +1603,13 @@ void EquationsApp::handleKeyTemplate(const KeyEvent& ev) {
             if (_templateFocus < NUM_TEMPLATES - 1) {
                 ++_templateFocus;
                 for (int i = 0; i < NUM_TEMPLATES; ++i) {
-                    lv_obj_set_style_text_color(_templateLabels[i],
-                        (i == _templateFocus) ? lv_color_hex(COL_FOCUS_HEX) : lv_color_black(),
-                        LV_PART_MAIN);
+                    if (_templateLabels[i]) {
+                        lv_obj_set_style_text_color(_templateLabels[i],
+                            (i == _templateFocus) ? lv_color_hex(COL_FOCUS_HEX) : lv_color_black(),
+                            LV_PART_MAIN);
+                    }
                 }
-                lv_obj_invalidate(_templateOverlay);
+                if (_templateOverlay) lv_obj_invalidate(_templateOverlay);
             }
             break;
 
@@ -1009,9 +1620,12 @@ void EquationsApp::handleKeyTemplate(const KeyEvent& ev) {
 
             applyTemplate(_templateFocus, slot);
             ++_numEquations;
+            invalidateStepsCache();
 
             // Hide template overlay
-            lv_obj_add_flag(_templateOverlay, LV_OBJ_FLAG_HIDDEN);
+            if (_templateOverlay) {
+                lv_obj_add_flag(_templateOverlay, LV_OBJ_FLAG_HIDDEN);
+            }
 
             // Go to editing mode for the new equation
             showEditing(slot);
@@ -1021,9 +1635,11 @@ void EquationsApp::handleKeyTemplate(const KeyEvent& ev) {
         case KeyCode::AC:
         case KeyCode::DEL:
             // Cancel template, back to list
-            lv_obj_add_flag(_templateOverlay, LV_OBJ_FLAG_HIDDEN);
+            if (_templateOverlay) {
+                lv_obj_add_flag(_templateOverlay, LV_OBJ_FLAG_HIDDEN);
+            }
             _state = State::EQ_LIST;
-            lv_obj_invalidate(_screen);
+            if (_screen) lv_obj_invalidate(_screen);
             break;
 
         default:
@@ -1158,6 +1774,7 @@ void EquationsApp::handleKeyEditing(const KeyEvent& ev) {
             _eqNode[_editingIndex] = std::move(_editNode);
             _eqRowData[_editingIndex] = static_cast<NodeRow*>(_eqNode[_editingIndex].get());
             _editRow = nullptr;
+            invalidateStepsCache();
 
             // Focus on the next item after the edited equation
             _listFocus = _editingIndex;
@@ -1203,10 +1820,14 @@ void EquationsApp::handleKeyResult(const KeyEvent& ev) {
 void EquationsApp::handleKeySteps(const KeyEvent& ev) {
     switch (ev.code) {
         case KeyCode::UP:
-            lv_obj_scroll_by(_stepsContainer, 0, 30, LV_ANIM_ON);
+            if (_stepsContainer && isValidLvObj(_stepsContainer)) {
+                lv_obj_scroll_by(_stepsContainer, 0, 30, LV_ANIM_ON);
+            }
             break;
         case KeyCode::DOWN:
-            lv_obj_scroll_by(_stepsContainer, 0, -30, LV_ANIM_ON);
+            if (_stepsContainer && isValidLvObj(_stepsContainer)) {
+                lv_obj_scroll_by(_stepsContainer, 0, -30, LV_ANIM_ON);
+            }
             break;
         case KeyCode::AC:
         case KeyCode::DEL:
@@ -1398,6 +2019,7 @@ cas::LinEq EquationsApp::symEquationToLinEq(const cas::SymEquation& eq,
 // ════════════════════════════════════════════════════════════════════════════
 
 void EquationsApp::solveEquations() {
+    _solveEpoch = 0;
     if (_numEquations == 1) {
         _isOmniSolve = true;
         solveOmni();
@@ -1405,6 +2027,9 @@ void EquationsApp::solveEquations() {
         _isOmniSolve = false;
         solveSystem();
     }
+
+    // Mark solve data as coherent with the current equation generation.
+    _solveEpoch = _equationEpoch;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1937,7 +2562,8 @@ addHint:
 
 void EquationsApp::buildStepsDisplay() {
     // ── 1. Clean up previous content (persistent container) ─────────
-    if (_stepsContainer == nullptr) {
+    if (!isValidLvObj(_stepsContainer)) {
+        _stepsContainer = nullptr;
         return;
     }
     lv_obj_clean(_stepsContainer);
@@ -1949,23 +2575,28 @@ void EquationsApp::buildStepsDisplay() {
 
     const auto& steps = log.steps();
 
-    if (steps.empty()) {
-        lv_obj_t* lbl = lv_label_create(_stepsContainer);
-        lv_label_set_text(lbl, "No steps available.");
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, LV_PART_MAIN);
-        lv_obj_set_style_text_color(lbl, lv_color_hex(COL_HINT_HEX), LV_PART_MAIN);
-        return;
-    }
-
     static constexpr int CANVAS_W = SCREEN_W - 2 * PAD - 16;
 
+    auto createStepLabel = [&](int stepIndex) -> lv_obj_t* {
+        if (!isValidLvObj(_stepsContainer)) return nullptr;
+        logStepBudget(stepIndex);
+        if (!canAllocStep(STEPS_LABEL_BUDGET)) return nullptr;
+        return lv_label_create(_stepsContainer);
+    };
+
     // Helper: create a MathCanvas from a NodePtr, add to _stepRenderers
-    auto emitCanvas = [&](vpam::NodePtr node) {
-        if (!node) return;
+    auto emitCanvas = [&](int stepIndex, vpam::NodePtr node) -> bool {
+        if (!node) return true;
+        if (!isValidLvObj(_stepsContainer)) return false;
+
+        logStepBudget(stepIndex);
+        if (!canAllocStep(STEPS_CANVAS_BUDGET)) return false;
+
         node = cas::SymExprToAST::ensureRow(std::move(node));
         auto srd = std::make_unique<StepRenderData>();
         srd->nodeData = std::move(node);
         srd->canvas.create(_stepsContainer);
+        if (!srd->canvas.obj()) return false;
 
         auto* row = static_cast<vpam::NodeRow*>(srd->nodeData.get());
         srd->canvas.setExpression(row, nullptr);
@@ -1978,7 +2609,20 @@ void EquationsApp::buildStepsDisplay() {
         lv_obj_set_size(srd->canvas.obj(), w, h);
         srd->canvas.invalidate();
         _stepRenderers.push_back(std::move(srd));
+        return true;
     };
+
+    if (steps.empty()) {
+        lv_obj_t* lbl = createStepLabel(0);
+        if (!lbl) {
+            failClosedStepRender(0);
+            return;
+        }
+        lv_label_set_text(lbl, "No steps available.");
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, LV_PART_MAIN);
+        lv_obj_set_style_text_color(lbl, lv_color_hex(COL_HINT_HEX), LV_PART_MAIN);
+        return;
+    }
 
     // ── 2. Iterate all steps ───────────────────────────────────────
     for (size_t i = 0; i < steps.size(); ++i) {
@@ -2004,7 +2648,11 @@ void EquationsApp::buildStepsDisplay() {
                          step.description.c_str());
             }
 
-            lv_obj_t* descLbl = lv_label_create(_stepsContainer);
+            lv_obj_t* descLbl = createStepLabel(static_cast<int>(i + 1));
+            if (!descLbl) {
+                failClosedStepRender(i + 1);
+                return;
+            }
             lv_label_set_text(descLbl, buf);
             lv_obj_set_width(descLbl, SCREEN_W - 2 * PAD - 8);
             lv_label_set_long_mode(descLbl, LV_LABEL_LONG_WRAP);
@@ -2018,7 +2666,10 @@ void EquationsApp::buildStepsDisplay() {
         // Any step with a SymExpr tree gets a mandatory MathCanvas
         if (step.mathExpr) {
             vpam::NodePtr astNode = cas::SymExprToAST::convert(step.mathExpr);
-            emitCanvas(std::move(astNode));
+            if (!emitCanvas(static_cast<int>(i + 1), std::move(astNode))) {
+                failClosedStepRender(i + 1);
+                return;
+            }
         }
 
         // ── 2c. MathCanvas for equation snapshots ──────────────────
@@ -2031,7 +2682,10 @@ void EquationsApp::buildStepsDisplay() {
             if (!eqText.empty() && eqText != "0" && eqText != "0 = 0") {
                 vpam::NodePtr snapNode =
                     cas::SymToAST::fromSymEquation(step.snapshot);
-                emitCanvas(std::move(snapNode));
+                if (!emitCanvas(static_cast<int>(i + 1), std::move(snapNode))) {
+                    failClosedStepRender(i + 1);
+                    return;
+                }
             }
         }
 
@@ -2066,7 +2720,10 @@ void EquationsApp::buildStepsDisplay() {
                 r->appendChild(makeOperator(OpKind::Add));
                 appendExactVPAM(r, im);
                 r->appendChild(makeConstant(ConstKind::Imag));
-                emitCanvas(std::move(row));
+                if (!emitCanvas(static_cast<int>(i + 1), std::move(row))) {
+                    failClosedStepRender(i + 1);
+                    return;
+                }
             }
 
             // Root 2: x2 = re - im·i
@@ -2080,13 +2737,20 @@ void EquationsApp::buildStepsDisplay() {
                 r->appendChild(makeOperator(OpKind::Sub));
                 appendExactVPAM(r, im);
                 r->appendChild(makeConstant(ConstKind::Imag));
-                emitCanvas(std::move(row));
+                if (!emitCanvas(static_cast<int>(i + 1), std::move(row))) {
+                    failClosedStepRender(i + 1);
+                    return;
+                }
             }
         }
     }
 
     // ── 3. Footer hint ─────────────────────────────────────────────
-    lv_obj_t* hintLbl = lv_label_create(_stepsContainer);
+    lv_obj_t* hintLbl = createStepLabel(static_cast<int>(steps.size()));
+    if (!hintLbl) {
+        failClosedStepRender(steps.size());
+        return;
+    }
     lv_label_set_text(hintLbl,
                       LV_SYMBOL_UP LV_SYMBOL_DOWN " Scroll    AC: Back");
     lv_obj_set_style_text_font(hintLbl, &lv_font_montserrat_12, LV_PART_MAIN);
@@ -2106,11 +2770,39 @@ void EquationsApp::buildStepsDisplay() {
 // ════════════════════════════════════════════════════════════════════════════
 
 void EquationsApp::buildCASStepsDisplay() {
-    if (_stepsContainer == nullptr) {
+    if (!isValidLvObj(_stepsContainer)) {
+        _stepsContainer = nullptr;
         return;
     }
     lv_obj_clean(_stepsContainer);
     _stepRenderers.clear();
+
+    static constexpr int16_t CANVAS_MAX_W =
+        static_cast<int16_t>(SCREEN_W - 2 * PAD - 8);
+
+    auto createScopedLabel = [&](int stepIndex) -> lv_obj_t* {
+        if (!isValidLvObj(_stepsContainer)) return nullptr;
+        logStepBudget(stepIndex);
+        if (!canAllocStep(STEPS_LABEL_BUDGET)) return nullptr;
+        return lv_label_create(_stepsContainer);
+    };
+
+    auto appendInfoLabel = [&](const char* text,
+                               uint32_t colorHex,
+                               int stepIndex = -1) -> bool {
+        lv_obj_t* lbl = createScopedLabel(stepIndex);
+        if (!lbl) return false;
+        lv_label_set_text(lbl, text);
+        lv_obj_set_width(lbl, CANVAS_MAX_W);
+        lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, LV_PART_MAIN);
+        lv_obj_set_style_text_color(lbl, lv_color_hex(colorHex), LV_PART_MAIN);
+        return true;
+    };
+
+    auto appendMemoryLimitReached = [&](std::size_t stepIndex = 0U) {
+        failClosedStepRender(stepIndex);
+    };
 
     // ── 1. Serialise the equation NodeRow to a text string ─────────────
     std::string eqText;
@@ -2120,7 +2812,8 @@ void EquationsApp::buildCASStepsDisplay() {
 
     // Verify it contains '='
     if (eqText.find('=') == std::string::npos) {
-        buildStepsDisplay();   // fall back
+        appendInfoLabel("Parse error: equation must include '='.", COL_ACCENT_HEX);
+        appendInfoLabel("STEPS unavailable for this input.", COL_HINT_HEX);
         return;
     }
 
@@ -2128,13 +2821,19 @@ void EquationsApp::buildCASStepsDisplay() {
     _casPool.reset();
     _casEngine.reset();
     _casPool   = std::make_unique<cas::CasMemoryPool>();
+    if (!_casPool || !_casPool->valid()) {
+        appendMemoryLimitReached();
+        return;
+    }
     _casEngine = std::make_unique<cas::RuleEngine>(*_casPool);
     _hasCasResult = false;
 
     char var = 'x';
     cas::NodePtr parsedEq = casParseEquation(eqText, *_casPool, var);
     if (!parsedEq) {
-        buildStepsDisplay();   // fall back
+        appendInfoLabel("CAS parse failed: unsupported equation format.",
+                        COL_ACCENT_HEX);
+        appendInfoLabel("Try a simpler algebraic form.", COL_HINT_HEX);
         return;
     }
 
@@ -2148,15 +2847,15 @@ void EquationsApp::buildCASStepsDisplay() {
 
     const auto& steps = _casResult.steps;
 
-    static constexpr int16_t CANVAS_MAX_W =
-        static_cast<int16_t>(SCREEN_W - 2 * PAD - 8);
-
     // Helper: emit a MathCanvas for a CAS tree with optional highlight
     auto emitCasCanvas = [&](const cas::NodePtr& tree,
                               const cas::NodePtr& highlight,
                               lv_color_t hlColor)
     {
-        if (!tree) return;
+        if (!tree) return true;
+        if (!isValidLvObj(_stepsContainer)) return false;
+        logStepBudget(-1);
+        if (!canAllocStep(STEPS_CANVAS_BUDGET)) return false;
 
         const vpam::MathNode* hlPtr = nullptr;
         vpam::NodePtr vpamTree;
@@ -2165,7 +2864,7 @@ void EquationsApp::buildCASStepsDisplay() {
         } else {
             vpamTree = cas::CasToVpam::convert(tree);
         }
-        if (!vpamTree) return;
+        if (!vpamTree) return true;
 
         // Wrap in a Row if needed
         if (vpamTree->type() != vpam::NodeType::Row) {
@@ -2180,7 +2879,7 @@ void EquationsApp::buildCASStepsDisplay() {
         srd->canvas.create(_stepsContainer);
         if (!srd->canvas.obj()) {
             printf("[CAS] emitCasCanvas: lv_obj_create failed\n");
-            return;
+            return false;
         }
 
         auto* row = static_cast<vpam::NodeRow*>(srd->nodeData.get());
@@ -2197,22 +2896,36 @@ void EquationsApp::buildCASStepsDisplay() {
         if (hlPtr) srd->canvas.setHighlightNode(hlPtr, hlColor);
         srd->canvas.invalidate();
         _stepRenderers.push_back(std::move(srd));
+        return true;
     };
+
+    bool memoryLimitHit = false;
 
     // ── 4a. Step 0 — Original Equation (always shown first) ─────────
     if (_stepsContainer != nullptr) {
-        lv_obj_t* descLbl = lv_label_create(_stepsContainer);
+        lv_obj_t* descLbl = createScopedLabel(0);
+        if (!descLbl) {
+            appendMemoryLimitReached(0);
+            return;
+        }
         lv_label_set_text(descLbl, "0. Original Equation");
         lv_obj_set_width(descLbl, CANVAS_MAX_W);
         lv_label_set_long_mode(descLbl, LV_LABEL_LONG_WRAP);
         lv_obj_set_style_text_font(descLbl, &lv_font_montserrat_12, LV_PART_MAIN);
         lv_obj_set_style_text_color(descLbl, lv_color_hex(COL_DESC_HEX), LV_PART_MAIN);
-        emitCasCanvas(parsedEq, nullptr, lv_color_hex(0x4FC3F7));
+        if (!emitCasCanvas(parsedEq, nullptr, lv_color_hex(0x4FC3F7))) {
+            appendMemoryLimitReached(0);
+            return;
+        }
     }
 
     if (steps.empty()) {
         if (_stepsContainer != nullptr) {
-            lv_obj_t* lbl = lv_label_create(_stepsContainer);
+            lv_obj_t* lbl = createScopedLabel(0);
+            if (!lbl) {
+                appendMemoryLimitReached(0);
+                return;
+            }
             lv_label_set_text(lbl, "No further steps available.");
             lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, LV_PART_MAIN);
             lv_obj_set_style_text_color(lbl, lv_color_hex(COL_HINT_HEX), LV_PART_MAIN);
@@ -2222,7 +2935,7 @@ void EquationsApp::buildCASStepsDisplay() {
 
     // ── 4b. Iterate steps ────────────────────────────────────
     for (std::size_t i = 0; i < steps.size(); ++i) {
-        if (_stepsContainer == nullptr) return;
+        if (!isValidLvObj(_stepsContainer)) return;
 
         const auto& step = steps[i];
 
@@ -2241,7 +2954,11 @@ void EquationsApp::buildCASStepsDisplay() {
             snprintf(buf, sizeof(buf), "%d. %s", (int)(i + 1),
                      step.ruleName.c_str());
 
-        lv_obj_t* descLbl = lv_label_create(_stepsContainer);
+        lv_obj_t* descLbl = createScopedLabel(static_cast<int>(i + 1));
+        if (!descLbl) {
+            memoryLimitHit = true;
+            break;
+        }
         lv_label_set_text(descLbl, buf);
         lv_obj_set_width(descLbl, CANVAS_MAX_W);
         lv_label_set_long_mode(descLbl, LV_LABEL_LONG_WRAP);
@@ -2252,13 +2969,25 @@ void EquationsApp::buildCASStepsDisplay() {
 
         // MathCanvas for this step's equation tree
         if (step.tree) {
-            emitCasCanvas(step.tree, step.affectedNode, hlColor);
+            if (!emitCasCanvas(step.tree, step.affectedNode, hlColor)) {
+                memoryLimitHit = true;
+                break;
+            }
         }
+    }
+
+    if (memoryLimitHit) {
+        appendMemoryLimitReached(steps.size());
+        return;
     }
 
     // ── 5. Footer hint ───────────────────────────────────────
     if (_stepsContainer != nullptr) {
-        lv_obj_t* hintLbl = lv_label_create(_stepsContainer);
+        lv_obj_t* hintLbl = createScopedLabel(static_cast<int>(steps.size()));
+        if (!hintLbl) {
+            appendMemoryLimitReached(steps.size());
+            return;
+        }
         lv_label_set_text(hintLbl, LV_SYMBOL_UP LV_SYMBOL_DOWN " Scroll    AC: Back");
         lv_obj_set_style_text_font(hintLbl, &lv_font_montserrat_12, LV_PART_MAIN);
         lv_obj_set_style_text_color(hintLbl, lv_color_hex(COL_HINT_HEX),
@@ -2271,11 +3000,35 @@ void EquationsApp::buildCASStepsDisplay() {
 // ════════════════════════════════════════════════════════════════════════════
 
 void EquationsApp::buildSystemCASStepsDisplay() {
-    if (_stepsContainer == nullptr) {
+    if (!isValidLvObj(_stepsContainer)) {
+        _stepsContainer = nullptr;
         return;
     }
     lv_obj_clean(_stepsContainer);
     _stepRenderers.clear();
+
+    static constexpr int16_t CANVAS_MAX_W =
+        static_cast<int16_t>(SCREEN_W - 2 * PAD - 8);
+
+    auto createScopedLabel = [&](int stepIndex) -> lv_obj_t* {
+        if (!isValidLvObj(_stepsContainer)) return nullptr;
+        logStepBudget(stepIndex);
+        if (!canAllocStep(STEPS_LABEL_BUDGET)) return nullptr;
+        return lv_label_create(_stepsContainer);
+    };
+
+    auto appendInfoLabel = [&](const char* text,
+                               uint32_t colorHex,
+                               int stepIndex = -1) -> bool {
+        lv_obj_t* lbl = createScopedLabel(stepIndex);
+        if (!lbl) return false;
+        lv_label_set_text(lbl, text);
+        lv_obj_set_width(lbl, CANVAS_MAX_W);
+        lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, LV_PART_MAIN);
+        lv_obj_set_style_text_color(lbl, lv_color_hex(colorHex), LV_PART_MAIN);
+        return true;
+    };
 
     // ── 1. Serialise both equation rows to text ────────────────────────
     std::string eq1Text, eq2Text;
@@ -2284,7 +3037,8 @@ void EquationsApp::buildSystemCASStepsDisplay() {
 
     if (eq1Text.find('=') == std::string::npos ||
         eq2Text.find('=') == std::string::npos) {
-        buildStepsDisplay();
+        appendInfoLabel("Parse error: invalid system equations.", COL_ACCENT_HEX);
+        appendInfoLabel("Both equations must include '='.", COL_HINT_HEX);
         return;
     }
 
@@ -2296,7 +3050,9 @@ void EquationsApp::buildSystemCASStepsDisplay() {
     cas::NodePtr parsedEq1 = casParseEquation(eq1Text, *_casPool, var1);
     cas::NodePtr parsedEq2 = casParseEquation(eq2Text, *_casPool, var2);
     if (!parsedEq1 || !parsedEq2) {
-        buildStepsDisplay();
+        appendInfoLabel("CAS parse failed: unsupported system format.",
+                        COL_ACCENT_HEX);
+        appendInfoLabel("Try simpler linear equations.", COL_HINT_HEX);
         return;
     }
 
@@ -2304,14 +3060,15 @@ void EquationsApp::buildSystemCASStepsDisplay() {
     cas::SystemTutorResult result = cas::SystemTutor::solveSystem(
         parsedEq1, parsedEq2, *_casPool, var1, var2);
 
-    static constexpr int16_t CANVAS_MAX_W =
-        static_cast<int16_t>(SCREEN_W - 2 * PAD - 8);
-
     // Helper: emit a MathCanvas for a CAS tree as a child of `_stepsContainer`
     auto emitSysCasCanvas = [&](const cas::NodePtr& tree) {
-        if (!tree) return;
+        if (!tree) return true;
+        if (!isValidLvObj(_stepsContainer)) return false;
+        logStepBudget(-1);
+        if (!canAllocStep(STEPS_CANVAS_BUDGET)) return false;
+
         vpam::NodePtr vpamTree = cas::CasToVpam::convert(tree);
-        if (!vpamTree) return;
+        if (!vpamTree) return true;
 
         if (vpamTree->type() != vpam::NodeType::Row) {
             auto rowWrap = vpam::makeRow();
@@ -2325,7 +3082,7 @@ void EquationsApp::buildSystemCASStepsDisplay() {
         srd->canvas.create(_stepsContainer);
         if (!srd->canvas.obj()) {
             printf("[SYS] emitSysCasCanvas: lv_obj_create failed\n");
-            return;
+            return false;
         }
 
         auto* row = static_cast<vpam::NodeRow*>(srd->nodeData.get());
@@ -2340,10 +3097,19 @@ void EquationsApp::buildSystemCASStepsDisplay() {
         lv_obj_set_size(srd->canvas.obj(), w, h);
         srd->canvas.invalidate();
         _stepRenderers.push_back(std::move(srd));
+        return true;
+    };
+
+    auto appendMemoryLimitReached = [&](std::size_t stepIndex = 0U) {
+        failClosedStepRender(stepIndex);
     };
 
     // ── 4. Header ─────────────────────────────────────────────────────
-    lv_obj_t* headerLbl = lv_label_create(_stepsContainer);
+    lv_obj_t* headerLbl = createScopedLabel(0);
+    if (!headerLbl) {
+        appendMemoryLimitReached(0);
+        return;
+    }
     lv_label_set_text(headerLbl, "System of Equations");
     lv_obj_set_width(headerLbl, CANVAS_MAX_W);
     lv_label_set_long_mode(headerLbl, LV_LABEL_LONG_WRAP);
@@ -2351,17 +3117,27 @@ void EquationsApp::buildSystemCASStepsDisplay() {
     lv_obj_set_style_text_color(headerLbl, lv_color_hex(COL_ACCENT_HEX), LV_PART_MAIN);
 
     // ── 5. Original equations ──────────────────────────────────────────
-    lv_obj_t* origLbl = lv_label_create(_stepsContainer);
+    lv_obj_t* origLbl = createScopedLabel(0);
+    if (!origLbl) {
+        appendMemoryLimitReached(0);
+        return;
+    }
     lv_label_set_text(origLbl, "0. Original System");
     lv_obj_set_width(origLbl, CANVAS_MAX_W);
     lv_label_set_long_mode(origLbl, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_font(origLbl, &lv_font_montserrat_12, LV_PART_MAIN);
     lv_obj_set_style_text_color(origLbl, lv_color_hex(COL_DESC_HEX), LV_PART_MAIN);
-    emitSysCasCanvas(parsedEq1);
-    emitSysCasCanvas(parsedEq2);
+    if (!emitSysCasCanvas(parsedEq1) || !emitSysCasCanvas(parsedEq2)) {
+        appendMemoryLimitReached(0);
+        return;
+    }
 
     if (result.steps.empty()) {
-        lv_obj_t* lbl = lv_label_create(_stepsContainer);
+        lv_obj_t* lbl = createScopedLabel(0);
+        if (!lbl) {
+            appendMemoryLimitReached(0);
+            return;
+        }
         lv_label_set_text(lbl, "No further steps available.");
         lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, LV_PART_MAIN);
         lv_obj_set_style_text_color(lbl, lv_color_hex(COL_HINT_HEX), LV_PART_MAIN);
@@ -2370,7 +3146,7 @@ void EquationsApp::buildSystemCASStepsDisplay() {
 
     // ── 6. Iterate SystemTutor steps ───────────────────────────────────
     for (std::size_t i = 0; i < result.steps.size(); ++i) {
-        if (_stepsContainer == nullptr) return;
+        if (!isValidLvObj(_stepsContainer)) return;
 
         const auto& step = result.steps[i];
 
@@ -2383,8 +3159,17 @@ void EquationsApp::buildSystemCASStepsDisplay() {
             snprintf(buf, sizeof(buf), "%d. %s", (int)(i + 1),
                      step.ruleName.c_str());
 
+        logStepBudget(static_cast<int>(i + 1));
+        if (!canAllocStep(STEPS_CANVAS_BUDGET)) {
+            appendMemoryLimitReached(i + 1);
+            return;
+        }
+
         lv_obj_t* stepRow = lv_obj_create(_stepsContainer);
-        if (!stepRow) return;
+        if (!stepRow) {
+            appendMemoryLimitReached(i + 1);
+            return;
+        }
         lv_obj_set_width(stepRow, CANVAS_MAX_W);
         lv_obj_set_height(stepRow, LV_SIZE_CONTENT);
         lv_obj_set_style_bg_opa(stepRow, LV_OPA_TRANSP, LV_PART_MAIN);
@@ -2394,20 +3179,37 @@ void EquationsApp::buildSystemCASStepsDisplay() {
         lv_obj_set_flex_flow(stepRow, LV_FLEX_FLOW_COLUMN);
         lv_obj_remove_flag(stepRow, LV_OBJ_FLAG_SCROLLABLE);
 
+        logStepBudget(static_cast<int>(i + 1));
+        if (!canAllocStep(STEPS_LABEL_BUDGET)) {
+            appendMemoryLimitReached(i + 1);
+            return;
+        }
+
         lv_obj_t* descLbl = lv_label_create(stepRow);
+        if (!descLbl) {
+            appendMemoryLimitReached(i + 1);
+            return;
+        }
         lv_label_set_text(descLbl, buf);
         lv_obj_set_width(descLbl, CANVAS_MAX_W);
         lv_label_set_long_mode(descLbl, LV_LABEL_LONG_WRAP);
         lv_obj_set_style_text_font(descLbl, &lv_font_montserrat_12, LV_PART_MAIN);
         lv_obj_set_style_text_color(descLbl, lv_color_hex(COL_DESC_HEX), LV_PART_MAIN);
 
-        if (step.eq1Tree) emitSysCasCanvas(step.eq1Tree);
-        if (step.eq2Tree) emitSysCasCanvas(step.eq2Tree);
+        if ((step.eq1Tree && !emitSysCasCanvas(step.eq1Tree)) ||
+            (step.eq2Tree && !emitSysCasCanvas(step.eq2Tree))) {
+            appendMemoryLimitReached(i + 1);
+            return;
+        }
     }
 
     // ── 7. Footer hint ────────────────────────────────────────────────
     if (_stepsContainer != nullptr) {
-        lv_obj_t* hintLbl = lv_label_create(_stepsContainer);
+        lv_obj_t* hintLbl = createScopedLabel(static_cast<int>(result.steps.size()));
+        if (!hintLbl) {
+            appendMemoryLimitReached(result.steps.size());
+            return;
+        }
         lv_label_set_text(hintLbl, LV_SYMBOL_UP LV_SYMBOL_DOWN " Scroll    AC: Back");
         lv_obj_set_style_text_font(hintLbl, &lv_font_montserrat_12, LV_PART_MAIN);
         lv_obj_set_style_text_color(hintLbl, lv_color_hex(COL_HINT_HEX), LV_PART_MAIN);

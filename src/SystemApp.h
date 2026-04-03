@@ -179,6 +179,8 @@ private:
 
     // ── App transitions ──
     void switchApp(int id);
+    void teardownModeNow(Mode mode);
+    void flushPendingTeardownNow(const char* reason);
 
     /**
      * Vuelve al modo MENU, reanuda LVGL y recarga el launcher screen.

@@ -20,7 +20,26 @@
 #include <algorithm>
 #include <cassert>
 
+#ifdef ARDUINO
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#else
+#include <thread>
+#endif
+
 namespace cas {
+
+namespace {
+
+static inline void cooperativeYield() {
+#ifdef ARDUINO
+    vTaskDelay(1);
+#else
+    std::this_thread::yield();
+#endif
+}
+
+} // namespace
 
 // ═════════════════════════════════════════════════════════════════════════════
 // §1 — rulePhaseName
@@ -691,6 +710,12 @@ RuleEngine::SolveResult RuleEngine::applyToFixedPoint(const NodePtr& root,
         log.affectedNode = r.affectedNode;
         solveResult.steps.push_back(std::move(log));
         current = r.newTree;
+
+        // Cooperative checkpoint to avoid starving scheduler/WDT under
+        // long rewrite chains.
+        if ((step % 8U) == 0U) {
+            cooperativeYield();
+        }
     }
 
     solveResult.finalTree = current;

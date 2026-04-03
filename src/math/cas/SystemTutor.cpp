@@ -8,7 +8,26 @@
 #include "AlgebraicRules.h"
 #include <cmath>
 
+#ifdef ARDUINO
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#else
+#include <thread>
+#endif
+
 namespace cas {
+
+namespace {
+
+static inline void cooperativeYield() {
+#ifdef ARDUINO
+    vTaskDelay(1);
+#else
+    std::this_thread::yield();
+#endif
+}
+
+} // namespace
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -120,6 +139,7 @@ NodePtr SystemTutor::runEngine(const NodePtr& eq, CasMemoryPool& pool,
         engine.addRule(std::move(rule));
 
     auto result = engine.applyToFixedPoint(eq, 80);
+    cooperativeYield();
     checkNonLinearHandover(result, var);
     appendEngineSteps(result, out, true);
     return result.finalTree;
@@ -184,6 +204,7 @@ SystemTutorResult SystemTutor::bySubstitution(const NodePtr& eq1,
         for (auto& rule : makeAlgebraicRules(pool, var2))
             eng1.addRule(std::move(rule));
         auto r1 = eng1.applyToFixedPoint(eq1, 80);
+        cooperativeYield();
         appendEngineSteps(r1, res.steps, true);
         workingEq1 = r1.finalTree;
         isolatedExpr = getIsolatedRHS(workingEq1, var2);
@@ -211,6 +232,7 @@ SystemTutorResult SystemTutor::bySubstitution(const NodePtr& eq1,
     for (auto& rule : makeAlgebraicRules(pool, var1))
         eng2.addRule(std::move(rule));
     auto r2 = eng2.applyToFixedPoint(substituted, 80);
+    cooperativeYield();
     checkNonLinearHandover(r2, var1);
     appendEngineSteps(r2, res.steps, false);
     NodePtr solvedVar1 = r2.finalTree;
@@ -233,6 +255,7 @@ SystemTutorResult SystemTutor::bySubstitution(const NodePtr& eq1,
         for (auto& rule : makeAlgebraicRules(pool, var2))
             eng3.addRule(std::move(rule));
         auto r3 = eng3.applyToFixedPoint(backSub, 80);
+        cooperativeYield();
         appendEngineSteps(r3, res.steps, true);
     }
 
@@ -297,6 +320,7 @@ SystemTutorResult SystemTutor::byElimination(const NodePtr& eq1,
     for (auto& rule : makeAlgebraicRules(pool, solveFor))
         eng1.addRule(std::move(rule));
     auto r1 = eng1.applyToFixedPoint(combined, 80);
+    cooperativeYield();
     checkNonLinearHandover(r1, solveFor);
     appendEngineSteps(r1, res.steps, true);
 
@@ -320,6 +344,7 @@ SystemTutorResult SystemTutor::byElimination(const NodePtr& eq1,
         for (auto& rule : makeAlgebraicRules(pool, backVar))
             eng2.addRule(std::move(rule));
         auto r2 = eng2.applyToFixedPoint(backSub, 80);
+        cooperativeYield();
         appendEngineSteps(r2, res.steps, true);
     }
 
@@ -379,6 +404,7 @@ SystemTutorResult SystemTutor::byEquating(const NodePtr& eq1,
     for (auto& rule : makeAlgebraicRules(pool, solveFor))
         eng.addRule(std::move(rule));
     auto r1 = eng.applyToFixedPoint(equated, 80);
+    cooperativeYield();
     checkNonLinearHandover(r1, solveFor);
     appendEngineSteps(r1, res.steps, true);
 
@@ -400,6 +426,7 @@ SystemTutorResult SystemTutor::byEquating(const NodePtr& eq1,
         for (auto& rule : makeAlgebraicRules(pool, isolVar))
             eng2.addRule(std::move(rule));
         auto r2 = eng2.applyToFixedPoint(backSub, 80);
+        cooperativeYield();
         appendEngineSteps(r2, res.steps, true);
     }
 

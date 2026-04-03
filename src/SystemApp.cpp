@@ -154,6 +154,46 @@ void SystemApp::initApps() {
     _apps.emplace_back(19, "Fractals",     icon_Grapher);
 }
 
+void SystemApp::teardownModeNow(Mode mode) {
+    switch (mode) {
+        case Mode::APP_CALCULATION:    if (_calcApp)         _calcApp->end();         break;
+        case Mode::APP_EQUATIONS:      if (_equationsApp)    _equationsApp->end();    break;
+        case Mode::APP_CALCULUS:       if (_calculusApp)     _calculusApp->end();     break;
+        case Mode::APP_GRAPHER:        if (_grapherApp)      _grapherApp->end();      break;
+        case Mode::APP_SETTINGS:       if (_settingsApp)     _settingsApp->end();     break;
+        case Mode::APP_STATISTICS:     if (_statisticsApp)   _statisticsApp->end();   break;
+        case Mode::APP_PROBABILITY:    if (_probabilityApp)  _probabilityApp->end();  break;
+        case Mode::APP_REGRESSION:     if (_regressionApp)   _regressionApp->end();   break;
+        case Mode::APP_MATRICES:       if (_matricesApp)     _matricesApp->end();     break;
+        case Mode::APP_PYTHON:         if (_pythonApp)       _pythonApp->end();       break;
+        case Mode::APP_SEQUENCES:      if (_sequencesApp)    _sequencesApp->end();    break;
+        case Mode::APP_PERIODIC_TABLE: if (_periodicTableApp) _periodicTableApp->end(); break;
+        case Mode::APP_BRIDGE_DESIGNER: if (_bridgeDesignerApp) _bridgeDesignerApp->end(); break;
+        case Mode::APP_CIRCUIT_CORE:   if (_circuitCoreApp)  _circuitCoreApp->end();  break;
+        case Mode::APP_FLUID_2D:       if (_fluid2DApp)      _fluid2DApp->end();      break;
+        case Mode::APP_PARTICLE_LAB:   if (_particleLabApp)  _particleLabApp->end();  break;
+        case Mode::APP_NEURAL_LAB:     if (_neuralLabApp)    _neuralLabApp->end();    break;
+        case Mode::APP_OPTICS_LAB:     if (_opticsLabApp)    _opticsLabApp->end();    break;
+        case Mode::APP_NEO_LANGUAGE:   if (_neoLangApp)      _neoLangApp->end();      break;
+        case Mode::APP_FRACTAL:        if (_fractalApp)      _fractalApp->end();      break;
+        default: break;
+    }
+}
+
+void SystemApp::flushPendingTeardownNow(const char* reason) {
+    if (_pendingTeardownMode == Mode::MENU) {
+        return;
+    }
+
+    Serial.printf("[RTM] Immediate teardown (%s): destroying mode=%d\n",
+                  reason ? reason : "unspecified",
+                  (int)_pendingTeardownMode);
+    teardownModeNow(_pendingTeardownMode);
+    _pendingTeardownMode = Mode::MENU;
+    _teardownStartMs = 0;
+    Serial.println("[RTM] Immediate teardown complete.");
+}
+
 
 // ═════════════════════════════════════════════════
 // update() — Main loop tick (called every frame)
@@ -167,29 +207,7 @@ void SystemApp::update() {
         millis() - _teardownStartMs > 250) {
         Serial.printf("[RTM] Deferred teardown: destroying mode=%d\n",
                       (int)_pendingTeardownMode);
-        switch (_pendingTeardownMode) {
-            case Mode::APP_CALCULATION:  if (_calcApp)        _calcApp->end();         break;
-            case Mode::APP_EQUATIONS:    if (_equationsApp)   _equationsApp->end();    break;
-            case Mode::APP_CALCULUS:     if (_calculusApp)    _calculusApp->end();     break;
-            case Mode::APP_GRAPHER:      if (_grapherApp)     _grapherApp->end();      break;
-            case Mode::APP_SETTINGS:     if (_settingsApp)    _settingsApp->end();     break;
-            case Mode::APP_STATISTICS:   if (_statisticsApp)  _statisticsApp->end();   break;
-            case Mode::APP_PROBABILITY:  if (_probabilityApp) _probabilityApp->end();  break;
-            case Mode::APP_REGRESSION:   if (_regressionApp)  _regressionApp->end();   break;
-            case Mode::APP_MATRICES:     if (_matricesApp)    _matricesApp->end();     break;
-            case Mode::APP_PYTHON:       if (_pythonApp)      _pythonApp->end();       break;
-            case Mode::APP_SEQUENCES:    if (_sequencesApp)   _sequencesApp->end();    break;
-            case Mode::APP_PERIODIC_TABLE: if (_periodicTableApp) _periodicTableApp->end(); break;
-            case Mode::APP_BRIDGE_DESIGNER: if (_bridgeDesignerApp) _bridgeDesignerApp->end(); break;
-            case Mode::APP_CIRCUIT_CORE: if (_circuitCoreApp) _circuitCoreApp->end(); break;
-            case Mode::APP_FLUID_2D: if (_fluid2DApp) _fluid2DApp->end(); break;
-            case Mode::APP_PARTICLE_LAB: if (_particleLabApp) _particleLabApp->end(); break;
-            case Mode::APP_NEURAL_LAB: if (_neuralLabApp) _neuralLabApp->end(); break;
-            case Mode::APP_OPTICS_LAB: if (_opticsLabApp) _opticsLabApp->end(); break;
-            case Mode::APP_NEO_LANGUAGE: if (_neoLangApp)  _neoLangApp->end();   break;
-            case Mode::APP_FRACTAL:    if (_fractalApp)    _fractalApp->end();   break;
-            default: break;
-        }
+        teardownModeNow(_pendingTeardownMode);
         _pendingTeardownMode = Mode::MENU;  // mark as done
         Serial.println("[RTM] Deferred teardown complete.");
     }
@@ -208,7 +226,10 @@ void SystemApp::update() {
     } else if (_mode == Mode::APP_CALCULUS) {
         // LVGL handles CalculusApp rendering
     } else if (_mode == Mode::APP_EQUATIONS) {
-        // LVGL handles EquationsApp rendering
+        // EquationsApp uses a cooperative update tick for staged pipelines.
+        if (_equationsApp && _equationsApp->isActive()) {
+            _equationsApp->update();
+        }
     } else if (_mode == Mode::APP_GRAPHER) {
         // LVGL handles GrapherApp rendering
     } else if (_mode == Mode::APP_SETTINGS) {
@@ -448,7 +469,7 @@ void SystemApp::handleKey(const KeyEvent &ev) {
         case Mode::APP_EQUATIONS:
             if (ev.code == KeyCode::MODE) {
                 returnToMenu();
-            } else if (_equationsApp) {
+            } else if (_equationsApp && _equationsApp->isActive()) {
                 _equationsApp->handleKey(ev);
             }
             break;
@@ -654,6 +675,11 @@ void SystemApp::launchApp(int id) {
     // Ensure LVGL layout is finalized before switching screens.
     // Prevents crashes when launching from a card that was scrolled off-screen.
     lv_obj_update_layout(lv_scr_act());
+
+    // ADR/I2: any pending deferred teardown must be fully resolved before
+    // entering a new app lifecycle. This avoids stale delayed end() calls
+    // invalidating a freshly relaunched app.
+    flushPendingTeardownNow("launchApp");
 
     if (id == 0) {
         // CalculationApp es LVGL-native: LVGL sigue activo
