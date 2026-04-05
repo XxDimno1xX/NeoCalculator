@@ -185,6 +185,7 @@ private:
     std::vector<cas::SystemTutorStep>     _stepsSystemPendingLogs;
     cas::SolveResult                      _stepsTutorResult;
     bool                                  _stepsTutorActive = false;
+    cas::SymExprArena                     _stepsTutorArena;
 
     std::size_t _stepsSolveIterations = 0;
     std::size_t _stepsRenderIndex = 0;

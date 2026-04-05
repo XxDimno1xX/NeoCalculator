@@ -142,8 +142,21 @@ std::string PedagogicalLogger::buildPhrase(SolveAction action,
 
     // ── Quadratic ──────────────────────────────────────────────────
 
-    case SolveAction::QUAD_IDENTIFY_COEFFICIENTS:
+    case SolveAction::QUAD_IDENTIFY_COEFFICIENTS: {
+        const CASNumber* a = findVal(ctx, "a");
+        const CASNumber* b = findVal(ctx, "b");
+        const CASNumber* c = findVal(ctx, "c");
+        if (a && b && c) {
+            std::string phrase = "Identifying coefficients: a = ";
+            phrase += a->toString();
+            phrase += ", b = ";
+            phrase += b->toString();
+            phrase += ", c = ";
+            phrase += c->toString();
+            return phrase;
+        }
         return "Identifying coefficients:";
+    }
 
     case SolveAction::QUAD_COMPUTE_DISCRIMINANT:
         return "Computing the discriminant:";
@@ -504,19 +517,8 @@ void PedagogicalLogger::logAction(SolveAction action,
 
     // ── Identify coefficients: emit text + the standard form ──────
     case SolveAction::QUAD_IDENTIFY_COEFFICIENTS: {
-        if (ar) {
-            const CASNumber* a = findVal(ctx, "a");
-            const CASNumber* b = findVal(ctx, "b");
-            const CASNumber* c = findVal(ctx, "c");
-            if (ctx.customExpr) {
-                logExpr(phrase, ctx.customExpr, method);
-            } else if (a && b && c) {
-                logExpr(phrase,
-                        buildQuadraticDisplayExpr(*ar, ctx.variable, *a, *b, *c),
-                        method);
-            } else {
-                logNote(phrase, method);
-            }
+        if (ctx.customExpr) {
+            logExpr(phrase, ctx.customExpr, method);
         } else {
             logNote(phrase, method);
         }

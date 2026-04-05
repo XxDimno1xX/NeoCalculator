@@ -180,8 +180,16 @@ NodeOperator::NodeOperator(OpKind op)
 }
 
 void NodeOperator::calculateLayout(const FontMetrics& fm) {
-    // Ancho: 1 carácter + padding a cada lado
-    _layout.width   = fm.charWidth + OP_PAD * 2;
+    // Ancho: 1 carácter + padding a cada lado.
+    // PlusMinus needs extra room to avoid clipping in low-resolution vector drawing.
+    if (_op == OpKind::PlusMinus) {
+        _layout.width   = static_cast<int16_t>(fm.charWidth + OP_PAD * 2 + 2);
+        _layout.ascent  = static_cast<int16_t>(fm.ascent + 1);
+        _layout.descent = static_cast<int16_t>(fm.descent + 1);
+        return;
+    }
+
+    _layout.width   = static_cast<int16_t>(fm.charWidth + OP_PAD * 2);
     _layout.ascent  = fm.ascent;
     _layout.descent = fm.descent;
 }

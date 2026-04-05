@@ -370,6 +370,7 @@ void EquationsApp::resetStepsPipeline() {
     _stepsSystemPendingLogs.clear();
     _stepsTutorResult = cas::SolveResult();
     _stepsTutorActive = false;
+    _stepsTutorArena.reset();
     _stepsSolveIterations = 0;
     _stepsRenderIndex = 0;
     _stepsProgressLabel = nullptr;
@@ -1195,6 +1196,9 @@ void EquationsApp::update() {
             _stepsHeaderRendered = false;
             _stepsCasPendingLogs.clear();
             _stepsSystemPendingLogs.clear();
+            _stepsTutorResult = cas::SolveResult();
+            _stepsTutorActive = false;
+            _stepsTutorArena.reset();
             _stepsParsedEq1.reset();
             _stepsParsedEq2.reset();
             _stepsCurrentTree.reset();
@@ -1284,6 +1288,7 @@ void EquationsApp::update() {
 
                 _stepsTutorResult = cas::SolveResult();
                 _stepsTutorActive = false;
+                _stepsTutorArena.reset();
 
                 bool hasHandover = false;
                 for (const auto& step : _casResult.steps) {
@@ -1298,7 +1303,7 @@ void EquationsApp::update() {
                     NodePtr rhsTree;
                     if (splitAtEquals(_eqRowData[0], lhsTree, rhsTree)) {
                         cas::ASTFlattener flattener;
-                        flattener.setArena(&_arena);
+                        flattener.setArena(&_stepsTutorArena);
                         auto eqFlat = flattener.flattenEquation(lhsTree.get(), rhsTree.get());
                         if (eqFlat.ok && !eqFlat.transcendental) {
                             cas::PedagogicalLogger tutorLog;
@@ -1307,16 +1312,16 @@ void EquationsApp::update() {
                             bool ranTutor = false;
                             if (degree == 2) {
                                 _stepsTutorResult = cas::solveQuadraticTutor(eqFlat.eq, _stepsVar1,
-                                                                             tutorLog, &_arena);
+                                                                             tutorLog, &_stepsTutorArena);
                                 ranTutor = true;
                             } else if (degree == 3) {
                                 _stepsTutorResult = cas::solveCubicTutor(eqFlat.eq, _stepsVar1,
-                                                                         tutorLog, &_arena);
+                                                                         tutorLog, &_stepsTutorArena);
                                 ranTutor = true;
                             }
                             if (ranTutor) {
                                 _stepsTutorResult.steps = std::move(tutorLog);
-                                _stepsTutorActive = _stepsTutorResult.ok;
+                                _stepsTutorActive = (_stepsTutorResult.steps.count() > 0U);
                             }
                         }
                     }
@@ -1325,9 +1330,7 @@ void EquationsApp::update() {
                 _stepsCurrentTree = _casResult.finalTree;
                 _stepsCasPendingLogs = _casResult.steps;
                 _stepsSolveIterations = _stepsCasPendingLogs.size();
-                if (_stepsTutorActive) {
-                    _stepsSolveIterations += _stepsTutorResult.steps.count();
-                }
+                _stepsSolveIterations += _stepsTutorResult.steps.count();
                 _stepsReachedFixedPoint = _casResult.reachedFixedPoint;
 
                 _hasCasResult = true;
@@ -1360,6 +1363,9 @@ void EquationsApp::update() {
             }
 
             if (_stepsSource == StepsSource::SINGLE_CAS) {
+                const std::size_t casStepCount = _stepsCasPendingLogs.size();
+                const std::size_t tutorStepCount = _stepsTutorResult.steps.count();
+
                 if (_stepsRenderIndex == 0) {
                     if (!appendMessage(0, "0. Original Equation", COL_DESC_HEX) ||
                         !emitCasCanvas(0, _stepsParsedEq1, nullptr,
@@ -1373,12 +1379,12 @@ void EquationsApp::update() {
                 constexpr std::size_t kRenderBudgetPerTick = 2;
                 std::size_t rendered = 0;
                 while (_stepsRenderIndex > 0 &&
-                       (_stepsRenderIndex - 1) < _casResult.steps.size() &&
+                       (_stepsRenderIndex - 1) < casStepCount &&
                        rendered < kRenderBudgetPerTick)
                 {
                     const std::size_t idx = _stepsRenderIndex - 1;
-                    const auto& step = _casResult.steps[idx];
-                    const bool isFinal = (idx == _casResult.steps.size() - 1) ||
+                    const auto& step = _stepsCasPendingLogs[idx];
+                    const bool isFinal = (idx == casStepCount - 1) ||
                                          (step.ruleName == cas::RULE_NONLINEAR_HANDOVER);
                     const uint32_t descColHex = isFinal ? COL_ACCENT_HEX : COL_DESC_HEX;
                     const lv_color_t hlColor = isFinal ? lv_color_hex(0xFFB300)
@@ -1403,14 +1409,13 @@ void EquationsApp::update() {
                     ++rendered;
                 }
 
-                const std::size_t casStepCount = _casResult.steps.size();
-                while (_stepsTutorActive && rendered < kRenderBudgetPerTick) {
+                while (rendered < kRenderBudgetPerTick) {
                     if ((_stepsRenderIndex - 1) < casStepCount) break;
                     const std::size_t tutorIdx = (_stepsRenderIndex - 1) - casStepCount;
-                    if (tutorIdx >= _stepsTutorResult.steps.count()) break;
+                    if (tutorIdx >= tutorStepCount) break;
                     const auto& step = _stepsTutorResult.steps.steps()[tutorIdx];
                     const bool isFinal =
-                        (tutorIdx + 1 == _stepsTutorResult.steps.count()) &&
+                        (tutorIdx + 1 == tutorStepCount) &&
                         (step.kind == cas::StepKind::Result ||
                          step.kind == cas::StepKind::ComplexResult);
                     const uint32_t descColHex = isFinal ? COL_ACCENT_HEX : COL_DESC_HEX;
@@ -1499,9 +1504,8 @@ void EquationsApp::update() {
                 }
 
                 if (_stepsStage == StepsStage::RENDER_CHUNK) {
-                    const std::size_t totalCas = _casResult.steps.size();
-                    const std::size_t totalTutor =
-                        _stepsTutorActive ? _stepsTutorResult.steps.count() : 0U;
+                    const std::size_t totalCas = casStepCount;
+                    const std::size_t totalTutor = tutorStepCount;
                     const std::size_t totalSteps = totalCas + totalTutor;
                     if ((_stepsRenderIndex - 1) >= totalSteps) {
                         if (!appendHint(static_cast<int>(_stepsRenderIndex - 1))) {

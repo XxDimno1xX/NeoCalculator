@@ -12,6 +12,7 @@
 
 #include "MathRenderer.h"
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace vpam {
@@ -677,25 +678,42 @@ void MathCanvas::drawOperator(lv_layer_t* layer, const NodeOperator* node,
     lv_color_t color = _highlightActive ? _highlightColor : lv_color_hex(0x333333);
 
     if (node->op() == OpKind::PlusMinus) {
-        int16_t glyphW = std::max<int16_t>(fm.charWidth - 2, 6);
+        const auto& opL = node->layout();
+        int16_t glyphW = static_cast<int16_t>(
+            std::max<int16_t>(opL.width - 2 * NodeOperator::OP_PAD, 7));
         int16_t glyphCenterX = static_cast<int16_t>(textX + glyphW / 2);
-        int16_t axisY = static_cast<int16_t>(yBaseline - fm.axisHeight());
-        int16_t minusHalfW = static_cast<int16_t>(std::max<int16_t>(glyphW / 2, 3));
-        int16_t plusCenterY = static_cast<int16_t>(axisY - std::max<int16_t>(fm.ascent / 3, 3));
+
+        // Keep all strokes inside the operator box to prevent top/bottom clipping.
+        int16_t topY = static_cast<int16_t>(yBaseline - fm.ascent + 1);
+        int16_t bottomY = static_cast<int16_t>(yBaseline + fm.descent - 1);
+        int16_t minusY = static_cast<int16_t>(yBaseline - fm.axisHeight() + 1);
+        minusY = std::max<int16_t>(topY + 1, std::min<int16_t>(minusY, bottomY - 1));
+
+        int16_t minusHalfW = static_cast<int16_t>(std::max<int16_t>((glyphW / 2) - 1, 3));
         int16_t plusHalf = static_cast<int16_t>(std::max<int16_t>(glyphW / 5, 2));
-        int16_t stroke = static_cast<int16_t>(std::max<int16_t>(1, glyphW / 8));
+        int16_t plusCenterY = static_cast<int16_t>(minusY - std::max<int16_t>(fm.ascent / 4, 2));
+        plusCenterY = std::max<int16_t>(
+            static_cast<int16_t>(topY + plusHalf),
+            std::min<int16_t>(plusCenterY,
+                              static_cast<int16_t>(bottomY - plusHalf)));
+
+        int16_t stroke = static_cast<int16_t>(std::max<int16_t>(1, glyphW / 9));
 
         drawLine(layer,
-                 static_cast<int16_t>(glyphCenterX - minusHalfW), axisY,
-                 static_cast<int16_t>(glyphCenterX + minusHalfW), axisY,
+                 static_cast<int16_t>(glyphCenterX - minusHalfW), minusY,
+                 static_cast<int16_t>(glyphCenterX + minusHalfW), minusY,
                  stroke, color);
         drawLine(layer,
                  static_cast<int16_t>(glyphCenterX - plusHalf), plusCenterY,
                  static_cast<int16_t>(glyphCenterX + plusHalf), plusCenterY,
                  stroke, color);
         drawLine(layer,
-                 glyphCenterX, static_cast<int16_t>(plusCenterY - plusHalf),
-                 glyphCenterX, static_cast<int16_t>(plusCenterY + plusHalf),
+                 glyphCenterX,
+                 static_cast<int16_t>(std::max<int16_t>(
+                     topY, static_cast<int16_t>(plusCenterY - plusHalf))),
+                 glyphCenterX,
+                 static_cast<int16_t>(std::min<int16_t>(
+                     bottomY, static_cast<int16_t>(plusCenterY + plusHalf))),
                  stroke, color);
         return;
     }
@@ -865,38 +883,19 @@ void MathCanvas::drawParen(lv_layer_t* layer, const NodeParen* node,
 
     int16_t yTop    = static_cast<int16_t>(yBaseline - parenL.ascent);
     int16_t yBottom = static_cast<int16_t>(yBaseline + parenL.descent);
-    int16_t yMid    = static_cast<int16_t>((yTop + yBottom) / 2);
-
     int16_t pw = NodeParen::PAREN_W;
+    lv_color_t parenColor = _highlightActive ? _highlightColor : lv_color_black();
 
-    // ── Paréntesis izquierdo: ( ──
-    // Top curve: de la parte superior derecha al centro izquierdo
-    drawLine(layer,
-             static_cast<int16_t>(x + pw - 1), yTop,
-             static_cast<int16_t>(x + 1), yMid,
-             1, lv_color_black());
-    // Bottom curve: del centro izquierdo a la parte inferior derecha
-    drawLine(layer,
-             static_cast<int16_t>(x + 1), yMid,
-             static_cast<int16_t>(x + pw - 1), yBottom,
-             1, lv_color_black());
+    // ── Rounded elastic parentheses ──
+    drawRoundedParenthesis(layer, x, yTop, yBottom, pw, true, parenColor);
 
     // ── Contenido ──
     int16_t contentX = static_cast<int16_t>(x + pw + NodeParen::INNER_PAD);
     drawNode(layer, node->content(), contentX, yBaseline, fm, font, depth + 1);
 
-    // ── Paréntesis derecho: ) ──
+    // ── Rounded right parenthesis ──
     int16_t rpX = static_cast<int16_t>(x + parenL.width - pw);
-    // Top curve: de la parte superior izquierda al centro derecho
-    drawLine(layer,
-             static_cast<int16_t>(rpX + 1), yTop,
-             static_cast<int16_t>(rpX + pw - 1), yMid,
-             1, lv_color_black());
-    // Bottom curve: del centro derecho a la parte inferior izquierda
-    drawLine(layer,
-             static_cast<int16_t>(rpX + pw - 1), yMid,
-             static_cast<int16_t>(rpX + 1), yBottom,
-             1, lv_color_black());
+    drawRoundedParenthesis(layer, rpX, yTop, yBottom, pw, false, parenColor);
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -931,33 +930,19 @@ void MathCanvas::drawFunction(lv_layer_t* layer, const NodeFunction* node,
     int16_t parenX = static_cast<int16_t>(x + labelW + NodeFunction::LABEL_GAP);
     int16_t yTop    = static_cast<int16_t>(yBaseline - funcL.ascent);
     int16_t yBottom = static_cast<int16_t>(yBaseline + funcL.descent);
-    int16_t yMid    = static_cast<int16_t>((yTop + yBottom) / 2);
     int16_t pw      = NodeFunction::PAREN_W;
+    lv_color_t parenColor = _highlightActive ? _highlightColor : lv_color_black();
 
-    // Paréntesis izquierdo (
-    drawLine(layer,
-             static_cast<int16_t>(parenX + pw - 1), yTop,
-             static_cast<int16_t>(parenX + 1), yMid,
-             1, lv_color_black());
-    drawLine(layer,
-             static_cast<int16_t>(parenX + 1), yMid,
-             static_cast<int16_t>(parenX + pw - 1), yBottom,
-             1, lv_color_black());
+    // Rounded left parenthesis
+    drawRoundedParenthesis(layer, parenX, yTop, yBottom, pw, true, parenColor);
 
     // Contenido (argumento)
     int16_t contentX = static_cast<int16_t>(parenX + pw + NodeFunction::INNER_PAD);
     drawNode(layer, node->argument(), contentX, yBaseline, fm, font, depth + 1);
 
-    // Paréntesis derecho )
+    // Rounded right parenthesis
     int16_t rpX = static_cast<int16_t>(parenX + parenBlock - pw);
-    drawLine(layer,
-             static_cast<int16_t>(rpX + 1), yTop,
-             static_cast<int16_t>(rpX + pw - 1), yMid,
-             1, lv_color_black());
-    drawLine(layer,
-             static_cast<int16_t>(rpX + pw - 1), yMid,
-             static_cast<int16_t>(rpX + 1), yBottom,
-             1, lv_color_black());
+    drawRoundedParenthesis(layer, rpX, yTop, yBottom, pw, false, parenColor);
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1002,33 +987,78 @@ void MathCanvas::drawLogBase(lv_layer_t* layer, const NodeLogBase* node,
     int16_t parenX = static_cast<int16_t>(x + labelW + baseL.width + NodeLogBase::LABEL_GAP);
     int16_t yTop    = static_cast<int16_t>(yBaseline - lbL.ascent);
     int16_t yBottom = static_cast<int16_t>(yBaseline + lbL.descent);
-    int16_t yMid    = static_cast<int16_t>((yTop + yBottom) / 2);
     int16_t pw      = NodeLogBase::PAREN_W;
+    lv_color_t parenColor = _highlightActive ? _highlightColor : lv_color_black();
 
-    // Paréntesis izquierdo (
-    drawLine(layer,
-             static_cast<int16_t>(parenX + pw - 1), yTop,
-             static_cast<int16_t>(parenX + 1), yMid,
-             1, lv_color_black());
-    drawLine(layer,
-             static_cast<int16_t>(parenX + 1), yMid,
-             static_cast<int16_t>(parenX + pw - 1), yBottom,
-             1, lv_color_black());
+    // Rounded left parenthesis
+    drawRoundedParenthesis(layer, parenX, yTop, yBottom, pw, true, parenColor);
 
     // Contenido (argumento)
     int16_t contentX = static_cast<int16_t>(parenX + pw + NodeLogBase::INNER_PAD);
     drawNode(layer, node->argument(), contentX, yBaseline, fm, font, depth + 1);
 
-    // Paréntesis derecho )
+    // Rounded right parenthesis
     int16_t rpX = static_cast<int16_t>(parenX + parenBlock - pw);
-    drawLine(layer,
-             static_cast<int16_t>(rpX + 1), yTop,
-             static_cast<int16_t>(rpX + pw - 1), yMid,
-             1, lv_color_black());
-    drawLine(layer,
-             static_cast<int16_t>(rpX + pw - 1), yMid,
-             static_cast<int16_t>(rpX + 1), yBottom,
-             1, lv_color_black());
+    drawRoundedParenthesis(layer, rpX, yTop, yBottom, pw, false, parenColor);
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Rounded parenthesis helpers
+// ════════════════════════════════════════════════════════════════════════════
+
+void MathCanvas::drawQuadraticCurve(lv_layer_t* layer,
+                                    int16_t x0, int16_t y0,
+                                    int16_t cx, int16_t cy,
+                                    int16_t x1, int16_t y1,
+                                    int16_t segments,
+                                    int16_t stroke,
+                                    lv_color_t color) {
+    if (segments < 1) segments = 1;
+
+    auto qx = [&](float t) -> float {
+        const float u = 1.0f - t;
+        return u * u * static_cast<float>(x0)
+             + 2.0f * u * t * static_cast<float>(cx)
+             + t * t * static_cast<float>(x1);
+    };
+    auto qy = [&](float t) -> float {
+        const float u = 1.0f - t;
+        return u * u * static_cast<float>(y0)
+             + 2.0f * u * t * static_cast<float>(cy)
+             + t * t * static_cast<float>(y1);
+    };
+
+    for (int16_t i = 0; i < segments; ++i) {
+        const float t0 = static_cast<float>(i) / static_cast<float>(segments);
+        const float t1 = static_cast<float>(i + 1) / static_cast<float>(segments);
+
+        int16_t sx = static_cast<int16_t>(std::lround(qx(t0)));
+        int16_t sy = static_cast<int16_t>(std::lround(qy(t0)));
+        int16_t ex = static_cast<int16_t>(std::lround(qx(t1)));
+        int16_t ey = static_cast<int16_t>(std::lround(qy(t1)));
+
+        drawLine(layer, sx, sy, ex, ey, stroke, color);
+    }
+}
+
+void MathCanvas::drawRoundedParenthesis(lv_layer_t* layer,
+                                        int16_t x, int16_t yTop, int16_t yBottom,
+                                        int16_t width, bool left, lv_color_t color) {
+    int16_t yMid = static_cast<int16_t>((yTop + yBottom) / 2);
+
+    int16_t xOuter = left ? static_cast<int16_t>(x + width - 1) : x;
+    int16_t xInner = left ? x : static_cast<int16_t>(x + width - 1);
+
+    // Slight inner pull improves smoothness on low-resolution displays.
+    int16_t xCtrl = left
+        ? static_cast<int16_t>(xInner + std::max<int16_t>(1, width / 4))
+        : static_cast<int16_t>(xInner - std::max<int16_t>(1, width / 4));
+
+    drawQuadraticCurve(layer,
+                       xOuter, yTop,
+                       xCtrl, yMid,
+                       xOuter, yBottom,
+                       7, 1, color);
 }
 
 // ════════════════════════════════════════════════════════════════════════════

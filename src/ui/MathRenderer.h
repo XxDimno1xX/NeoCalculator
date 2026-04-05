@@ -292,6 +292,27 @@ private:
                              int16_t symTop, int16_t symBot,
                              lv_color_t color);
 
+    /**
+     * Draw a rounded elastic parenthesis using a quadratic curve.
+     * @param x      Left edge of the parenthesis bounding box.
+     * @param yTop   Top y coordinate.
+     * @param yBottom Bottom y coordinate.
+     * @param width  Parenthesis width in pixels.
+     * @param left   True for '(' and false for ')'.
+     */
+    void drawRoundedParenthesis(lv_layer_t* layer,
+                                int16_t x, int16_t yTop, int16_t yBottom,
+                                int16_t width, bool left, lv_color_t color);
+
+    /// Draw a quadratic Bezier curve approximated with line segments.
+    void drawQuadraticCurve(lv_layer_t* layer,
+                            int16_t x0, int16_t y0,
+                            int16_t cx, int16_t cy,
+                            int16_t x1, int16_t y1,
+                            int16_t segments,
+                            int16_t stroke,
+                            lv_color_t color);
+
     // ── Cursor ───────────────────────────────────────────────────────────
     void drawCursor(lv_layer_t* layer);
     void computeCursorPosition(int16_t baseX, int16_t baseY);

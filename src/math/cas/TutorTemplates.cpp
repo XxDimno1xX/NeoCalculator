@@ -420,15 +420,8 @@ SolveResult solveQuadraticTutor(const SymEquation& eq, char var,
     ctx.var(var).deg(2).withArena(arena);
     ctx.val("a", a).val("b", b).val("c", c);
     
-    // ── 1. Type & Coefficients (using preexisting actions) ──────────
-    ActionContext coeffCtx = ctx;
-    if (arena) {
-        SymExpr* dispExpr = buildQuadraticDisplayExpr(*arena, var, a, b, c);
-        if (dispExpr) {
-            coeffCtx.expr(dispExpr);
-        }
-    }
-    log.logAction(SolveAction::QUAD_IDENTIFY_COEFFICIENTS, coeffCtx, MethodId::Quadratic);
+    // ── 1. Type & Coefficients (explicit declaration, no duplicate polynomial line) ──
+    log.logAction(SolveAction::QUAD_IDENTIFY_COEFFICIENTS, ctx, MethodId::Quadratic);
     
     if (!arena) {
         // Fallback if no arena provided (shouldn't happen in visual mode)
