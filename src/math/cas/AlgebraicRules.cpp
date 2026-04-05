@@ -98,6 +98,49 @@ static int maxDegreeOf(const NodePtr& node, char var) {
     }
 }
 
+/// Returns the maximum polynomial degree across all variables in `node`.
+/// Constants -> 0, Variable -> 1, Negation -> child degree, Sum -> max child
+/// degree, Product -> sum child degrees, Power -> base degree * exponent,
+/// Equation -> max(lhs degree, rhs degree).
+static int maxDegreeAnyVar(const NodePtr& node) {
+    if (!node) return 0;
+    switch (node->nodeType) {
+        case NodeType::Constant:  return 0;
+        case NodeType::Variable:  return 1;
+        case NodeType::Negation: {
+            const auto* n = static_cast<const NegationNode*>(node.get());
+            return maxDegreeAnyVar(n->operand);
+        }
+        case NodeType::Sum: {
+            const auto* s = static_cast<const SumNode*>(node.get());
+            int d = 0;
+            for (const auto& c : s->children) d = std::max(d, maxDegreeAnyVar(c));
+            return d;
+        }
+        case NodeType::Product: {
+            const auto* p = static_cast<const ProductNode*>(node.get());
+            int d = 0;
+            for (const auto& c : p->children) d += maxDegreeAnyVar(c);
+            return d;
+        }
+        case NodeType::Power: {
+            const auto* pw = static_cast<const PowerNode*>(node.get());
+            if (pw->exponent && pw->exponent->isConstant()) {
+                double exp = static_cast<const ConstantNode*>(pw->exponent.get())->value;
+                const double raw = static_cast<double>(maxDegreeAnyVar(pw->base)) * exp;
+                return static_cast<int>(std::round(raw));
+            }
+            return maxDegreeAnyVar(pw->base);
+        }
+        case NodeType::Equation: {
+            const auto* eq = static_cast<const EquationNode*>(node.get());
+            return std::max(maxDegreeAnyVar(eq->lhs), maxDegreeAnyVar(eq->rhs));
+        }
+        default:
+            return 0;
+    }
+}
+
 /// Format a double exponent as a short string: 2.0 → "2", 0.5 → "0.5".
 static std::string fmtExp(double e) {
     double intpart;
@@ -556,9 +599,7 @@ static RewriteRule makeMoveConstantsToRHSRule() {
             // do not run linear isolation transposition. This prevents
             // repeatedly adding/subtracting the same constant term and lets
             // checkNonLinearHandover trigger the quadratic path.
-            if (maxDegreeOf(eq.lhs, 'x') >= 2 ||
-                maxDegreeOf(eq.lhs, 'y') >= 2 ||
-                maxDegreeOf(eq.lhs, 'z') >= 2) {
+            if (maxDegreeAnyVar(eq.lhs) >= 2) {
                 double rhsVal = getNumericValue(eq.rhs);
                 if (!std::isnan(rhsVal) && isApprox(rhsVal, 0.0)) {
                     return nullptr;

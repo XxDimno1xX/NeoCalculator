@@ -1282,10 +1282,7 @@ void EquationsApp::update() {
                 _stepsCurrentTree = _casResult.finalTree;
                 _stepsCasPendingLogs = _casResult.steps;
                 _stepsSolveIterations = _stepsCasPendingLogs.size();
-                _stepsReachedFixedPoint = _casResult.reachedFixedPoint
-                                          || _casResult.haltedByNoProgress
-                                          || _casResult.haltedByCycle
-                                          || _casResult.hitStepLimit;
+                _stepsReachedFixedPoint = _casResult.reachedFixedPoint;
 
                 _hasCasResult = true;
                 _stepsRenderIndex = 0;
