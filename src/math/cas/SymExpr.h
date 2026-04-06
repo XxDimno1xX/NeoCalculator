@@ -86,6 +86,7 @@ enum class SymExprType : uint8_t {
     Paren,       // Display-only: (expr)
     PlusMinus,   // Display-only: lhs ± rhs
     Subscript,   // Display-only: base_sub
+    CoeffAssign, // Display-only: a = ..., b = ..., c = ...
 };
 
 class SymExpr {
@@ -439,6 +440,39 @@ public:
 };
 
 // ════════════════════════════════════════════════════════════════════
+// SymCoeffAssign — Display-only coefficient assignment (IMMUTABLE)
+// ════════════════════════════════════════════════════════════════════
+
+class SymCoeffAssign : public SymExpr {
+public:
+    SymExpr* const aVal;
+    SymExpr* const bVal;
+    SymExpr* const cVal;
+
+    SymCoeffAssign(SymExpr* a, SymExpr* b, SymExpr* c)
+        : SymExpr(SymExprType::CoeffAssign, computeHashStatic(a, b, c)),
+          aVal(a), bVal(b), cVal(c) {}
+
+    double      evaluate(double) const override { return 0.0; } // Display only
+    SymExpr*    clone(SymExprArena& arena) const override;
+    std::string toString() const override { return "(a=..., b=..., c=...)"; }
+    bool        containsVar(char v) const override {
+        return (aVal && aVal->containsVar(v))
+            || (bVal && bVal->containsVar(v))
+            || (cVal && cVal->containsVar(v));
+    }
+    bool        isPolynomial() const override { return false; }
+
+    static size_t computeHashStatic(const SymExpr* a, const SymExpr* b, const SymExpr* c) {
+        size_t h = hashMix(0x0B);
+        h = hashCombine(h, a ? a->_hash : 0);
+        h = hashCombine(h, b ? b->_hash : 0);
+        h = hashCombine(h, c ? c->_hash : 0);
+        return h;
+    }
+};
+
+// ════════════════════════════════════════════════════════════════════
 // Canonical ordering comparator
 //
 // Defines the total order for commutative children (Add terms,
@@ -639,6 +673,12 @@ inline SymExpr* symPlusMinus(SymExprArena& a, SymExpr* lhs, SymExpr* rhs) {
 /// Subscript node (cons'd)
 inline SymExpr* symSubscript(SymExprArena& a, SymExpr* base, SymExpr* sub) {
     auto* node = a.create<SymSubscript>(base, sub);
+    return a.consTable().getOrCreate(node);
+}
+
+/// Coefficient assignment node (cons'd): a=..., b=..., c=...
+inline SymExpr* symCoeffAssign(SymExprArena& a, SymExpr* av, SymExpr* bv, SymExpr* cv) {
+    auto* node = a.create<SymCoeffAssign>(av, bv, cv);
     return a.consTable().getOrCreate(node);
 }
 

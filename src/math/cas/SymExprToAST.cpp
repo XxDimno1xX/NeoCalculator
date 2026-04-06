@@ -192,6 +192,8 @@ NodePtr SymExprToAST::convert(const SymExpr* expr) {
             return convertPlusMinus(static_cast<const SymPlusMinus*>(expr));
         case SymExprType::Subscript:
             return convertSubscript(static_cast<const SymSubscript*>(expr));
+        case SymExprType::CoeffAssign:
+            return convertCoeffAssign(static_cast<const SymCoeffAssign*>(expr));
         default:
             return makeNumber("?");
     }
@@ -533,6 +535,26 @@ NodePtr SymExprToAST::convertSubscript(const SymSubscript* sub) {
     NodePtr baseNode = ensureRow(convert(sub->base));
     NodePtr subNode  = ensureRow(convert(sub->subscript));
     return makeSubscript(std::move(baseNode), std::move(subNode));
+}
+
+NodePtr SymExprToAST::convertCoeffAssign(const SymCoeffAssign* coeff) {
+    auto row = makeRow();
+    auto* r = static_cast<NodeRow*>(row.get());
+
+    auto appendSlot = [&](char label, const SymExpr* val) {
+        r->appendChild(makeVariable(label));
+        r->appendChild(makeVariable('='));
+        if (val) appendFlat(r, convert(val));
+        else r->appendChild(makeNumber("?"));
+    };
+
+    appendSlot('a', coeff ? coeff->aVal : nullptr);
+    r->appendChild(makeNumber(","));
+    appendSlot('b', coeff ? coeff->bVal : nullptr);
+    r->appendChild(makeNumber(","));
+    appendSlot('c', coeff ? coeff->cVal : nullptr);
+
+    return row;
 }
 
 } // namespace cas

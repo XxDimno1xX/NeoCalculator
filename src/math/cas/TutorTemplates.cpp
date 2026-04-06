@@ -421,11 +421,20 @@ SolveResult solveQuadraticTutor(const SymEquation& eq, char var,
     ctx.val("a", a).val("b", b).val("c", c);
     
     // ── 1. Type & Coefficients (explicit declaration, no duplicate polynomial line) ──
-    log.logAction(SolveAction::QUAD_IDENTIFY_COEFFICIENTS, ctx, MethodId::Quadratic);
-    
     if (!arena) {
+        log.logAction(SolveAction::QUAD_IDENTIFY_COEFFICIENTS, ctx, MethodId::Quadratic);
         // Fallback if no arena provided (shouldn't happen in visual mode)
         return result;
+    }
+
+    {
+        SymExpr* aExpr = symFromCAS(*arena, a);
+        SymExpr* bExpr = symFromCAS(*arena, b);
+        SymExpr* cExpr = symFromCAS(*arena, c);
+        SymExpr* coeffExpr = symCoeffAssign(*arena, aExpr, bExpr, cExpr);
+        log.logAction(SolveAction::QUAD_IDENTIFY_COEFFICIENTS,
+                      ctx.expr(coeffExpr),
+                      MethodId::Quadratic);
     }
 
     

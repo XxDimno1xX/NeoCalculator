@@ -14,8 +14,71 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <string>
 
 namespace vpam {
+
+namespace {
+
+struct SymbolAlias {
+    const char* token;
+    const char* utf8;
+};
+
+// ASCII token -> UTF-8 fallback map for broad math symbol input.
+static const SymbolAlias kSymbolAliases[] = {
+    {"\\alpha",  "\xCE\xB1"}, {"\\beta",   "\xCE\xB2"}, {"\\Gamma", "\xCE\x93"},
+    {"\\gamma",  "\xCE\xB3"}, {"\\Delta",  "\xCE\x94"}, {"\\delta", "\xCE\xB4"},
+    {"\\epsilon","\xCE\xB5"}, {"\\zeta",   "\xCE\xB6"}, {"\\eta",   "\xCE\xB7"},
+    {"\\Theta",  "\xCE\x98"}, {"\\theta",  "\xCE\xB8"}, {"\\iota",  "\xCE\xB9"},
+    {"\\kappa",  "\xCE\xBA"}, {"\\Lambda", "\xCE\x9B"}, {"\\lambda","\xCE\xBB"},
+    {"\\mu",     "\xCE\xBC"}, {"\\nu",     "\xCE\xBD"}, {"\\Xi",    "\xCE\x9E"},
+    {"\\xi",     "\xCE\xBE"}, {"\\Pi",     "\xCE\xA0"}, {"\\pi",    "\xCF\x80"},
+    {"\\rho",    "\xCF\x81"}, {"\\Sigma",  "\xCE\xA3"}, {"\\sigma", "\xCF\x83"},
+    {"\\tau",    "\xCF\x84"}, {"\\Upsilon","\xCE\xA5"}, {"\\upsilon","\xCF\x85"},
+    {"\\Phi",    "\xCE\xA6"}, {"\\phi",    "\xCF\x86"}, {"\\chi",   "\xCF\x87"},
+    {"\\Psi",    "\xCE\xA8"}, {"\\psi",    "\xCF\x88"}, {"\\Omega", "\xCE\xA9"},
+    {"\\omega",  "\xCF\x89"},
+    {"\\infty",  "\xE2\x88\x9E"}, {"\\partial","\xE2\x88\x82"}, {"\\nabla","\xE2\x88\x87"},
+    {"\\int",    "\xE2\x88\xAB"}, {"\\iint",  "\xE2\x88\xAC"}, {"\\iiint","\xE2\x88\xAD"},
+    {"\\oint",   "\xE2\x88\xAE"}, {"\\oiint", "\xE2\x88\xAF"},
+    {"\\forall", "\xE2\x88\x80"}, {"\\exists","\xE2\x88\x83"}, {"\\nexists","\xE2\x88\x84"},
+    {"\\therefore","\xE2\x88\xB4"}, {"\\because","\xE2\x88\xB5"}, {"\\implies","\xE2\x87\x92"},
+    {"\\iff",    "\xE2\x87\x94"}, {"\\neg",   "\xC2\xAC"}, {"\\land", "\xE2\x88\xA7"},
+    {"\\lor",    "\xE2\x88\xA8"}, {"\\in",    "\xE2\x88\x88"}, {"\\notin","\xE2\x88\x89"},
+    {"\\subset", "\xE2\x8A\x82"}, {"\\subseteq","\xE2\x8A\x86"}, {"\\cup","\xE2\x88\xAA"},
+    {"\\cap",    "\xE2\x88\xA9"}, {"\\setminus","\xE2\x88\x96"}, {"\\emptyset","\xE2\x88\x85"},
+    {"\\equiv",  "\xE2\x89\xA1"}, {"\\notequiv","\xE2\x89\xA2"}, {"\\to","\xE2\x86\x92"},
+    {"\\leftarrow","\xE2\x86\x90"}, {"\\leftrightarrow","\xE2\x86\x94"}, {"\\oplus","\xE2\x8A\x95"},
+    {"\\propto", "\xE2\x88\x9D"}, {"\\otimes","\xE2\x8A\x97"}, {"\\perp","\xE2\x8A\xA5"},
+    {"\\parallel","\xE2\x88\xA5"}, {"\\angle","\xE2\x88\xA0"}, {"\\cong","\xE2\x89\x85"},
+    {"\\sim",    "\xE2\x88\xBC"}, {"\\approx","\xE2\x89\x88"}, {"\\degree","\xC2\xB0"},
+    {"\\triangle","\xE2\x96\xB3"}, {"\\leq","\xE2\x89\xA4"}, {"\\geq","\xE2\x89\xA5"},
+    {"\\neq",    "\xE2\x89\xA0"}, {"\\mp","\xE2\x88\x93"}, {"\\times","\xC3\x97"},
+    {"\\ll",     "\xE2\x89\xAA"}, {"\\gg","\xE2\x89\xAB"}, {"\\circ","\xE2\x88\x98"},
+    {"\\square", "\xE2\x96\xA1"}, {"\\aleph_0","\xE2\x84\xB5\xE2\x82\x80"},
+    {"\\lfloor", "\xE2\x8C\x8A"}, {"\\rfloor","\xE2\x8C\x8B"}, {"\\lceil","\xE2\x8C\x88"},
+    {"\\rceil",  "\xE2\x8C\x89"}, {"\\dagger","\xE2\x80\xA0"}, {"\\ast","\xE2\x88\x97"},
+    {"\\hbar",   "\xE2\x84\x8F"}, {"\\mathbbN","\xE2\x84\x95"}, {"\\mathbbZ","\xE2\x84\xA4"},
+    {"\\mathbbQ","\xE2\x84\x9A"}, {"\\mathbbR","\xE2\x84\x9D"}, {"\\mathbbC","\xE2\x84\x82"},
+    {"\\mathbbH","\xE2\x84\x8D"}
+};
+
+static std::string normalizeSymbolText(const char* in) {
+    if (!in) return {};
+    std::string out(in);
+    for (const auto& e : kSymbolAliases) {
+        std::string::size_type pos = 0;
+        const std::string token(e.token);
+        while ((pos = out.find(token, pos)) != std::string::npos) {
+            out.replace(pos, token.size(), e.utf8);
+            pos += std::strlen(e.utf8);
+        }
+    }
+    return out;
+}
+
+} // namespace
 
 // ════════════════════════════════════════════════════════════════════════════
 // Constructor / Destructor
@@ -683,21 +746,21 @@ void MathCanvas::drawOperator(lv_layer_t* layer, const NodeOperator* node,
             std::max<int16_t>(opL.width - 2 * NodeOperator::OP_PAD, 7));
         int16_t glyphCenterX = static_cast<int16_t>(textX + glyphW / 2);
 
-        // Keep all strokes inside the operator box to prevent top/bottom clipping.
+        // Keep all strokes inside the operator box while centering around baseline axis.
         int16_t topY = static_cast<int16_t>(yBaseline - fm.ascent + 1);
         int16_t bottomY = static_cast<int16_t>(yBaseline + fm.descent - 1);
-        int16_t minusY = static_cast<int16_t>(yBaseline - fm.axisHeight() + 1);
+        int16_t boxMidY = static_cast<int16_t>((topY + bottomY) / 2);
+        int16_t minusY = boxMidY;
         minusY = std::max<int16_t>(topY + 1, std::min<int16_t>(minusY, bottomY - 1));
 
         int16_t minusHalfW = static_cast<int16_t>(std::max<int16_t>((glyphW / 2) - 1, 3));
         int16_t plusHalf = static_cast<int16_t>(std::max<int16_t>(glyphW / 5, 2));
-        int16_t plusCenterY = static_cast<int16_t>(minusY - std::max<int16_t>(fm.ascent / 4, 2));
-        plusCenterY = std::max<int16_t>(
-            static_cast<int16_t>(topY + plusHalf),
-            std::min<int16_t>(plusCenterY,
-                              static_cast<int16_t>(bottomY - plusHalf)));
+        int16_t plusCenterY = minusY;
+        plusCenterY = std::max<int16_t>(static_cast<int16_t>(topY + plusHalf),
+                                        std::min<int16_t>(plusCenterY,
+                                                          static_cast<int16_t>(bottomY - plusHalf)));
 
-        int16_t stroke = static_cast<int16_t>(std::max<int16_t>(1, glyphW / 9));
+        int16_t stroke = static_cast<int16_t>(std::max<int16_t>(1, glyphW / 10));
 
         drawLine(layer,
                  static_cast<int16_t>(glyphCenterX - minusHalfW), minusY,
@@ -1044,6 +1107,9 @@ void MathCanvas::drawQuadraticCurve(lv_layer_t* layer,
 void MathCanvas::drawRoundedParenthesis(lv_layer_t* layer,
                                         int16_t x, int16_t yTop, int16_t yBottom,
                                         int16_t width, bool left, lv_color_t color) {
+    if (yBottom <= yTop) return;
+
+    const int16_t height = static_cast<int16_t>(yBottom - yTop);
     int16_t yMid = static_cast<int16_t>((yTop + yBottom) / 2);
 
     int16_t xOuter = left ? static_cast<int16_t>(x + width - 1) : x;
@@ -1054,11 +1120,14 @@ void MathCanvas::drawRoundedParenthesis(lv_layer_t* layer,
         ? static_cast<int16_t>(xInner + std::max<int16_t>(1, width / 4))
         : static_cast<int16_t>(xInner - std::max<int16_t>(1, width / 4));
 
+    const int16_t segs = static_cast<int16_t>(std::max<int>(7, height / 6));
+    const int16_t stroke = static_cast<int16_t>(std::max<int16_t>(1, width / 5));
+
     drawQuadraticCurve(layer,
                        xOuter, yTop,
                        xCtrl, yMid,
                        xOuter, yBottom,
-                       7, 1, color);
+                       segs, stroke, color);
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1379,11 +1448,14 @@ void MathCanvas::drawText(lv_layer_t* layer, int16_t x, int16_t yBaseline,
                           lv_color_t color) {
     if (!text || !text[0]) return;
 
+    const std::string normalized = normalizeSymbolText(text);
+    const char* renderText = normalized.empty() ? text : normalized.c_str();
+
     lv_draw_label_dsc_t dsc;
     lv_draw_label_dsc_init(&dsc);
     dsc.font  = font;
     dsc.color = color;
-    dsc.text  = text;
+    dsc.text  = renderText;
     dsc.opa   = LV_OPA_COVER;
 
     // El área define el bounding box del texto.
@@ -1394,11 +1466,11 @@ void MathCanvas::drawText(lv_layer_t* layer, int16_t x, int16_t yBaseline,
 
     // Calcular el ancho del texto
     // Usamos el largo del texto y el ancho de carácter de la fuente
-    int32_t textLen = static_cast<int32_t>(std::strlen(text));
+    int32_t textLen = static_cast<int32_t>(std::strlen(renderText));
 
     // Para el ancho, medimos cada carácter usando la fuente
     int32_t textWidth = 0;
-    const char* p = text;
+    const char* p = renderText;
     while (*p) {
         lv_font_glyph_dsc_t glyph;
         uint32_t letter = static_cast<uint32_t>(static_cast<uint8_t>(*p));

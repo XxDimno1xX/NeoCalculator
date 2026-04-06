@@ -108,6 +108,14 @@ bool ConsTable::structurallyEqual(const SymExpr* a, const SymExpr* b) {
             return sa->base == sb->base && sa->subscript == sb->subscript;
         }
 
+        case SymExprType::CoeffAssign: {
+            const auto* ca = static_cast<const SymCoeffAssign*>(a);
+            const auto* cb = static_cast<const SymCoeffAssign*>(b);
+            return ca->aVal == cb->aVal
+                && ca->bVal == cb->bVal
+                && ca->cVal == cb->cVal;
+        }
+
         default:
             return false;
     }

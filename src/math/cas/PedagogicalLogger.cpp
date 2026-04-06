@@ -69,6 +69,16 @@ static SymExpr* buildQuadraticDisplayExpr(SymExprArena& arena,
     return expr;
 }
 
+static SymExpr* buildQuadraticCoeffAssignExpr(SymExprArena& arena,
+                                              const CASNumber& a,
+                                              const CASNumber& b,
+                                              const CASNumber& c) {
+    return symCoeffAssign(arena,
+                          symFromCAS(arena, a),
+                          symFromCAS(arena, b),
+                          symFromCAS(arena, c));
+}
+
 // ════════════════════════════════════════════════════════════════════
 // findVal — Look up a value by label in the context
 // ════════════════════════════════════════════════════════════════════
@@ -143,18 +153,6 @@ std::string PedagogicalLogger::buildPhrase(SolveAction action,
     // ── Quadratic ──────────────────────────────────────────────────
 
     case SolveAction::QUAD_IDENTIFY_COEFFICIENTS: {
-        const CASNumber* a = findVal(ctx, "a");
-        const CASNumber* b = findVal(ctx, "b");
-        const CASNumber* c = findVal(ctx, "c");
-        if (a && b && c) {
-            std::string phrase = "Identifying coefficients: a = ";
-            phrase += a->toString();
-            phrase += ", b = ";
-            phrase += b->toString();
-            phrase += ", c = ";
-            phrase += c->toString();
-            return phrase;
-        }
         return "Identifying coefficients:";
     }
 
@@ -517,7 +515,19 @@ void PedagogicalLogger::logAction(SolveAction action,
 
     // ── Identify coefficients: emit text + the standard form ──────
     case SolveAction::QUAD_IDENTIFY_COEFFICIENTS: {
-        if (ctx.customExpr) {
+        if (ar) {
+            const CASNumber* a = findVal(ctx, "a");
+            const CASNumber* b = findVal(ctx, "b");
+            const CASNumber* c = findVal(ctx, "c");
+            if (a && b && c) {
+                SymExpr* coeffExpr = buildQuadraticCoeffAssignExpr(*ar, *a, *b, *c);
+                logExpr(phrase, coeffExpr, method);
+            } else if (ctx.customExpr) {
+                logExpr(phrase, ctx.customExpr, method);
+            } else {
+                logNote(phrase, method);
+            }
+        } else if (ctx.customExpr) {
             logExpr(phrase, ctx.customExpr, method);
         } else {
             logNote(phrase, method);

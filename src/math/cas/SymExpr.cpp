@@ -316,6 +316,13 @@ SymExpr* SymSubscript::clone(SymExprArena& arena) const {
     return arena.create<SymSubscript>(base->clone(arena), subscript->clone(arena));
 }
 
+SymExpr* SymCoeffAssign::clone(SymExprArena& arena) const {
+    return arena.create<SymCoeffAssign>(
+        aVal ? aVal->clone(arena) : nullptr,
+        bVal ? bVal->clone(arena) : nullptr,
+        cVal ? cVal->clone(arena) : nullptr);
+}
+
 // ════════════════════════════════════════════════════════════════════
 // toSymPoly() — Convert polynomial SymExpr tree → SymPoly
 // ════════════════════════════════════════════════════════════════════
@@ -388,6 +395,7 @@ static SymPoly exprToPolyImpl(const SymExpr* expr, char var) {
             return exprToPolyImpl(static_cast<const SymParen*>(expr)->child, var);
         case SymExprType::PlusMinus:
         case SymExprType::Subscript:
+        case SymExprType::CoeffAssign:
         case SymExprType::Func:
         default:
             return SymPoly::fromConstant(vpam::ExactVal::fromInt(0));
