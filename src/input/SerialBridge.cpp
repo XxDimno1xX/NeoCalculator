@@ -5,6 +5,8 @@
  */
 
 #include "SerialBridge.h"
+#include "math/giac/GiacBridge.h"
+#include <ctype.h>
 
 SerialBridge::SerialBridge()
     : _head(0), _tail(0)
@@ -85,9 +87,15 @@ bool SerialBridge::pollEvent(KeyEvent &outEvent) {
 // ── Character → KeyCode mapping ──
 
 void SerialBridge::processChar(int ch) {
-    // Eco del caracter crudo recibido (confirma que la S3 recibe datos)
+    // Line buffer for optional line-commands (e.g., "CAS: expr")
+    static char lineBuf[256];
+    static int  linePos = 0;
+
+    // Echo the raw received character (confirms S3 received data)
     if (ch >= 0x20 && ch <= 0x7E) {
         Serial.printf("[SB] RX: '%c' (0x%02X)\n", (char)ch, ch);
+        // Append to line buffer for potential line-based command
+        if (linePos < (int)(sizeof(lineBuf) - 1)) lineBuf[linePos++] = (char)ch;
     } else {
         Serial.printf("[SB] RX: 0x%02X\n", ch);
     }
@@ -96,8 +104,35 @@ void SerialBridge::processChar(int ch) {
     static unsigned long lastEnterMs = 0;
     if (ch == '\r' || ch == '\n') {
         unsigned long now = millis();
-        if (now - lastEnterMs < 50) return; // Skip duplicate \r\n pair
+        if (now - lastEnterMs < 50) {
+            // clear buffer on duplicate newline
+            linePos = 0;
+            return;
+        }
         lastEnterMs = now;
+
+        // Null-terminate and inspect the buffered line
+        if (linePos > 0) {
+            lineBuf[linePos] = '\0';
+            char* p = lineBuf;
+            // Skip leading whitespace
+            while (*p && isspace((unsigned char)*p)) ++p;
+            // Case-insensitive check for "CAS:"
+            if ((toupper((unsigned char)p[0]) == 'C') && (toupper((unsigned char)p[1]) == 'A') &&
+                (toupper((unsigned char)p[2]) == 'S') && (p[3] == ':')) {
+                char* expr = p + 4;
+                while (*expr && isspace((unsigned char)*expr)) ++expr;
+                String in(expr);
+                String out = solveWithGiac(in);
+                Serial.print("[CAS] => ");
+                Serial.println(out);
+                linePos = 0;
+                return; // command handled
+            }
+        }
+
+        // Default behaviour: emit ENTER event and clear line buffer
+        linePos = 0;
         push(KeyCode::ENTER, "ENTER (PC-Enter)");
         return;
     }
