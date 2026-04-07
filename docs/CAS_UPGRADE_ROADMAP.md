@@ -1,965 +1,479 @@
-# CAS — Master Plan & Feasibility Analysis
+# CAS Constitution: Giac/KhiCAS Migration for NumOS (ESP32-S3)
 
-&gt; **NumOS CAS: Architectural Overhaul Roadmap**
-&gt; Target: Compete with HP Prime G2 & Wolfram Engine on ESP32-S3 N16R8
-&gt; Author: Chief Mathematics Software Architect
-&gt; Date: March 2026
-&gt; Status: ✅ ALL 6 PHASES COMPLETE — Production Ready
-
----
-
-## Executive Summary — Project Completed
-
-All six phases of the CAS upgrade have been implemented and verified:
-
-| Phase | Description | Status | Build |
-|-------|-------------|--------|-------|
-| **Phase 1** | BigInt Hybrid Engine (CASInt + CASRational) | ✅ COMPLETE | 30 tests passing |
-| **Phase 2** | Immutable DAG & Hash-Consing (ConsTable) | ✅ COMPLETE | 20 tests passing |
-| **Phase 3** | Fixed-Point Simplifier (multi-pass, trig/log/exp) | ✅ COMPLETE | 25 tests passing |
-| **Phase 4** | Symbolic Integration (Slagle heuristic) | ✅ COMPLETE | SymIntegrate engine |
-| **Phase 5** | Multivariable & Resultant Solver | ✅ COMPLETE | SymPolyMulti + NL 2×2 |
-| **Phase 6** | Integration App & Polish | ✅ COMPLETE | Unified CalculusApp (d/dx + ∫dx) |
-
-**Final Build Stats (March 2026):**
-
-| Resource | Used | Total | % Used |
-|----------|-----:|------:|:------:|
-| **RAM** | 94,512 B | 327,680 B | **28.8%** |
-| **Flash** | 1,263,109 B | 6,553,600 B | **19.3%** |
-| **Warnings** | 0 | — | **Clean** |
+Version: 1.0
+Status: Active constitution for CAS migration
+Scope: `src/math`, `src/apps/EquationsApp.*`, `src/ui/MathRenderer.*`, PlatformIO build and memory policy
+Supersedes: Any previous roadmap claiming the custom CAS stack is the long-term final architecture
 
 ---
 
-## Table of Contents
+## 1. Vision
 
-1. [Current State Audit](#1-current-state-audit)
-2. [Critical Engineering Challenges](#2-critical-engineering-challenges)
-   - 2.1 [The BigNum Bottleneck](#21-the-bignum-bottleneck)
-   - 2.2 [Hash-Consing DAG in PSRAM](#22-hash-consing-dag-in-psram)
-   - 2.3 [Simplifier Termination Guarantee](#23-simplifier-termination-guarantee)
-   - 2.4 [Risch & Gröbner Feasibility](#24-risch--gröbner-feasibility)
-3. [Architectural Decisions](#3-architectural-decisions)
-4. [Phased Execution Strategy](#4-phased-execution-strategy)
-   - Phase 1: [BigInt Hybrid Engine](#phase-1-bigint-hybrid-engine)
-   - Phase 2: [Immutable DAG & Hash-Consing](#phase-2-immutable-dag--hash-consing)
-   - Phase 3: [Fixed-Point Simplifier](#phase-3-fixed-point-simplifier)
-   - Phase 4: [Symbolic Integration (Slagle)](#phase-4-symbolic-integration-slagle)
-   - Phase 5: [Multivariable & Resultant Solver](#phase-5-multivariable--resultant-solver)
-   - Phase 6: [Integration App & Polish](#phase-6-integration-app--polish)
-5. [Risk Matrix](#5-risk-matrix)
-6. [Memory Budget](#6-memory-budget)
-7. [Test Strategy](#7-test-strategy)
+NumOS will stop evolving a custom symbolic core as the primary CAS and will adopt Giac/KhiCAS as the canonical mathematics engine.
+
+This migration is not cosmetic. It is a strategic move to:
+
+1. Reach modern symbolic capability without reinventing decades of algebra research.
+2. Preserve NumOS strengths (fast UI, LVGL experience, educational steps, hardware fit).
+3. Build on open-source mathematics instead of locking the project into a maintenance trap.
+
+Target outcome:
+
+1. Giac/KhiCAS executes symbolic math.
+2. NumOS remains responsible for interaction, pedagogy, rendering, and hardware reliability.
+3. Existing VPAM visual quality is preserved and upgraded.
 
 ---
 
-## 1. Current State Audit
+## 2. Constitutional Rules (Non-Negotiable)
 
-### 1.1 Build Footprint (Post Phase 6B — Final)
-
-| Resource | Used | Total | Free | % Free |
-|----------|-----:|------:|-----:|-------:|
-| **RAM** (data+bss) | 94,512 B | 327,680 B | 233,168 B | **71.2%** |
-| **Flash** | 1,263,109 B | 6,553,600 B | 5,290,491 B | **80.7%** |
-| **PSRAM** (runtime) | ~256 KB max (arena) | 8,388,608 B | ~7.75 MB | **~97%** |
-
-**Verdict**: Enormous headroom. We can afford ~5 MB of PSRAM for CAS data
-structures and ~4 MB additional Flash for algorithm code.
-
-### 1.2 CAS Module Inventory (27 files)
-
-| Module | Files | Status | Limitations |
-|--------|------:|--------|-------------|
-| `ExactVal` | 2 | ✅ Working | `int64_t` overflow on 15+ digit numbers |
-| `SymPoly` | 2 | ✅ Working | Univariable only, no poly GCD/factoring |
-| `SymExpr` tree | 2 | ✅ Working | No hash, no equality, mutable nodes |
-| `SymExprArena` | 1 | ✅ Working | Bump-only, no dedup, 256 KB cap |
-| `ASTFlattener` | 2 | ✅ Working | Exponents capped at ±10 |
-| `SymDiff` | 2 | ✅ Working | 17 rules, all derivatives correct |
-| `SymSimplify` | 2 | ✅ Working | Single-pass, no trig/log identities |
-| `SingleSolver` | 2 | ✅ Working | Degree ≤2 exact, ≥3 Newton only |
-| `SystemSolver` | 2 | ✅ Working | 2×2 and 3×3 linear only |
-| `OmniSolver` | 2 | ✅ Working | Pattern-match inverses + Newton fallback |
-| `HybridNewton` | 2 | ✅ Working | Symbolic Jacobian, single-variable |
-| `SymToAST` | 2 | ✅ Working | Polynomial rendering path |
-| `SymExprToAST` | 2 | ✅ Working | General expression rendering path |
-| `CASStepLogger` | 2 | ✅ Working | PSRAM-backed step vectors |
-| `PSRAMAllocator` | 1 | ✅ Working | STL allocator for PSRAM containers |
-
-### 1.3 Critical Overflow Hotspots in ExactVal
-
-| Priority | Function | Line | Expression | Risk |
-|----------|----------|------|------------|------|
-| **P0** | `exactMul` | L282–288 | `a.num*b.num`, `a.den*b.den`, `a.outer*b.outer`, `a.inner*b.inner` | 4 unguarded 64×64 multiplies |
-| **P0** | `exactAdd` | L229 | `a.num*(d/a.den) + b.num*(d/b.den)` | Cross-multiply + sum |
-| **P0** | `exactAdd` | L240–241 | `a.num*a.outer*(d/a.den)` | Triple multiply |
-| **P1** | `exactPow` | L396–397 | `rn *= bn; rd *= bd` per iteration | Repeated multiply, GCD too late |
-| **P1** | `exactSqrt` | L444 | `absNum * absDen` | Rationalization product |
-| **P2** | `lcm` | L53 | `(a/g)*b` | Large coprime denominators |
-
-**Zero pre-emptive overflow guards exist.** All use post-hoc GCD which cannot fix
-already-wrapped values. This is the most urgent problem.
+1. Giac/KhiCAS is the source of mathematical truth for symbolic operations once migration is complete.
+2. Display DMA buffers remain in internal RAM. CAS heap and large symbolic objects move to PSRAM.
+3. UI responsiveness is mandatory: no long CAS operation may block the render loop.
+4. Step rendering must stay incremental and memory-bounded, aligned with current staged step pipeline behavior.
+5. Migration must remain reversible until Phase 6 sign-off via a compile-time switch.
+6. Open-source license obligations are part of the architecture, not an afterthought.
 
 ---
 
-## 2. Critical Engineering Challenges
+## 3. Technical Architecture
 
-### 2.1 The BigNum Bottleneck
+### 3.1 Current Assets to Preserve
 
-#### Problem Statement
+Keep and evolve these layers:
 
-Replacing `int64_t` with `mbedtls_mpi` in `ExactVal` would make **every
-arithmetic operation** ~5-10x slower. A simplification loop that currently takes
-&lt;1ms would take 5-10ms, potentially stalling the LVGL frame loop (16.6ms budget
-at 60fps).
+1. `src/math/MathAST.*` for semantic visual layout objects.
+2. `src/ui/MathRenderer.*` (`MathCanvas`) for high-quality expression rendering in LVGL.
+3. `src/apps/EquationsApp.*` staged steps pipeline (`PARSE -> SOLVE -> RENDER_CHUNK -> FINALIZE`) and memory guardrails.
+4. Existing native desktop path (`[env:emulator_pc]` in `platformio.ini`) as high-speed debug loop.
 
-#### Measured Characteristics of `mbedtls_mpi` on ESP32-S3
+### 3.2 Target Layering
 
-| Operation | `int64_t` (native) | `mbedtls_mpi` (1 limb) | `mbedtls_mpi` (4 limbs) |
-|-----------|-------------------:|------------------------:|------------------------:|
-| Add | ~1 cycle (0.004 µs) | ~50 cycles (0.21 µs) | ~80 cycles (0.33 µs) |
-| Mul | ~5 cycles (0.02 µs) | ~200 cycles (0.83 µs) | ~800 cycles (3.3 µs) |
-| GCD | ~100 cycles (0.42 µs) | ~2000 cycles (8.3 µs) | ~8000 cycles (33 µs) |
-| `init+free` | N/A | ~100 cycles (0.42 µs) | ~100 cycles |
+```
+Keyboard/Input -> App Layer (Equations/Calculation/Tutor)
+             -> GiacBridge (async command/eval/step API)
+             -> Giac/KhiCAS Kernel (context + gen + eval + gen2tex)
+             -> TeX-to-MathAST Adapter (new)
+             -> MathRenderer (existing, upgraded)
+             -> LVGL + DisplayDriver
+```
 
-*Estimates based on mbedtls benchmarks on Xtensa LX7 @ 240 MHz. 1 limb = 32 bits
-≈ int64_t equivalent. 4 limbs = 128 bits for intermediate products.*
+### 3.3 Planned New Components
 
-#### Solution: Hybrid BigNum with Overflow Detection
-
-              ┌─────────────────────────┐
-              │    CASRational class     │
-              ├─────────────────────────┤
-              │ int64_t num, den         │  ← Hot path (95% of operations)
-              │ bool _promoted           │
-              │ mbedtls_mpi* _bigNum     │  ← Cold path (lazy-allocated)
-              │ mbedtls_mpi* _bigDen     │
-              └─────────────────────────┘
-
-Operation flow:
-┌──────────┐ ┌──────────────────┐ ┌────────────────────┐
-│ int64_t │────►│ _builtin_mul │────►│ Result fits 64-bit │
-│ fast path│ │ overflow() check │ Y │ Return native │
-└──────────┘ └────────┬─────────┘ └────────────────────┘
-│ N (overflow!)
-▼
-┌────────────────────┐
-│ Promote both ops │
-│ to mbedtls_mpi │
-│ Retry operation │
-│ Set _promoted=true │
-└────────────────────┘
-
-
-**Key design rules:**
-
-1. **`__builtin_mul_overflow(a, b, &result)`** — GCC intrinsic available on
-   Xtensa. Returns `true` on overflow, costs ~2 cycles. Used for every
-   `int64_t` multiply in `exactAdd`, `exactMul`, `exactPow`, `exactSqrt`.
-
-2. **Lazy promotion**: `_bigNum`/`_bigDen` are `nullptr` until first overflow.
-   Once promoted, all subsequent operations on that value use `mbedtls_mpi`.
-
-3. **Demotion on simplify**: After GCD reduction, if result fits in `int64_t`,
-   demote back to native. Check: `mbedtls_mpi_bitlen() <= 63`.
-
-4. **No UI stall**: The simplifier operates in a **deferred compute** window.
-   `lv_timer_handler()` is called between simplification passes if elapsed
-   time exceeds 10ms, keeping LVGL responsive.
-
-5. **`mbedtls_mpi` memory**: Each `mbedtls_mpi` struct is 12 bytes + limb
-   array. Limbs are heap-allocated. For PSRAM placement, override the
-   `mbedtls_platform_set_calloc_free()` hook to use `heap_caps_calloc(SPIRAM)`.
-
-#### Sizeof Impact
-
-| Config | `sizeof(CASRational)` | Notes |
-|--------|----------------------:|-------|
-| Current `ExactVal` | 48 B | 4×int64_t + int8_t×2 + bool + string |
-| New `CASRational` (not promoted) | 32 B | 2×int64_t + bool + 2×ptr(null) |
-| New `CASRational` (promoted) | 32 B + 24 B heap | mpi struct + limb arrays |
-
-Net result: **smaller** default footprint (we remove `outer`, `inner`, `piMul`,
-`eMul` from the rational — those become separate symbolic nodes in the DAG).
+1. `src/math/giac/GiacBridge.h/.cpp`
+2. `src/math/giac/GiacWorker.h/.cpp` (optional worker task)
+3. `src/math/tex/TeXTokenizer.h/.cpp`
+4. `src/math/tex/TeXParser.h/.cpp`
+5. `src/math/tex/TeXToMathAST.h/.cpp`
+6. `src/math/giac/GiacStepAdapter.h/.cpp`
 
 ---
 
-### 2.2 Hash-Consing DAG in PSRAM
+## 4. Memory Constitution: PSRAM-First CAS, Internal-Only DMA
 
-#### Problem Statement
+ESP-IDF guidance confirms:
 
-If SymExpr nodes are immutable, identical subexpressions should share the same
-pointer. `sin(x)` appearing 50 times in a derivative tree should be one node,
-not 50 copies. This requires a deduplication lookup (hash table) during
-construction.
+1. External RAM can be routed through capability allocator (`MALLOC_CAP_SPIRAM`).
+2. `malloc()` can be configured to use external RAM with internal reserve thresholds.
+3. DMA-capable buffers have strict constraints; in practice display-critical buffers stay internal unless carefully validated.
 
-#### Current Blockers
+NumOS policy:
 
-1. **No `hash()` or `operator==`** on any `SymExpr` subclass.
-2. **`SymSimplify` mutates nodes in-place** (`n->child = simplify(...)`) —
-   destroys immutability invariant.
-3. **`ExactVal` contains `std::string error`** — not trivially hashable.
-4. **Arena has no lookup capability** — pure bump allocator.
+1. Keep display draw buffers in `MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA` (already implemented in `src/main.cpp`).
+2. Route Giac-heavy allocations to PSRAM.
+3. Reserve internal heap headroom for LVGL metadata, stacks, ISR-safe allocations, and fragmentation safety.
 
-#### Solution: Arena + SideTable Hash-Consing
+### 4.1 Build and Config Example
 
+```ini
+; platformio.ini (example additions)
+[env:esp32s3_n16r8]
+build_flags =
+    ; existing flags omitted
+    -DNUMOS_USE_GIAC=1
+    -DGIAC_KHICAS_PROFILE=1
+    -DNO_GUI=1
+    -DNO_FILESYSTEM=1
+    -fexceptions
+    -frtti
 
-┌────────────────────────────────────────────────────────┐
-│ SymExprArena (PSRAM) │
-│ ┌──────────┬──────────┬──────────┬──────────┐ │
-│ │ Block 0 │ Block 1 │ Block 2 │ Block 3 │ ... │
-│ │ [nodes] │ [nodes] │ [nodes] │ [nodes] │ │
-│ └──────────┴──────────┴──────────┴──────────┘ │
-└────────────────────────────────────────────────────────┘
-▲
-│ lookup
-┌────────┴──────────────────────────────────────────────┐
-│ ConsTable (PSRAM hash map) │
-│ unordered_map&lt;uint64_t, SymExpr*, ..., PSRAMAlloc&gt; │
-│ │
-│ Key = structuralHash(node) │
-│ Collision resolution: open addressing (Robin Hood) │
-│ Load factor: ≤0.7 → rehash │
-└───────────────────────────────────────────────────────┘
+; If using sdkconfig defaults in mixed Arduino/IDF mode, set:
+; CONFIG_SPIRAM_USE_MALLOC=y
+; CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024
+; CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=<platform-tested value>
+```
 
+### 4.2 Global Allocation Redirection Example
 
-**Hash function design** (structural, recursive, cached):
+```cpp
+// src/math/giac/GiacAlloc.cpp
+#include <new>
+#include "esp_heap_caps.h"
 
-hash(SymNum&#123;val&#125;) = mix(0x01, hash_int(val.num), hash_int(val.den))
-hash(SymVar&#123;name&#125;) = mix(0x02, name)
-hash(SymNeg&#123;child&#125;) = mix(0x03, child-&gt;_hash)
-hash(SymAdd&#123;t[], n&#125;) = mix(0x04, sorted_hash(t[0]..t[n-1]))
-hash(SymMul&#123;f[], n&#125;) = mix(0x05, sorted_hash(f[0]..f[n-1]))
-hash(SymPow&#123;b, e&#125;) = mix(0x06, b-&gt;_hash, e-&gt;_hash)
-hash(SymFunc&#123;k, arg&#125;) = mix(0x07, k, arg-&gt;_hash)
+void* operator new(std::size_t size) {
+    void* p = heap_caps_malloc_prefer(
+        size,
+        2,
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT,
+        MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!p) throw std::bad_alloc();
+    return p;
+}
 
+void operator delete(void* p) noexcept {
+    heap_caps_free(p);
+}
 
-- `sorted_hash` for Add/Mul uses **canonical ordering** (by hash value) to
-  ensure commutativity: `x + y` and `y + x` hash identically.
-- Each node stores `uint64_t _hash` (8 bytes) computed once at creation.
-- `mix()` = `splitmix64` finalizer (fast, good avalanche).
+void* operator new[](std::size_t size) {
+    void* p = heap_caps_malloc_prefer(
+        size,
+        2,
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT,
+        MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!p) throw std::bad_alloc();
+    return p;
+}
 
-**Cons function** (replaces direct `arena.create<T>`):
+void operator delete[](void* p) noexcept {
+    heap_caps_free(p);
+}
+```
 
-SymExpr* cons(arena, consTable, SymExprType type, args...):
-Compute hash from type + args
-Probe consTable[hash]
-If found AND structurallyEqual → return existing pointer (DEDUP!)
-Else → arena.create&lt;T&gt;(args...), insert into consTable, return new
+### 4.3 Runtime Guardrails
 
-
-**Memory overhead**: ConsTable ≈ 16 bytes/entry (8 hash + 4 ptr + 4 next).
-For 10,000 unique nodes → ~160 KB. Fits comfortably in PSRAM.
-
-**Lifecycle**: ConsTable lives alongside its arena. `arena.reset()` also
-clears the ConsTable. No reference counting needed — all nodes share the
-same bulk lifetime.
-
-**SymSimplify refactor**: Must become **pure-functional** — never mutate
-input nodes. Instead of `n->child = simplify(n->child)`, do:
-
-SymExpr* newChild = simplify(n-&gt;child, arena, table);
-if (newChild == n-&gt;child) return n; // No change → reuse
-return cons(arena, table, Neg, newChild); // Changed → new immutable node
-
+1. Log `heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)` before and during step rendering.
+2. Keep hard limits equivalent to current step policy in `EquationsApp` (`STEPS_LABEL_BUDGET`, `STEPS_CANVAS_BUDGET`, child cap).
+3. Fail closed with a warning step when memory thresholds are crossed.
 
 ---
 
-### 2.3 Simplifier Termination Guarantee
+## 5. Giac/KhiCAS Version Policy (1.9+ Baseline)
 
-#### Problem Statement
+### 5.1 Baseline Decision
 
-A rule engine applying identities (trig, log, expansion, factoring) can
-oscillate:
+NumOS targets Giac/KhiCAS version line `>= 1.9.0` for first production integration.
 
-x(a+b) → xa + xb (expansion rule)
-xa + xb → x(a+b) (factoring rule)
-→ infinite loop
+`2.0.x` is allowed when the build is stable on ESP32-S3 and phase gates pass.
 
+### 5.2 Why Not 1.5-era Branches
 
-#### Solution: Three-Layer Termination Contract
+Public timeline entries indicate major evolution after 1.5, including:
 
-**Layer 1 — Canonical Ordering (prevents oscillation):**
+1. `1.6.17`: calculator compatibility and interpreter integration improvements.
+2. `1.7.x`: stronger Numworks connectivity and polynomial system solver updates.
+3. `1.9.0-x`: optimization and solver improvements, documentation modernization, bootloader compatibility updates.
+4. `2.0.0-x`: full-featured browser/offline workflows and ongoing packaging modernization.
 
-Every expression has a unique canonical form defined by a total order on nodes:
+### 5.3 Version Comparison (Strategic)
 
-Order priority:
-Constants &lt; Operations &lt; Variables &lt; Functions
-Among variables: alphabetical (a &lt; b &lt; x &lt; y &lt; z)
-Among sums: sorted by descending hash of each term
-Among products: sorted by descending hash of each factor
-Among powers: base-first, then exponent
-Canonical Form Contract:
-✓ Add terms are sorted (largest hash first)
-✓ Mul factors are sorted (largest hash first)
-✓ Double negation eliminated (--x → x)
-✓ Negation pushed inward (-(a+b) → (-a)+(-b))
-✓ Constants folded (3+5 → 8, 2·3 → 6)
-✓ Identities eliminated (0+x→x, 1·x→x, x^0→1, x^1→x)
-
-
-**Layer 2 — Monotonic Complexity Metric (prevents expansion):**
-
-Each expression has a **weight** = total node count in the DAG. Rules are
-only applied if the result's weight is **≤** the input's weight. This
-prevents unbounded expansion.
-
-             weight computation
-weight(Num) = 1
-weight(Var) = 1
-weight(Neg&#123;c&#125;) = 1 + weight(c)
-weight(Add&#123;t₁..tₙ&#125;) = 1 + Σweight(tᵢ)
-weight(Mul&#123;f₁..fₙ&#125;) = 1 + Σweight(fᵢ)
-weight(Pow&#123;b,e&#125;) = 1 + weight(b) + weight(e)
-weight(Func&#123;k,a&#125;) = 1 + weight(a)
-
-
-A rule `r(expr) → expr'` is accepted only if `weight(expr') ≤ weight(expr)`.
-Exception: targeted "unfold" rules (e.g. `tan→sin/cos`) carry a +1 weight
-allowance but are capped at 1 application per `tan` node.
-
-**Layer 3 — Hard Iteration Limit (absolute safety net):**
-
-MAX_SIMPLIFY_PASSES = 8
-for (int pass = 0; pass &lt; MAX_SIMPLIFY_PASSES; pass++) &#123;
-SymExpr* after = applyAllRules(expr, arena, consTable);
-if (after == expr) break; // Fixed point reached (pointer identity via hash-consing!)
-expr = after;
-&#125;
-
-
-Hash-consing makes the fixed-point check **free**: if `after == expr`
-(same pointer), no rules changed anything. No deep comparison needed.
-
-#### Simplification Rules (by priority group)
-
-| Group | Rules | Weight Effect |
-|-------|-------|:-------------:|
-| **G0: Normalize** | Flatten nested Add/Mul, sort children, canonical sign | ≤ 0 |
-| **G1: Identities** | `0+x→x`, `1·x→x`, `0·x→0`, `x^0→1`, `x^1→x` | -1 or more |
-| **G2: Constant fold** | `3+5→8`, `2·3→6`, `2^3→8` (small exponents only) | Reduces |
-| **G3: Like terms** | `2x+3x→5x`, `x·x→x²` via coefficient collection | ≤ 0 |
-| **G4: Power rules** | `x^a·x^b→x^(a+b)`, `(x^a)^b→x^(a·b)` | ≤ 0 |
-| **G5: Trig** | `sin²+cos²→1`, `tan→sin/cos` (one-shot), `sin(-x)→-sin(x)` | ≤ +1 (bounded) |
-| **G6: Log/Exp** | `ln(e^x)→x`, `e^(ln x)→x`, `ln(ab)→ln(a)+ln(b)` | ≤ 0 |
-| **G7: Factor** | `ax+bx→(a+b)x` (reverse distribution, only if weight ≤) | ≤ 0 |
+| Dimension | Giac 1.5-era baseline | Giac 1.9.x | Giac 2.0.x |
+|---|---|---|---|
+| Modern packaging cadence | Low | High | High |
+| Calculator ecosystem maintenance | Legacy | Active | Active |
+| Optimization updates (post-2015) | Limited | Significant | Significant |
+| Integration confidence for new ports | Medium | High | High, but verify per release |
+| Recommended for NumOS | No | Yes (initial) | Yes (after validation) |
 
 ---
 
-### 2.4 Risch & Gröbner Feasibility
+## 6. C++ Wrapper Bridge Contract
 
-#### Risch Algorithm — Verdict: NOT FEASIBLE on ESP32
+Giac must never be called ad hoc from UI widgets. All calls go through a single bridge contract.
 
-The full Risch algorithm requires:
+### 6.1 API Shape
 
-1. **Polynomial GCD over algebraic extensions** — needs multivariate polynomial
-   arithmetic with algebraic number fields ($\mathbb&#123;Q&#125;(\alpha)$).
-2. **Hermite reduction** — partial fraction decomposition over $\mathbb&#123;Q&#125;[x]$.
-3. **Rothstein-Trager** — resultant computation, polynomial factoring.
-4. **Logarithmic part** — solving systems of algebraic equations.
+```cpp
+// src/math/giac/GiacBridge.h
+struct GiacStep {
+    std::string description;
+    std::string latex;
+};
 
-Each of these subroutines alone can consume &gt;1 MB of working memory for
-non-trivial inputs. The full Risch on ESP32-S3 is **architecturally infeasible**
-without radical compromises.
+struct GiacRequest {
+    std::string command;
+    bool withSteps = false;
+};
 
-#### Slagle Heuristic — Verdict: EXCELLENT FIT for ESP32
+struct GiacResponse {
+    bool ok = false;
+    std::string latex;
+    std::string plain;
+    std::vector<GiacStep> steps;
+    std::string error;
+};
 
-James Slagle's SAINT (1961) is a **pattern-matching + recursive decomposition**
-approach that solves ~90% of calculus textbook integrals:
+class GiacBridge {
+public:
+    bool begin();
+    void resetContext();
+    GiacResponse evaluate(const GiacRequest& req);
+};
+```
 
-Slagle cascade:
-Table lookup: ∫x^n dx, ∫sin dx, ∫e^x dx, ... (O(1))
-Linearity: ∫(af+bg)dx = a∫f dx + b∫g dx
-U-substitution: If f(x) = g(u)·u', try ∫g(u)du
-Integration by parts: ∫u dv = uv - ∫v du (LIATE heuristic)
-Trig substitution: sin²→(1-cos2x)/2, etc.
-Partial fractions: For rational functions P(x)/Q(x)
-Newton fallback: Numeric quadrature if all else fails
+### 6.2 Execution Model
 
+1. App state enqueues request.
+2. Worker executes Giac eval in isolated context.
+3. Response contains final result + optional steps payload.
+4. UI thread only receives rendered-ready payload; never manipulates Giac internals.
 
-
-**Memory profile**: Each heuristic step creates O(1) new SymExpr nodes.
-Total working set for one integration: ~2-5 KB in the arena. With hash-consing,
-shared subexpressions reduce this further.
-
-**Performance profile**: Pattern matching is O(n) per rule × O(k) rules × O(d)
-recursion depth. For textbook integrals: n≤50 nodes, k≤100 rules, d≤10.
-Total: ~50,000 operations ≈ **&lt;1 ms at 240 MHz**.
-
-#### Gröbner Bases — Verdict: RESULTANT SUBSET ONLY
-
-Full Buchberger on arbitrary ideals has **doubly-exponential** worst-case
-complexity. On ESP32 with 8 MB PSRAM:
-
-| System Size | Buchberger Memory | Resultant Memory | Feasible? |
-|-------------|------------------:|-----------------:|-----------|
-| 2 eqs, 2 vars, deg 2 | ~10 KB | ~2 KB | ✅ Both |
-| 2 eqs, 2 vars, deg 4 | ~500 KB | ~50 KB | ✅ Both |
-| 3 eqs, 3 vars, deg 2 | ~5 MB | ~200 KB | ⚠️ Resultant only |
-| 3 eqs, 3 vars, deg 4 | ~200 MB | ~10 MB | ❌ Neither |
-
-**Decision**: Implement **Sylvester Resultant** for 2-variable, 2-equation
-nonlinear systems. This eliminates one variable algebraically, reducing to a
-univariate polynomial solved by existing `SingleSolver`. For 3+ variables
-or high degree, fall back to multivariate Newton.
+This aligns with existing non-blocking behavior in the `EquationsApp` staged pipeline.
 
 ---
 
-## 3. Architectural Decisions
+## 7. LVGL Rendering Evolution for Giac LaTeX Output
 
-| # | Decision | Rationale |
-|---|----------|-----------|
-| **D1** | Hybrid BigInt: `int64_t` fast-path + `mbedtls_mpi` on overflow | 95% of inputs use small numbers; &lt;2 cycle overhead for overflow check |
-| **D2** | Hash-consing DAG in PSRAM via ConsTable + Arena | Deduplicates shared subexpressions; O(1) equality via pointer identity |
-| **D3** | Canonical ordering via hash-sorted children | Eliminates commutativity oscillation in simplifier |
-| **D4** | Monotonic weight metric + 8-pass hard limit | Guarantees simplifier termination without losing useful rules |
-| **D5** | Slagle heuristic integration (no Risch) | Covers ~90% of textbook integrals; fits in &lt;5 KB arena per operation |
-| **D6** | Resultant elimination for 2×2 nonlinear (no full Gröbner) | Bounded memory; reduces to existing univariate solver |
-| **D7** | ESP32-only CAS, no emulator | All CAS tests run on hardware via Serial Monitor |
-| **D8** | ExactVal → split into `CASRational` + symbolic constants in DAG | Cleaner separation; `π`, `e`, `√n` become tree nodes, not packed fields |
-| **D9** | Arena Reset lifecycle (no GC) | Apps call `_arena.reset()` on exit; no ref-counting overhead |
-| **D10** | SymSimplify becomes pure-functional (no mutation) | Required by hash-consing immutability; enables pointer-identity fixed-point |
+Current renderer is AST-based, not TeX-based. This is a strength.
 
----
+Migration rule: do not replace `MathRenderer`; feed it better trees.
 
-## 4. Phased Execution Strategy
+### 7.1 New Render Flow
 
-### Phase 1: BigInt Hybrid Engine ✅ COMPLETE
+1. `gen` result from Giac.
+2. `gen2tex(...)` to canonical TeX-like string.
+3. TeX adapter parses output into `MathAST`.
+4. Existing `MathCanvas` draws with current quality and cursor conventions.
 
-&gt; **Goal**: Eliminate all `int64_t` overflow bugs. Zero silent wraparound.
-&gt; **Duration**: ~2 weeks → **Completed**
-&gt; **Risk**: Low (isolated to numeric layer, no UI changes)
+### 7.2 Parser Scope (Phase-Gated)
 
-**Step 1.1 — Create `CASInt` wrapper class**
-- File: `src/math/cas/CASInt.h`
-- Stores `int64_t _val` (hot path) + `mbedtls_mpi* _big` (cold, `nullptr` default)
-- Implements `add`, `sub`, `mul`, `div`, `mod`, `gcd`, `cmp`, `isZero`, `abs`
-- Every multiply uses `__builtin_mul_overflow(a, b, &result)`
-- On overflow: promote both operands to `mbedtls_mpi`, retry
-- On GCD reduction: if `mbedtls_mpi_bitlen() <= 63`, demote back to `int64_t`
-- `mbedtls_mpi` allocations routed to PSRAM via `mbedtls_platform_set_calloc_free()`
+Phase 1 TeX subset:
 
-**Step 1.2 — Create `CASRational` class**
-- File: `src/math/cas/CASRational.h`, `.cpp`
-- Fields: `CASInt num, den` (den always &gt; 0, auto-GCD-reduced)
-- Methods: `add`, `sub`, `mul`, `div`, `neg`, `pow(int exp)`, `cmp`, `isZero`, `isInteger`, `toDouble`
-- Replace every `int64_t` multiply in `exactAdd`/`exactMul`/`exactPow`/`exactSqrt` with `CASInt::mul`
-- Auto-normalize after every operation
+1. Fractions (`\\frac`)
+2. Powers/subscripts (`^`, `_`)
+3. Parentheses and group braces
+4. Roots (`\\sqrt`)
+5. Core Greek/constants/operators used in school workflows
 
-**Step 1.3 — Migrate existing `ExactVal` users**
-- `SymNum` node: change `ExactVal val` → `CASRational coeff` + remove `outer/inner/piMul/eMul`
-  (these will become separate SymExpr nodes: `SymMul(coeff, SymPow(SymVar('π'), n))`)
-- `SymPoly::SymTerm`: change `ExactVal coeff` → `CASRational coeff`
-- Legacy numeric pipeline (`CalculationApp`): keep `ExactVal` for display.
-  Bridge via `CASRational::toExactVal()` converter
+Unsupported tokens must degrade gracefully:
 
-**Step 1.4 — Create overflow regression tests**
-- File: `tests/BigIntTest.h`, `tests/BigIntTest.cpp`
-- Test: `100! / 50!` (large factorial), `999999937^10` (prime power), `fibonacci(90)²`
-- Test: promotion, demotion, round-trip `int64→mpi→int64`
-- Test: `CASRational` arithmetic with numbers exceeding `INT64_MAX`
-- Target: **30 tests**, all passing
-
-**Verification**: Run all existing 85+ CAS tests. Must still pass (no regression).
-Run new BigIntTest. Run `exactPow(fromInt(999999937), 10)` — must not silently
-wrap.
+1. Fallback to plain label representation.
+2. Log unsupported token for parser coverage tracking.
 
 ---
 
-### Phase 2: Immutable DAG & Hash-Consing ✅ COMPLETE
+## 8. step_by_step Tutor Mapping Constitution
 
-&gt; **Goal**: SymExpr nodes become immutable with structural sharing via hash-consing.
-&gt; **Duration**: ~3 weeks → **Completed**
-&gt; **Risk**: Medium (SymSimplify refactor is the hardest part)
+NumOS will map Giac step workflows into the existing educational UI model.
 
-**Step 2.1 — Add `_hash` field to `SymExpr`**
-- Add `uint64_t _hash` to `SymExpr` base class (8 bytes)
-- Add `virtual uint64_t computeHash() const = 0` to each subclass
-- Hash computed once in constructor, stored immutably
-- Hash function: `splitmix64` finalizer with type discriminator
+### 8.1 Input Strategy
 
-**Step 2.2 — Create `ConsTable` class**
-- File: `src/math/cas/ConsTable.h`
-- Open-addressing hash map: `SymExpr* _buckets[]`, `size_t _capacity`, `size_t _size`
-- Backed by `PSRAMAllocator`
-- API: `SymExpr* findOrInsert(uint64_t hash, SymExpr* candidate)`
-- Structural equality check on hash collision (compare type + fields recursively)
-- Load factor ≤ 0.7 → rehash (double capacity)
-- `reset()` → clear all buckets (called with arena reset)
+The adapter must support both:
 
-**Step 2.3 — Create `cons()` factory functions**
-- File: `src/math/cas/ConsFactory.h`
-- Replace `symNum(arena, ...)` → `consNum(arena, table, ...)`
-- Replace `symAdd(arena, ...)` → `consAdd(arena, table, ...)`
-- etc. for all 7 node types
-- Children of `SymAdd`/`SymMul` are **sorted by hash** during construction
-  (canonical ordering) before the cons lookup
-- If existing node found in table → return existing (dedup!)
-- If not → allocate in arena, insert in table, return new
+1. Explicit step command path (`step_by_step(...)`) where available.
+2. Alternative step-rich outputs driven by solver commands and context flags.
 
-**Step 2.4 — Refactor SymSimplify to pure-functional**
-- Current: `n->child = simplify(n->child, arena)` (MUTATES input)
-- New: `SymExpr* newChild = simplify(n->child, arena, table); if (newChild == n->child) return n; return consNeg(arena, table, newChild);`
-- Every `simplifyXxx` function now takes `ConsTable&` parameter
-- Fixed-point check becomes `==` pointer comparison (free via hash-consing)
+### 8.2 Canonical Internal Step Record
 
-**Step 2.5 — Refactor SymDiff to use cons functions**
-- All `symAdd(arena, ...)` → `consAdd(arena, table, ...)`
-- Derivative of `sin(x)` used N times → cons returns same `cos(x)` node
-- Thread `ConsTable&` through `diff()` signature
+```cpp
+struct TutorStepRecord {
+    std::string description;
+    std::string latex;
+    bool isResult = false;
+};
+```
 
-**Step 2.6 — Refactor ASTFlattener to use cons functions**
-- Change `flattenToExpr(MathNode*)` to thread `ConsTable&`
-- All arena factory calls → cons equivalents
+### 8.3 Mapping Rules
 
-**Step 2.7 — Expand arena capacity**
-- Increase `MAX_BLOCKS` from 4 → 16 (1 MB max)
-- Add `ConsTable` as companion: `SymExprArena::consTable()` accessor
-- `arena.reset()` calls `consTable.reset()` automatically
+| Giac payload shape | Adapter behavior | UI output |
+|---|---|---|
+| Scalar expression | `gen2tex` and mark as single result | One MathCanvas row |
+| Vector of expressions | Iterate and convert each expression | Multi-step canvases |
+| Mixed vector (strings + expressions) | Strings become descriptions, expressions become formula rows | Label + canvas pairs |
+| Nested vectors | Flatten with stable order | Deterministic sequence |
 
-**Step 2.8 — Integration tests**
-- File: `tests/ConsTableTest.h`, `tests/ConsTableTest.cpp`
-- Test: cons same number twice → same pointer
-- Test: cons `x + y` and `y + x` → same pointer (canonical ordering)
-- Test: cons `sin(x)` 100 times → 1 allocation
-- Test: simplify `(x + 0)` → returns exact pointer to `x`
-- Test: arena reset clears ConsTable
-- Target: **20 tests**
+### 8.4 Integration with Existing Pipeline
 
-**Verification**: All 85+ existing CAS tests still pass. Memory usage for
-differentiating `sin(x)^10` is measurably lower than pre-consing baseline
-(log `arena.currentUsed()` before/after).
+Map directly to `EquationsApp` staged rendering behavior:
+
+1. `PARSE`: parse request and detect step mode.
+2. `SOLVE`: run Giac and collect raw step payload.
+3. `RENDER_CHUNK`: convert each step to AST and emit chunks using existing memory budgets.
+4. `FINALIZE`: append hint/footer and hide progress label.
 
 ---
 
-### Phase 3: Fixed-Point Simplifier ✅ COMPLETE
+## 9. Six-Phase Integration Roadmap (Realistic)
 
-&gt; **Goal**: Multi-pass rule engine with trig/log identities, canonical form,
-&gt; guaranteed termination.
-&gt; **Duration**: ~2 weeks → **Completed**
-&gt; **Risk**: Medium (termination guarantee is the critical concern)
+## Phase 1 - Build Skeleton and Legal Baseline
 
-**Step 3.1 — Add `weight()` to SymExpr**
-- Add `virtual uint32_t weight() const = 0` to `SymExpr`
-- Implementation: node count (cached in `_weight` field, 4 bytes)
-- Computed once at construction, immutable
+Goals:
 
-**Step 3.2 — Implement canonical ordering comparator**
-- `int symCmp(const SymExpr* a, const SymExpr* b)` — total order
-- Used by cons factory to sort `SymAdd` terms and `SymMul` factors
-- Order: `Num < Neg < Add < Mul < Pow < Var < Func`
-- Within same type: compare by hash (deterministic)
+1. Bring Giac/KhiCAS source snapshot into `lib/third_party/giac`.
+2. Establish compile profile for `emulator_pc` and ESP32 target.
+3. Add license files and attribution documentation.
 
-**Step 3.3 — Restructure SymSimplify as multi-pass engine**
-- File: `src/math/cas/SymSimplify.cpp` (refactor in-place)
-- New top-level:
+Exit criteria:
 
-simplify(expr, arena, table):
-for pass in 0..MAX_PASSES-1:
-expr2 = canonicalize(expr) // G0: sort, flatten
-expr2 = eliminateIdentities(expr2) // G1: 0+x→x, 1·x→x
-expr2 = foldConstants(expr2) // G2: 3+5→8
-expr2 = collectLikeTerms(expr2) // G3: 2x+3x→5x
-expr2 = applyPowerRules(expr2) // G4: x^a·x^b→x^(a+b)
-expr2 = applyTrigRules(expr2) // G5: sin²+cos²→1
-expr2 = applyLogRules(expr2) // G6: ln(e^x)→x
-if (expr2 == expr) break // Pointer identity → fixed point
-expr = expr2
-return expr
+1. Bridge compiles and returns result for `2+2` in both native and ESP32 builds.
+2. CI job reports third-party version hash and license notice.
 
-- `MAX_PASSES = 8`
+## Phase 2 - Memory Redirection and Stability
 
-**Step 3.4 — Implement G3: Like-term collection**
-- Walk `SymAdd` terms. Group by "base expression" (everything except numeric
-coefficient). Sum coefficients.
-- `2x + 3x → 5x` becomes: group by `x`, sum coeffs `2+3=5`, emit `5·x`
-- Weight-neutral: replaces N terms with 1 term (weight decreases)
+Goals:
 
-**Step 3.5 — Implement G4: Power rules**
-- In `SymMul`: find pairs `x^a, x^b` (same base via pointer identity).
-Replace with `x^(a+b)`. Weight-neutral.
-- `(x^a)^b → x^(a·b)`: only when both exponents are `SymNum`. Weight decreases.
+1. Route CAS-heavy allocations to PSRAM.
+2. Preserve internal RAM for DMA and latency-sensitive allocations.
+3. Add heap telemetry in debug mode.
 
-**Step 3.6 — Implement G5: Trig identities**
-- `sin(x)² + cos(x)² → 1` — detect within `SymAdd`, requires identifying
-`SymPow(SymFunc(Sin,u), 2)` + `SymPow(SymFunc(Cos,u), 2)` with pointer-equal `u`
-- `sin(-x) → -sin(x)` — detect `SymFunc(Sin, SymNeg(u))`, weight-neutral
-- `cos(-x) → cos(x)` — detect `SymFunc(Cos, SymNeg(u))`, weight decreases
-- `tan(x) → sin(x)/cos(x)` — applied **once per tan node** (annotated to prevent re-application), weight +1 (allowed)
+Exit criteria:
 
-**Step 3.7 — Implement G6: Log/Exp identities**
-- `ln(e^x) → x` — detect `SymFunc(Ln, SymFunc(Exp, u))`, weight -2
-- `e^(ln(x)) → x` — detect `SymFunc(Exp, SymFunc(Ln, u))`, weight -2
-- `ln(a·b) → ln(a) + ln(b)` — only when weight doesn't increase (i.e., `a`, `b`
-are simple nodes)
+1. Large symbolic operations do not exhaust internal heap.
+2. No display corruption/regression under concurrent UI + CAS workload.
 
-**Step 3.8 — Tests**
-- File: `tests/SimplifierTest.h`, `tests/SimplifierTest.cpp`
-- Test: `sin(x)² + cos(x)² → 1` (Pythagorean identity)
-- Test: `ln(e^x) → x`
-- Test: `2x + 3x → 5x`
-- Test: `x² · x³ → x⁵`
-- Test: `(x²)³ → x⁶`
-- Test: Termination on pathological input `sin(cos(sin(cos(x))))`
-- Test: Pass count ≤ 8 for any expression
-- Target: **25 tests**
+## Phase 3 - GiacBridge and Command Contract
 
-**Verification**: Existing CAS tests pass. New simplifier produces same or simpler
-results for all existing differentiation test cases. No test takes &gt;50ms.
+Goals:
 
----
+1. Implement `GiacBridge` API with robust error propagation.
+2. Add context reset and deterministic evaluation paths.
+3. Add smoke tests for simplify/solve/diff/integrate commands.
 
-### Phase 4: Symbolic Integration (Slagle) ✅ COMPLETE
+Exit criteria:
 
-&gt; **Goal**: Implement a heuristic symbolic integration engine using
-&gt; pattern matching, u-substitution, and integration by parts.
-&gt; **Duration**: ~3 weeks → **Completed**
-&gt; **Risk**: Medium-High (recursive heuristics need careful depth bounding)
+1. `EquationsApp` can request final symbolic results through bridge only.
+2. No direct CAS UI calls bypassing bridge remain in active path.
 
-**Step 4.1 — Create `SymIntegrate` static class**
-- File: `src/math/cas/SymIntegrate.h`, `src/math/cas/SymIntegrate.cpp`
-- API: `static SymExpr* integrate(SymExpr* expr, char var, SymExprArena& arena, ConsTable& table, CASStepLogger* log = nullptr)`
-- Returns `nullptr` if integration fails (not expressible in closed form)
+## Phase 4 - TeX-to-MathAST Rendering Bridge
 
-**Step 4.2 — Implement table lookup (Level 1)**
-- ~50 standard integral forms as pattern → result pairs
-- Patterns stored as `SymExprType` + structural template
+Goals:
 
-| # | Pattern | Result |
-|---|---------|--------|
-| 1 | `∫ c dx` | `c·x` |
-| 2 | `∫ x^n dx` (n≠-1) | `x^(n+1)/(n+1)` |
-| 3 | `∫ x^(-1) dx` | `ln(|x|)` |
-| 4 | `∫ e^x dx` | `e^x` |
-| 5 | `∫ a^x dx` | `a^x / ln(a)` |
-| 6 | `∫ sin(x) dx` | `-cos(x)` |
-| 7 | `∫ cos(x) dx` | `sin(x)` |
-| 8 | `∫ tan(x) dx` | `-ln(cos(x))` |
-| 9 | `∫ sec²(x) dx` | `tan(x)` |
-| 10 | `∫ 1/(1+x²) dx` | `arctan(x)` |
-| 11 | `∫ 1/√(1-x²) dx` | `arcsin(x)` |
-| 12–50 | (hyperbolic, composite power, exp·trig, etc.) | ... |
+1. Implement tokenizer/parser for Giac TeX subset.
+2. Convert TeX output to existing `MathAST` nodes.
+3. Integrate with `MathCanvas` in result views.
 
-**Step 4.3 — Implement linearity (Level 2)**
-- `∫(a·f + b·g)dx = a·∫f dx + b·∫g dx`
-- Split `SymAdd` terms, factor out constants from `SymMul`, recurse
+Exit criteria:
 
-**Step 4.4 — Implement u-substitution (Level 3)**
-- Given `∫f(g(x))·g'(x) dx`, recognize inner function `g(x)`, verify that
-the remaining factor is proportional to `g'(x)` (via `SymDiff::diff`), then
-substitute `u = g(x)` and recurse on `∫f(u) du`
-- Candidate `g(x)` heuristics: innermost function argument, denominators, exponents
-- Max recursion depth: 5
+1. Fraction/power/root expressions from Giac render correctly in VPAM.
+2. Unsupported TeX degrades gracefully with logs, not crashes.
 
-**Step 4.5 — Implement integration by parts (Level 4)**
-- LIATE rule for choosing `u` and `dv`:
-- **L**ogarithmic &gt; **I**nverse trig &gt; **A**lgebraic &gt; **T**rig &gt; **E**xponential
-- `∫u dv = u·v - ∫v du` — recursion with depth limit 3
-- Detection: product of two "different type" expressions
-(e.g., `x · e^x`, `x² · sin(x)`, `ln(x) · x`)
+## Phase 5 - Tutor Step Integration
 
-**Step 4.6 — Implement trig substitution (Level 5)**
-- `sin²(x) → (1 - cos(2x))/2`
-- `cos²(x) → (1 + cos(2x))/2`
-- `sin(x)·cos(x) → sin(2x)/2`
-- Applied before u-sub when trig powers are detected
+Goals:
 
-**Step 4.7 — Implement partial fractions (Level 6)**
-- For `P(x)/Q(x)` where `deg(P) < deg(Q)`:
-- If `Q` is linear: trivial
-- If `Q` is quadratic: complete the square, arctan/log form
-- If `Q` factors (find rational roots via SingleSolver trial): decompose
-- Requires polynomial long division (new utility in SymPoly)
+1. Implement step adapter for vector/mixed Giac outputs.
+2. Map steps into staged incremental renderer with memory caps.
+3. Preserve highlight semantics for affected expression regions where possible.
 
-**Step 4.8 — Add `SymPoly::longDivision()` utility**
-- `static pair<SymPoly, SymPoly> divmod(SymPoly dividend, SymPoly divisor)`
-- Standard synthetic division algorithm
-- Used by partial fractions and future factoring
+Exit criteria:
 
-**Step 4.9 — Integration tests**
-- File: `tests/IntegrationTest.h`, `tests/IntegrationTest.cpp`
-- Verify by differentiating the result and simplifying to the original:
-`simplify(diff(integrate(f), x)) == simplify(f)` (pointer identity!)
-- Test 50 standard integrals from AP Calculus / PAU syllabi
-- Test u-sub: `∫2x·cos(x²) dx = sin(x²) + C`
-- Test by-parts: `∫x·e^x dx = (x-1)·e^x + C`
-- Test partial frac: `∫1/(x²-1) dx = (1/2)·ln|(x-1)/(x+1)| + C`
-- Target: **50 tests**
+1. Step view supports long derivations without UI lockups.
+2. Progress and fail-closed behavior mirrors current reliability guarantees.
 
-**Verification**: All derivatives of integration results, when simplified,
-match the integrand (via pointer identity after simplify).
+## Phase 6 - Decommission and Cutover
+
+Goals:
+
+1. Turn Giac path into default symbolic backend.
+2. Freeze then remove obsolete custom symbolic engines from primary build.
+3. Keep one emergency fallback build profile for one release cycle.
+
+Exit criteria:
+
+1. All symbolic user flows pass through Giac in production profile.
+2. Legacy custom CAS code is either archived or guarded behind explicit legacy flag.
 
 ---
 
-### Phase 5: Multivariable & Resultant Solver ✅ COMPLETE
+## 10. Decommission Plan (Legacy CAS)
 
-&gt; **Goal**: Extend SymExpr to native multivariate. Solve 2×2 nonlinear systems
-&gt; via Sylvester resultant elimination.
-&gt; **Duration**: ~2 weeks → **Completed**
-&gt; **Risk**: Medium
+This plan avoids a big-bang deletion and prevents accidental regressions.
 
-**Step 5.1 — Extend `SymExpr::evaluate()` to multivariate**
-- Change: `virtual double evaluate(double varVal) const = 0`
-- To: `virtual double evaluate(const VarMap& vars) const = 0`
-- Where: `using VarMap = std::array<double, 26>` (index = `var - 'a'`, 208 bytes on stack)
-- `SymVar::evaluate(vars)` → `return vars[name - 'a']`
-- Backward compatibility: add inline helper `double evaluate(char var, double val)`
-that creates a VarMap with one entry
+### 10.1 Freeze Immediately (No New Features)
 
-**Step 5.2 — Create `SymPolyMulti` class for resultant computation**
-- File: `src/math/cas/SymPolyMulti.h`, `.cpp`
-- Sparse multivariate polynomial: `map<Monomial, CASRational>` where
-`Monomial = array<int8_t, 4>` (exponents for up to 4 variables)
-- Operations: `add`, `sub`, `mul`, `degree(var)`, `leadingCoeff(var)`
-- `toSymExpr(arena, table)` → convert back to SymExpr DAG for rendering
+1. `src/math/cas/RuleEngine.*`
+2. `src/math/cas/AlgebraicRules.*`
+3. `src/math/cas/SingleSolver.*`
+4. `src/math/cas/SystemSolver.*`
+5. `src/math/cas/OmniSolver.*`
+6. `src/math/cas/SystemTutor.*`
 
-**Step 5.3 — Implement Sylvester resultant**
-- `CASRational resultant(SymPolyMulti& f, SymPolyMulti& g, char eliminateVar)`
-- Constructs Sylvester matrix, computes determinant via Bareiss algorithm
-(fraction-free Gaussian elimination — avoids BigNum explosion)
-- Result is a univariate polynomial in the remaining variable
+### 10.2 Transitional Adapters (Temporary)
 
-**Step 5.4 — Implement nonlinear 2×2 solver in OmniSolver**
-- When OmniSolver detects 2 equations with 2 variables:
-1. Convert both SymExpr → SymPolyMulti
-2. Compute `resultant(f, g, 'y')` → univariate in `x`
-3. Solve univariate via existing SingleSolver
-4. Back-substitute each `x` solution into either equation → solve for `y`
-5. Return solution pairs `{(x₁,y₁), (x₂,y₂), ...}`
-- Degree bound: reject if total degree &gt; 6 (too expensive)
+1. `src/math/cas/SymExprToAST.*`
+2. `src/math/cas/SymToAST.*`
+3. `src/math/cas/CasToVpam.*`
 
-**Step 5.5 — Extend HybridNewton to multivariate**
-- 2D Newton: `(x,y) -= J⁻¹·F(x,y)` where `J` is the 2×2 Jacobian
-- Jacobian computed via `SymDiff::diff(f, 'x')`, `SymDiff::diff(f, 'y')`, etc.
-- Fallback for nonlinear systems that exceed the resultant degree bound
-- Multiple initial guesses on a 2D grid
+These remain during migration as compatibility layers until TeX bridge reaches feature parity.
 
-**Step 5.6 — Tests**
-- File: `tests/ResultantTest.h`, `tests/ResultantTest.cpp`
-- Test: `x² + y² = 1, x + y = 1` → solve via resultant
-- Test: `xy = 6, x + y = 5` → `(2,3), (3,2)`
-- Test: `x² - y = 0, x - y² = 0` → `(0,0), (1,1)`
-- Test: degree &gt; 6 → graceful fallback to Newton
-- Target: **20 tests**
+### 10.3 Removal Trigger
+
+Remove or archive legacy symbolic modules after:
+
+1. Two consecutive release candidates pass with Giac backend enabled.
+2. Step tutorial parity is confirmed on supported equation classes.
+3. Memory safety metrics remain within target thresholds on real hardware.
 
 ---
 
-### Phase 6: Unified Calculus App (d/dx + ∫dx) ✅ COMPLETE
+## 11. Capability Comparison Table
 
-&gt; **Goal**: Merge CalculusApp (derivatives) and IntegralApp into single unified Calculus App with tab-based mode switching, update all docs, final stress test.
-&gt; **Duration**: ~2 weeks → **Completed**
-&gt; **Risk**: Low (combines proven CalculusApp and integration pipelines)
+### 11.1 Custom CAS vs Giac-Based NumOS
 
-**Step 6.1 — Unified `CalculusApp` Architecture**
-- File: `src/apps/CalculusApp.h`, `src/apps/CalculusApp.cpp`
-- Single app with `CalcMode` enum: `DERIVATIVE` / `INTEGRAL`
-- Tab-based UI: "d/dx Derive" (orange #E05500) / "∫dx Integrate" (purple #6A1B9A)
-- Toggle mode via GRAPH key (or tab widget click)
-- Dual pipelines:
-  - **Derivative**: `MathAST → ASTFlattener → SymExpr → SymDiff → SymSimplify → SymExprToAST → MathCanvas`
-  - **Integral**: `MathAST → ASTFlattener → SymExpr → SymIntegrate → SymSimplify → SymExprToAST → MathCanvas`
-- Display: `f(x) =` [original], `d/dx f(x) =` [derivative] OR `∫f(x)dx =` [antiderivative + C]
-- Steps show which rule/heuristic was applied (differentiation rules, integration strategy, etc.)
+| Capability | Current custom stack | Giac/KhiCAS target |
+|---|---|---|
+| Algebra breadth | Medium (rule-limited) | High (mature symbolic engine) |
+| Exact arithmetic depth | Good in scoped paths | High and broad |
+| Symbolic integration breadth | Limited heuristics | Much broader built-in coverage |
+| Nonlinear solving robustness | Mixed by class | Stronger mature heuristics |
+| Step-by-step pedagogy | Good for implemented rules | Good with adapter + richer backend |
+| Rendering quality | High (VPAM) | High (same VPAM, richer inputs) |
+| Maintenance burden | High internal burden | Lower algorithm burden, higher integration discipline |
 
-**Step 6.2 — Register Unified CalculusApp in SystemApp**
-- Remove `Mode::APP_INTEGRAL` and `IntegralApp` references from `SystemApp.h`
-- Route id=3 → `Mode::APP_CALCULUS` (unified app)
-- Wire lifecycle, key dispatch (GRAPH toggles mode), launch, returnToMenu
-- Add `FREE_EQ` as ENTER alias for EXE-key alternative
+### 11.2 Historical Baseline Comparison (Version Track)
 
-**Step 6.3 — Add SettingsApp Integration**
-- SettingsApp already exists with complex roots toggle and decimal precision
-- No additional changes needed — already registered and functional
-
-**Step 6.4 — Update All Documentation**
-- Update MATH_ENGINE.md: merge §8.13 (old CalculusApp/IntegralApp) → unified CalculusApp description
-- Remove orphaned IntegralApp references
-- Update README.md architecture diagram: single CalculusApp box, add SettingsApp box
-- Update PROJECT_BIBLE.md: LVGL-native apps list, module inventory, state table
-- Update HARDWARE.md: keyboard layout (5×10 matrix), build stats, SPI frequency (10 MHz)
-- Update ROADMAP.md: Phase 6 milestone completed, build stats updated
-- Update CAS_UPGRADE_ROADMAP.md: Phase 6 description, both build stat tables
-
-**Step 6.5 — Final Stress Test**
-- 100-iteration loop: random expressions from corpus of 50 functions
-- Toggle between derivative and integral modes for each expression
-- Simplify results and verify `simplify(diff(integrate(f))) ≈ f` where applicable
-- Log peak memory usage — must stay &lt; 2 MB
-- Target: hardware Serial output with PASS/FAIL per iteration
-
-**Verification**: Full build. RAM 28.8%, Flash 19.3%. All 200+ tests pass. Both pipelines verified. Settings App operational.
+| Dimension | Older 1.5-era deployments | Giac 1.9+ / 2.0 track |
+|---|---|---|
+| Active maintenance | Lower | Higher |
+| Post-2015 algorithm updates | Limited | Significant |
+| Packaging and compatibility updates | Limited | Ongoing |
+| Recommended for NumOS | No | Yes |
 
 ---
 
-## 5. Risk Matrix
+## 12. Open-Source Covenant
 
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
-| **mbedtls_mpi too slow for inner loops** | High | Low | Hybrid int64 fast-path; mpi only on overflow |
-| **Hash-consing memory overhead exceeds PSRAM** | High | Low | ConsTable with 0.7 load factor; max 1MB arena; monitor via `blockCount()` |
-| **Simplifier oscillation despite canonical order** | Medium | Medium | Weight monotonicity + 8-pass hard limit + pointer-identity fixed-point |
-| **U-substitution recursion stack overflow** | Medium | Low | Depth limit = 5; each level uses &lt;500B stack |
-| **Resultant matrix too large for high-degree systems** | Medium | Medium | Degree cap at 6; graceful Newton fallback |
-| **SymSimplify refactor breaks existing tests** | High | Medium | Pure-functional refactor is reversible; keep old code in `#if 0` blocks during transition |
-| **ExactVal→CASRational migration breaks CalculationApp** | Medium | Low | Bridge via `toExactVal()` converter; legacy path untouched |
-| **Integration by parts infinite loop (∫e^x dx → e^x → ∫e^x dx)** | Low | Medium | Taboo list: if integral recurs to same form, stop and return failure |
+NumOS adopts this migration as an open engineering collaboration, not a closed fork strategy.
 
----
+Commitments:
 
-## 6. Memory Budget
+1. Keep Giac/KhiCAS source provenance explicit in repository metadata.
+2. Publish local patches as clean, reviewable commits.
+3. Contribute upstream fixes when they are generic and reusable.
+4. Keep educational step UX as a first-class NumOS differentiator.
 
-### PSRAM Allocation Plan (8 MB = 8,388,608 bytes)
+License policy:
 
-| Component | Budget | Notes |
-|-----------|-------:|-------|
-| SymExprArena (nodes) | 1,048,576 B (1 MB) | 16 blocks × 64 KB |
-| ConsTable (hash map) | 524,288 B (512 KB) | ~32K entries × 16 B/entry |
-| CASStepLogger | 65,536 B (64 KB) | ~500 steps × 128 B average |
-| SymPolyMulti working set | 262,144 B (256 KB) | Resultant matrices |
-| mbedtls_mpi limb arrays | 131,072 B (128 KB) | Promoted BigNums |
-| Integration working set | 131,072 B (128 KB) | Recursive heuristic state |
-| **CAS subtotal** | **2,162,688 B (2.06 MB)** | **24.6% of PSRAM** |
-| LVGL draw buffers | ~153,600 B (150 KB) | 320×240 RGB565 |
-| Application heap | ~500 KB | App widgets, strings |
-| **System subtotal** | ~650 KB | |
-| **Total committed** | ~2.8 MB | **33% of PSRAM** |
-| **Free reserve** | ~5.5 MB | **66% headroom** |
-
-### Internal SRAM Allocation (328 KB)
-
-| Component | Budget | Notes |
-|-----------|-------:|-------|
-| Stack (main task) | 16 KB | ESP32 default |
-| LVGL core + objects | ~80 KB | Screens, widgets, styles |
-| DMA buffers (SPI/TFT) | ~20 KB | TFT_eSPI transaction buffer |
-| Static globals | ~95 KB | Current 29% RAM usage |
-| **Free** | ~117 KB | 35.7% headroom |
+1. Giac is distributed under GPL terms in upstream sources.
+2. Distribution and derivative work obligations must be satisfied before production release.
+3. Third-party notices are required in release artifacts.
 
 ---
 
-## 7. Test Strategy
+## 13. Definition of Done for Migration
 
-### Test Phase Map
+Migration is complete only when all are true:
 
-| Phase | Test File | Tests | Validates |
-|-------|-----------|------:|-----------|
-| Phase 1 | `tests/BigIntTest.cpp` | 30 | CASInt overflow detection, promotion/demotion, CASRational arithmetic |
-| Phase 2 | `tests/ConsTableTest.cpp` | 20 | Hash-consing dedup, canonical ordering, arena+table reset |
-| Phase 3 | `tests/SimplifierTest.cpp` | 25 | Trig/log identities, like-term collection, termination guarantee |
-| Phase 4 | `tests/IntegrationTest.cpp` | 50 | Table lookup, u-sub, by-parts, partial fractions, ∫(f')=f round-trip |
-| Phase 5 | `tests/ResultantTest.cpp` | 20 | Sylvester resultant, nonlinear 2×2 systems, degree-limit fallback |
-| Phase 6 | `tests/OmniStressTest.cpp` | 100 | End-to-end stress: diff+integrate+simplify loop, memory bounds |
-| **Legacy** | `tests/CASTest.cpp` + others | 85+ | Must all still pass after every phase |
-| **TOTAL** | | **330+** | |
-
-### Test Activation
-
-All tests remain behind `-DCAS_RUN_TESTS` build flag in `platformio.ini`.
-Each phase adds its `.cpp` to the commented-out `build_src_filter` list.
-CI verification: uncomment, build, flash, read Serial output.
+1. Giac backend is default in production profile.
+2. Result rendering path is `gen -> TeX -> MathAST -> MathCanvas` for supported expressions.
+3. Step view supports long sessions with no hard UI lockups.
+4. Internal heap floor and largest-block thresholds remain healthy during stress tests.
+5. Legacy custom symbolic engine is removed from default build path.
 
 ---
 
-## Appendix A: File Creation Inventory
+## 14. Immediate Next Actions
 
-### New Files (by phase)
-
-| Phase | File | Purpose |
-|-------|------|---------|
-| 1 | `src/math/cas/CASInt.h` | Hybrid int64/BigInt wrapper |
-| 1 | `src/math/cas/CASRational.h/.cpp` | Overflow-safe rational arithmetic |
-| 1 | `tests/BigIntTest.h/.cpp` | BigInt overflow tests |
-| 2 | `src/math/cas/ConsTable.h` | PSRAM hash-consing table |
-| 2 | `src/math/cas/ConsFactory.h` | Cons factory functions for all node types |
-| 2 | `tests/ConsTableTest.h/.cpp` | Hash-consing tests |
-| 3 | `tests/SimplifierTest.h/.cpp` | Advanced simplifier tests |
-| 4 | `src/math/cas/SymIntegrate.h/.cpp` | Slagle heuristic integration engine |
-| 4 | `tests/IntegrationTest.h/.cpp` | Integration verification tests |
-| 5 | `src/math/cas/SymPolyMulti.h/.cpp` | Multivariate polynomial for resultant |
-| 5 | `tests/ResultantTest.h/.cpp` | Nonlinear system tests |
-| 6 | `src/apps/CalculusApp.h/.cpp` | Unified symbolic derivatives + integrals LVGL app |
-| 6 | `tests/OmniStressTest.h/.cpp` | End-to-end stress test |
-
-### Modified Files (significant changes)
-
-| File | Phase | Change |
-|------|------:|--------|
-| `src/math/cas/SymExpr.h` | 2 | Add `_hash`, `_weight`, `computeHash()`, `weight()` |
-| `src/math/cas/SymExpr.cpp` | 2, 5 | Hash implementations; `evaluate(VarMap)` override |
-| `src/math/cas/SymExprArena.h` | 2 | Increase MAX_BLOCKS to 16; add `ConsTable& consTable()` |
-| `src/math/cas/SymSimplify.h/.cpp` | 2, 3 | Pure-functional refactor; multi-pass engine; trig/log rules |
-| `src/math/cas/SymDiff.h/.cpp` | 2 | Thread `ConsTable&` through all calls |
-| `src/math/cas/ASTFlattener.cpp` | 2 | Use cons factories instead of raw arena |
-| `src/math/cas/SymNum` (in SymExpr.h) | 1 | `ExactVal val` → `CASRational coeff` |
-| `src/math/cas/SymPoly.h/.cpp` | 1 | `ExactVal coeff` → `CASRational coeff` |
-| `src/math/cas/OmniSolver.cpp` | 5 | Add resultant path for 2-equation nonlinear |
-| `src/math/cas/HybridNewton.h/.cpp` | 5 | Add 2D Newton with symbolic Jacobian |
-| `src/SystemApp.h/.cpp` | 6 | Register unified CalculusApp, remove orphaned `Mode::APP_INTEGRAL` |
-| `src/main.cpp` | 1–6 | Add test includes for each phase |
-| `platformio.ini` | 1–6 | Add test source filters |
-| `docs/MATH_ENGINE.md` | 6 | Full documentation update |
+1. Create `NUMOS_USE_GIAC` feature flag and scaffold `GiacBridge`.
+2. Add TeX adapter skeleton with unit tests for fractions, powers, and roots.
+3. Wire `EquationsApp` single-equation solve path to bridge behind runtime toggle.
+4. Capture baseline memory/performance telemetry before and after bridge activation.
 
 ---
 
-## Appendix B: Dependency Graph Between Phases
+## 15. Source Notes (Research Basis)
 
+This constitution is grounded on:
 
-Phase 1 (BigInt) ← Foundation: safe arithmetic
-│
-▼
-Phase 2 (Hash-Consing) ← Requires Phase 1 (CASRational in SymNum)
-│
-├──────────────┐
-▼ ▼
-Phase 3 Phase 5
-(Simplifier) (Resultant) ← Both require Phase 2 (cons factories)
-│ │
-▼ │
-Phase 4 │
-(Integration) │ ← Requires Phase 3 (advanced simplify)
-│ │
-▼ ▼
-Phase 6 (App & Polish) ← Requires Phase 4 + 5
-
-
-**Critical path**: Phase 1 → 2 → 3 → 4 → 6 (~10 weeks)
-**Parallel path**: Phase 5 can start after Phase 2 completes.
-**Total estimated duration**: ~12 weeks (3 months)
-
----
-
-*NumOS CAS — From scientific calculator to symbolic mathematics engine.*
-*Target hardware: ESP32-S3 N16R8 (240 MHz, 8 MB PSRAM, 16 MB Flash)*
-*March 2026*
-
----
-
-## Project Completion Summary
-
-**All 6 phases of the CAS Upgrade Roadmap are COMPLETE.**
-
-### Delivered Capabilities
-
-| Capability | Module | Status |
-|:-----------|:-------|:------:|
-| Overflow-safe bignum arithmetic | CASInt + CASRational | ✅ |
-| Immutable DAG with hash-consing dedup | ConsTable + SymExprArena | ✅ |
-| Multi-pass simplifier (trig/log/exp/power) | SymSimplify (8-pass fixed-point) | ✅ |
-| Symbolic differentiation (17 rules) | SymDiff | ✅ |
-| Symbolic integration (table/linearity/u-sub/parts) | SymIntegrate | ✅ |
-| Analytic isolation solver | OmniSolver | ✅ |
-| Nonlinear 2×2 via Sylvester resultant | SymPolyMulti + SystemSolver | ✅ |
-| Derivatives app (LVGL-native) | CalculusApp (unified d/dx + ∫dx) | ✅ |
-| Integration app (LVGL-native) | Merged into unified CalculusApp | ✅ |
-| Natural 2D rendering of CAS results | SymExprToAST + MathCanvas | ✅ |
-
-### Final Metrics
-
-- **Build**: 0 errors, 0 warnings
-- **RAM**: 28.8% (94,512 B / 327,680 B) — 71.2% headroom
-- **Flash**: 19.3% (1,263,109 B / 6,553,600 B) — 80.7% headroom
-- **PSRAM**: ~97% free (~7.75 MB available)
-- **CAS modules**: 30+ source files
-- **Apps**: 5 functional (Calculation, Grapher, Equations, Calculus, Integral)
-
-*Roadmap concluded — March 2026*
+1. Current NumOS architecture in `src/ui/MathRenderer.*`, `src/math/MathAST.*`, `src/apps/EquationsApp.*`, and `platformio.ini`.
+2. ESP-IDF memory and external RAM guidance for capability allocator and PSRAM restrictions.
+3. Giac/Xcas public installation and release timeline information (including 1.9.x and 2.0.x evolution and KhiCAS calculator packaging context).
