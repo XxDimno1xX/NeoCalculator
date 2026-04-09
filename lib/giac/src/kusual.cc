@@ -6831,7 +6831,11 @@ double my_tan(double arg){
   }
   static const char _print_s []="print";
 #if 1 // def RTOS_THREADX
+#ifdef NO_UNARY_FUNCTION_COMPOSE
+  define_unary_function_eval(__print,&_print,_print_s);
+#else
   static define_unary_function_eval(__print,&_print,_print_s);
+#endif
 #else
   const unary_function_eval __print(1,&_print,_print_s,&printasprint);
 #endif

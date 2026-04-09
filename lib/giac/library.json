@@ -13,17 +13,23 @@
       "-Isrc"
     ],
     "srcFilter": [
-      "+<src/*.cpp>",
-      "+<src/*.c>",
-      "-<src/kdisplay*>",
-      "-<src/k_*.cpp>",
-      "-<src/fx*.cpp>",
-      "-<src/ti*.cpp>",
-      "-<src/Xcas*>",
-      "-<src/Fl_*>",
-      "-<src/Graph*>",
-      "-<src/hist*>",
-      "-<src/test.cpp>"
+      "+<*.cc>",
+      "+<*.cpp>",
+      "+<*.c>",
+      "-<kdisplay*>",
+      "-<kmaple.cc>",
+      "-<kthreaded.cc>",
+      "-<k_*.cc>",
+      "-<k_*.cpp>",
+      "-<fx*.cc>",
+      "-<fx*.cpp>",
+      "-<ti*.cc>",
+      "-<ti*.cpp>",
+      "-<Xcas*>",
+      "-<Fl_*>",
+      "-<Graph*>",
+      "-<hist*>",
+      "-<test.cpp>"
     ]
   },
   "dependencies": {

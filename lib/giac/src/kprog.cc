@@ -6165,7 +6165,8 @@ namespace giac {
     }    
     qs_comp_f = &f;
     qs_contextptr=contextptr;
-    qsort(v.begin(),v.size(),sizeof(gen),qs_comp);
+    if (!v.empty())
+      qsort(&v.front(),v.size(),sizeof(gen),qs_comp);
 #endif
     // sort(v.begin(),v.end(),gen_sort(f,contextptr));
     if (rev)

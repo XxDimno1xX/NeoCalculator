@@ -62,6 +62,9 @@ int dGetLine (char * s,int max, int isRecording=0, int ml=0);
 #ifdef TICE
 #include "k_csdk.h"
 #endif
+#if !defined FXCG && !defined TICE
+#include "k_csdk.h"
+#endif
 
 // Giac headers
 #include "gen.h"

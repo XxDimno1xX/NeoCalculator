@@ -253,7 +253,11 @@ namespace giac {
   gen _print(const gen & args,GIAC_CONTEXT);  
   extern const unary_function_ptr * const  at_print;
 #if !defined RTOS_THREADX && !defined NSPIRE && !defined FXCG && !defined TICE
+#ifdef NO_UNARY_FUNCTION_COMPOSE
+  extern const alias_unary_function_eval __print;
+#else
   extern const unary_function_eval __print;
+#endif
 #endif
 
   extern const unary_function_ptr * const  at_jacobi_symbol;

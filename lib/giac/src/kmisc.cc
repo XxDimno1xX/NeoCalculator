@@ -47,6 +47,9 @@ using namespace std;
 #include "giacintl.h"
 #include "console.h"
 #include "menuGUI.h"
+#ifndef FXCG
+#include "k_csdk.h"
+#endif
 #include "main.h"
 
 extern int line_start;
@@ -2813,7 +2816,7 @@ static define_unary_function_eval (__set_language,&_scatterplot,_set_language_s)
       return gensizeerr(contextptr);
     if (v.size()==1)
       v.push_back(ggb_var(args));
-    gen tmp=apply(v,equal2diff);
+    gen tmp=giac::apply(gen(v),equal2diff);
     vecteur lv=lvarxwithinv(tmp,v[1],contextptr);
     gen res=lv.size()<2?1:0;
     res.subtype=_INT_BOOLEAN;
@@ -6454,7 +6457,7 @@ static define_unary_function_eval (__camembert,&_camembert,_camembert_s);
 	continue;
       }
       //if (key==KEY_SHIFT_LEFT){ pos=0;continue;}
-      if (const char * ans=keytostring(key,keyflag,false)){
+      if (const char * ans=keytostring(key,keyflag,false,context0)){
 	insert(s,pos,ans);
 	pos+=strlen(ans);
 	continue;

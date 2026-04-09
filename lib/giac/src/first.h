@@ -79,6 +79,9 @@ struct Bidon {
 };
 template<class T> Bidon operator << (Bidon ,const T&){ return Bidon(); }
 inline Bidon operator << (Bidon,const char *){return Bidon();}
+inline Bidon operator << (Bidon, std::ostream& (*)(std::ostream&)){ return Bidon(); }
+inline Bidon operator << (Bidon, std::ios_base& (*)(std::ios_base&)){ return Bidon(); }
+inline Bidon operator << (Bidon, std::basic_ios<char>& (*)(std::basic_ios<char>&)){ return Bidon(); }
 // #define CIN 0 //std::cin
 #define COUT Bidon(0) //std::cout
 #define CERR Bidon(0) //std::cout
