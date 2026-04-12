@@ -45,34 +45,6 @@ static void initGiac() {
   }
 }
 
-static void normalizeInfinityTokens(std::string &s) {
-  auto replace_token = [&](const std::string &token, const std::string &replacement, bool skip_if_signed_left) {
-    size_t pos = 0;
-    while (true) {
-      pos = s.find(token, pos);
-      if (pos == std::string::npos) break;
-      bool left_ok = (pos == 0) || (!std::isalnum((unsigned char)s[pos-1]) && s[pos-1] != '_');
-      size_t after = pos + token.size();
-      bool right_ok = (after >= s.size()) || (!std::isalnum((unsigned char)s[after]) && s[after] != '_');
-      bool signed_left = (pos > 0) && (s[pos-1] == '+' || s[pos-1] == '-');
-      if (left_ok && right_ok && !(skip_if_signed_left && signed_left)) {
-        s.replace(pos, token.size(), replacement);
-        pos += replacement.size();
-      } else {
-        pos += token.size();
-      }
-    }
-  };
-
-  // Explicit positive aliases
-  replace_token("+oo", "+infinity", false);
-  replace_token("+infty", "+infinity", false);
-  // Unsuffixed aliases map to positive infinity; preserve -infinity when explicit
-  replace_token("oo", "+infinity", true);
-  replace_token("infty", "+infinity", true);
-  replace_token("infinity", "+infinity", true);
-}
-
 static std::string trimCopy(const std::string &s) {
   size_t begin = 0;
   while (begin < s.size() && std::isspace((unsigned char)s[begin])) ++begin;
@@ -187,74 +159,41 @@ static bool splitTopLevelArgs(const std::string &s, std::vector<std::string> &ar
   return !args.empty();
 }
 
-static bool splitTopLevelPower(const std::string &s, std::string &base, std::string &expo) {
-  int depth = 0;
-  for (size_t i = 0; i < s.size(); ++i) {
-    char c = s[i];
-    if (c == '(' || c == '[' || c == '{') ++depth;
-    else if ((c == ')' || c == ']' || c == '}') && depth > 0) --depth;
-    else if (c == '^' && depth == 0) {
-      base = trimCopy(s.substr(0, i));
-      expo = trimCopy(s.substr(i + 1));
-      return !base.empty() && !expo.empty();
-    }
+static bool parseFunctionCallArgs(const std::string &s, const char *name, std::vector<std::string> &args) {
+  const size_t n = std::char_traits<char>::length(name);
+  if (s.size() < n + 2 || s.compare(0, n, name) != 0) return false;
+
+  size_t open = n;
+  while (open < s.size() && std::isspace((unsigned char)s[open])) ++open;
+  if (open >= s.size() || s[open] != '(' || s.back() != ')') return false;
+
+  return splitTopLevelArgs(s.substr(open + 1, s.size() - open - 2), args);
+}
+
+static bool parseInfinityAliasDirection(const std::string &token, int &directionHint) {
+  std::string t = trimCopy(token);
+  std::string norm;
+  norm.reserve(t.size());
+  for (size_t i = 0; i < t.size(); ++i) {
+    unsigned char c = (unsigned char)t[i];
+    if (!std::isspace(c)) norm.push_back((char)std::tolower(c));
   }
+
+  if (norm == "oo" || norm == "+oo" || norm == "inf" || norm == "+inf" ||
+      norm == "infty" || norm == "+infty" || norm == "infinity" || norm == "+infinity") {
+    directionHint = 1;
+    return true;
+  }
+  if (norm == "-oo" || norm == "-inf" || norm == "-infty" || norm == "-infinity") {
+    directionHint = -1;
+    return true;
+  }
+  directionHint = 0;
   return false;
 }
 
-static bool tryFixPowOneToInfLimit(const std::string &expr, giac::gen &fixed) {
-  if (!startsWith(expr, "limit(")) return false;
-  size_t open = expr.find('(');
-  size_t close = expr.rfind(')');
-  if (open == std::string::npos || close == std::string::npos || close <= open) return false;
-
-  std::vector<std::string> args;
-  if (!splitTopLevelArgs(expr.substr(open + 1, close - open - 1), args)) return false;
-  if (args.size() < 3) return false;
-
-  const std::string &exprArg = args[0];
-  const std::string &varArg = args[1];
-  const std::string &limArg = args[2];
-  if (!isIdentifier(varArg)) return false;
-
-  giac::identificateur x(varArg);
-  giac::gen limPoint(limArg, &global_context);
-  giac::gen base;
-  giac::gen expo;
-
-  giac::gen e(exprArg, &global_context);
-  if (e.type == _SYMB && e._SYMBptr->sommet == at_pow && e._SYMBptr->feuille.type == _VECT && e._SYMBptr->feuille._VECTptr->size() == 2) {
-    base = e._SYMBptr->feuille._VECTptr->front();
-    expo = e._SYMBptr->feuille._VECTptr->back();
-  } else {
-    std::string baseStr;
-    std::string expoStr;
-    if (!splitTopLevelPower(exprArg, baseStr, expoStr)) return false;
-    base = giac::gen(baseStr, &global_context);
-    expo = giac::gen(expoStr, &global_context);
-  }
-
-  giac::gen lbase = giac::limit(base, x, limPoint, 0, &global_context);
-  giac::gen lexpo = giac::limit(expo, x, limPoint, 0, &global_context);
-  if (!is_inf(lexpo)) return false;
-  giac::gen delta = giac::recursive_normal(lbase - plus_one, &global_context);
-  if (!(lbase == plus_one || is_zero(delta, &global_context))) return false;
-
-  // If (base-1)*expo simplifies to a variable-free constant, use it directly.
-  giac::gen simplified = giac::recursive_normal((base - plus_one) * expo, &global_context);
-  if (!contains(giac::lidnt(simplified), x)) {
-    fixed = exp(simplified, &global_context);
-    return true;
-  }
-
-  giac::gen t = giac::limit(expo * (base - plus_one), x, limPoint, 0, &global_context);
-  if (is_undef(t)) {
-    t = giac::limit(expo * ln(base, &global_context), x, limPoint, 0, &global_context);
-  }
-  if (is_undef(t)) return false;
-
-  fixed = exp(t, &global_context);
-  return true;
+static giac::gen makeUnsignedInfinity() {
+  return giac::gen(giac::identificateur("infinity"));
 }
 
 static bool isSquareNumericMatrix(const giac::gen &g) {
@@ -293,8 +232,6 @@ String solveWithGiac(String expr) {
       std_expr = trimCopy(std_expr.substr(1));
     }
 
-    // Normalize user-friendly infinity tokens (oo, infty, +infinity, etc.)
-    normalizeInfinityTokens(std_expr);
     // Extract common ODE shorthand to avoid parser ambiguity on y'.
     std::string desolve_y;
     std::string desolve_rhs;
@@ -303,6 +240,8 @@ String solveWithGiac(String expr) {
       // Fallback textual normalization for other forms.
       normalizeDesolvePrimeNotation(std_expr);
     }
+    std::vector<std::string> limit_args;
+    bool has_limit_call = parseFunctionCallArgs(std_expr, "limit", limit_args);
 
     std::ostringstream step_buf;
     giac::gen g;
@@ -322,17 +261,26 @@ String solveWithGiac(String expr) {
         giac::gen ode = symb_equal(symb_derive(y, x), rhs);
         g = giac::desolve(ode, x, y, ordre, parameters, &global_context);
         g = giac::eval(g, giac::eval_level(&global_context), &global_context);
+      } else if (has_limit_call) {
+        giac::vecteur giac_args;
+        giac_args.reserve(limit_args.size() + 1);
+        int aliasDir = 0;
+        bool hasAliasInf = (limit_args.size() >= 3) && parseInfinityAliasDirection(limit_args[2], aliasDir);
+        giac::gen mappedInf = hasAliasInf ? makeUnsignedInfinity() : giac::gen(0);
+        for (size_t i = 0; i < limit_args.size(); ++i) {
+          if (i == 2 && hasAliasInf) {
+            giac_args.push_back(mappedInf);
+          } else {
+            giac_args.push_back(giac::gen(limit_args[i], &global_context));
+          }
+        }
+        if (hasAliasInf && limit_args.size() == 3) {
+          giac_args.push_back(giac::gen(aliasDir));
+        }
+        g = giac::_limit(giac::gen(giac_args, _SEQ__VECT), &global_context);
       } else {
         g = giac::gen(std_expr, &global_context);
         g = giac::eval(g, giac::eval_level(&global_context), &global_context);
-      }
-
-      // Fallback for 1^infinity indeterminate limits that may simplify too early.
-      if (startsWith(std_expr, "limit(")) {
-        giac::gen fixed;
-        if (tryFixPowOneToInfLimit(std_expr, fixed)) {
-          g = fixed;
-        }
       }
 
       // Canonicalize egvl diagonal-matrix output to eigenvalue list.

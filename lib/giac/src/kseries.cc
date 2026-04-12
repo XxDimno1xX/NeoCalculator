@@ -2498,20 +2498,61 @@ namespace giac {
     if (lim_point==minus_inf)
       direction=-1;    
 
-    // Handle indeterminate 1^infinity forms with the standard exp-transform.
+    // Handle indeterminate 1^infinity forms with the canonical exp(limit(exponent*ln(base))) transform.
     if (e.type==_SYMB && e._SYMBptr->sommet==at_pow && e._SYMBptr->feuille.type==_VECT && e._SYMBptr->feuille._VECTptr->size()==2){
       const gen &base = e._SYMBptr->feuille._VECTptr->front();
       const gen &expo = e._SYMBptr->feuille._VECTptr->back();
       gen lbase = in_limit(base,x,lim_point,direction,contextptr);
       gen lexpo = in_limit(expo,x,lim_point,direction,contextptr);
-      if (lbase==plus_one && is_inf(lexpo)){
-        // Prefer expo*(base-1): more stable than expo*ln(base) near base->1.
-        gen t = in_limit(expo*(base-plus_one),x,lim_point,direction,contextptr);
-        if (!is_undef(t))
-          return exp(t,contextptr);
-        t = in_limit(expo*ln(base,contextptr),x,lim_point,direction,contextptr);
-        if (!is_undef(t))
-          return exp(t,contextptr);
+      gen delta_base = ratnormal(lbase-plus_one,contextptr);
+      if ((lbase==plus_one || is_zero(delta_base)) && is_inf(lexpo)){
+        gen log_form = expo*ln(base,contextptr);
+        gen t = direction?unidirectional_limit(log_form,x,lim_point,direction,contextptr):in_limit(log_form,x,lim_point,direction,contextptr);
+        if (is_undef(t))
+          t = in_limit(log_form,x,lim_point,direction,contextptr);
+        if (is_undef(t) || is_zero(t)){
+          gen linear_form = expo*(base-plus_one);
+          gen t_linear = direction?unidirectional_limit(linear_form,x,lim_point,direction,contextptr):in_limit(linear_form,x,lim_point,direction,contextptr);
+          if (!is_undef(t_linear))
+            t = t_linear;
+        }
+        return exp(t,contextptr);
+      }
+    }
+
+    // Same 1^infinity handling for expressions already transformed to exp(exponent*ln(base)).
+    if (e.type==_SYMB && e._SYMBptr->sommet==at_exp && e._SYMBptr->feuille.type==_SYMB && e._SYMBptr->feuille._SYMBptr->sommet==at_prod && e._SYMBptr->feuille._SYMBptr->feuille.type==_VECT){
+      const vecteur & terms=*e._SYMBptr->feuille._SYMBptr->feuille._VECTptr;
+      gen base=undef;
+      gen expo=plus_one;
+      bool has_ln=false;
+      for (unsigned i=0;i<terms.size();++i){
+	const gen & term=terms[i];
+	if (!has_ln && term.type==_SYMB && term._SYMBptr->sommet==at_ln){
+	  base=term._SYMBptr->feuille;
+	  has_ln=true;
+	}
+	else {
+	  expo=expo*term;
+	}
+      }
+      if (has_ln){
+	gen lbase = in_limit(base,x,lim_point,direction,contextptr);
+	gen lexpo = in_limit(expo,x,lim_point,direction,contextptr);
+	gen delta_base = ratnormal(lbase-plus_one,contextptr);
+	if ((lbase==plus_one || is_zero(delta_base)) && is_inf(lexpo)){
+	  gen log_form = expo*ln(base,contextptr);
+	  gen t = direction?unidirectional_limit(log_form,x,lim_point,direction,contextptr):in_limit(log_form,x,lim_point,direction,contextptr);
+	  if (is_undef(t))
+	    t = in_limit(log_form,x,lim_point,direction,contextptr);
+	  if (is_undef(t) || is_zero(t)){
+	    gen linear_form = expo*(base-plus_one);
+	    gen t_linear = direction?unidirectional_limit(linear_form,x,lim_point,direction,contextptr):in_limit(linear_form,x,lim_point,direction,contextptr);
+	    if (!is_undef(t_linear))
+	      t = t_linear;
+	  }
+	  return exp(t,contextptr);
+	}
       }
     }
 
@@ -2532,8 +2573,24 @@ namespace giac {
       gen first_try=subst(e,x,lim_point,false,contextptr);
       first_try=eval(first_try,1,contextptr);
       first_try=simplifier(first_try,contextptr);
+      bool indeterminate_prod=false;
+      if (is_zero(first_try) && is_inf(lim_point) && e.type==_SYMB && e._SYMBptr->sommet==at_prod && e._SYMBptr->feuille.type==_VECT){
+  const vecteur & prod=*e._SYMBptr->feuille._VECTptr;
+  bool has_inf_factor=false,has_zero_factor=false;
+  for (unsigned i=0;i<prod.size();++i){
+    gen lf=in_limit(prod[i],x,lim_point,direction,contextptr);
+    if (is_inf(lf))
+      has_inf_factor=true;
+    if (is_zero(lf))
+      has_zero_factor=true;
+    if (has_inf_factor && has_zero_factor){
+      indeterminate_prod=true;
+      break;
+    }
+  }
+      }
       // if (first_try==plus_inf || first_try==minus_inf) return first_try;
-      if (!contains(lidnt(first_try),unsigned_inf)){
+  if (!indeterminate_prod && !contains(lidnt(first_try),unsigned_inf)){
 	if (has_num_coeff(first_try))
 	  return first_try;
 	gen chknum;
@@ -2556,8 +2613,8 @@ namespace giac {
 	}
       }
       if (lim_point==unsigned_inf){
-	*logptr(contextptr) << gettext("Warning, infinity is unsigned, perhaps you meant +infinity")<< "\n";
-	first_try = subst(partfrac(e,false,contextptr),x,lim_point,false,contextptr);
+  *logptr(contextptr) << gettext("Warning, infinity is unsigned, perhaps you meant +infinity")<< "\n";
+  first_try = subst(partfrac(e,false,contextptr),x,lim_point,false,contextptr);
 	// first_try = subst(ratnormal(e,contextptr),x,lim_point,false,contextptr);
       }
       else {
@@ -2578,7 +2635,7 @@ namespace giac {
 	return first_try;
   if (!is_undef(first_try) && !is_undef(numtry)){
 	// if (!direction) return first_try;
-	if (first_try!=unsigned_inf && numtry!=unsigned_inf)
+  if (!indeterminate_prod && first_try!=unsigned_inf && numtry!=unsigned_inf)
 	  return first_try;
       }
     }
@@ -3078,9 +3135,19 @@ namespace giac {
     return -2;
   }
 
+  static bool is_infinity_symbol(const gen & g){
+    if (is_inf(g))
+      return true;
+    if (g.type==_IDNT)
+      return !strcmp(g._IDNTptr->id_name,string_infinity);
+    if (g.type==_SYMB && (g._SYMBptr->sommet==at_plus || g._SYMBptr->sommet==at_neg) && g._SYMBptr->feuille.type==_IDNT)
+      return !strcmp(g._SYMBptr->feuille._IDNTptr->id_name,string_infinity);
+    return false;
+  }
+
   // Main limit entry point
   gen limit(const gen & e,const identificateur & x,const gen & lim_point_,int direction,GIAC_CONTEXT){
-    gen lim_point(eval(lim_point_,1,contextptr));
+    gen lim_point(is_infinity_symbol(lim_point_)?lim_point_:eval(lim_point_,1,contextptr));
     if (is_undef(lim_point))
       return lim_point;
     if (lim_point.type==_DOUBLE_){
@@ -3088,7 +3155,7 @@ namespace giac {
       if (d==int(d))
 	return limit(e,x,int(d),direction,contextptr);
     }
-    if (has_num_coeff(lim_point)) // otherwise A:=conic(x^2/4+y^2/3=1); B:=element(A,1)+nop(-1.666-1.243*i) runs forever
+    if (has_num_coeff(lim_point) && !is_infinity_symbol(lim_point)) // otherwise A:=conic(x^2/4+y^2/3=1); B:=element(A,1)+nop(-1.666-1.243*i) runs forever
       return subst(e,x,lim_point,false,contextptr);
     // Insert here code for cleaning limit remember
     int save_series_flags=series_flags(contextptr);
@@ -3139,7 +3206,7 @@ namespace giac {
 	return gensizeerr(contextptr);
       return quotedlimit(G,*x._IDNTptr,(*(e._SYMBptr->feuille._VECTptr))[1],0,contextptr);
     }
-    if (s>2)
+    if (s>2 && !is_infinity_symbol(v[2]))
       v[2]=eval(v[2],1,contextptr);
     if (s>3)
       v[3]=eval(v[3],1,contextptr);
