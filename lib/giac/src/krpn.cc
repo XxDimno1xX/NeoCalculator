@@ -61,6 +61,10 @@ using namespace std;
 namespace giac {
 #endif // ndef NO_NAMESPACE_GIAC
 
+#ifndef T_RPN_OP
+#define T_RPN_OP 0
+#endif
+
   string printasconstant(const gen & feuille,const char * sommetstr,GIAC_CONTEXT){
     return sommetstr;
   }

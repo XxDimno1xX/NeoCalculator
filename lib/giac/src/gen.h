@@ -803,8 +803,12 @@ namespace giac {
   typedef ulonglong alias_gen;
 #else
   struct alias_gen {
+#ifdef DOUBLEVAL
+    longlong value;
+#else
     int value;
-    // unsigned short reserved; // not used 
+#endif
+    unsigned short reserved; // not used
     signed char subtype;
     unsigned char type;  // see dispatch.h
   };
@@ -859,17 +863,17 @@ namespace giac {
 #define define_tab2_alias_gen(name,retype,resubtype,reptr,imtype,imsubtype,imptr) alias_gen name[]={{(ulonglong(reptr) << 16) | (resubtype << 8) | retype },{(ulonglong(imptr) << 16) | (imsubtype << 8) | imtype }};
 #else // SMARTPTR64
 #ifdef DOUBLEVAL
-#define define_alias_gen(name,type,subtype,ptr) alias_gen name={type,subtype,0,ulonglong(ptr)};
-#define define_alias_ref_symbolic(name,sommet,type,subtype,ptr) alias_ref_symbolic name={-1,(unary_function_eval *)sommet,type,subtype,0,ulonglong(ptr)};
-#define define_alias_ref_fraction(name,numtype,numsubtype,numptr,dentype,densubtype,denptr) alias_ref_fraction name={-1,{numtype,numsubtype,0,ulonglong(numptr)},{dentype,densubtype,0,ulonglong(denptr)}};
-#define define_alias_ref_complex(name,retype,resubtype,reptr,imtype,imsubtype,imptr) alias_ref_complex name={-1,0,{retype,resubtype,0,ulonglong(reptr)},{imtype,imsubtype,0,ulonglong(imptr)}};
-#define define_tab2_alias_gen(name,retype,resubtype,reptr,imtype,imsubtype,imptr) alias_gen name[]={{retype,resubtype,0,ulonglong(reptr)},{imtype,imsubtype,0,ulonglong(imptr)}};
+#define define_alias_gen(name,type,subtype,ptr) alias_gen name={longlong(ptr),0,subtype,type};
+#define define_alias_ref_symbolic(name,sommet,type,subtype,ptr) alias_ref_symbolic name={-1,(unary_function_eval *)sommet,longlong(ptr),0,subtype,type};
+#define define_alias_ref_fraction(name,numtype,numsubtype,numptr,dentype,densubtype,denptr) alias_ref_fraction name={-1,{longlong(numptr),0,numsubtype,numtype},{longlong(denptr),0,densubtype,dentype}};
+#define define_alias_ref_complex(name,retype,resubtype,reptr,imtype,imsubtype,imptr) alias_ref_complex name={-1,0,{longlong(reptr),0,resubtype,retype},{longlong(imptr),0,imsubtype,imtype}};
+#define define_tab2_alias_gen(name,retype,resubtype,reptr,imtype,imsubtype,imptr) alias_gen name[]={{longlong(reptr),0,resubtype,retype},{longlong(imptr),0,imsubtype,imtype}};
 #else // DOUBLEVAL
-#define define_alias_gen(name,type,subtype,ptr) alias_gen name={int(ptr),subtype,type};
-#define define_alias_ref_symbolic(name,sommet,type,subtype,ptr) alias_ref_symbolic name={-1,(unary_function_eval *)sommet,int(ptr),subtype,type};
-#define define_alias_ref_fraction(name,numtype,numsubtype,numptr,dentype,densubtype,denptr) alias_ref_fraction name={-1,{int(numptr),numsubtype,numtype},{int(denptr),densubtype,dentype}};
-#define define_alias_ref_complex(name,retype,resubtype,reptr,imtype,imsubtype,imptr) alias_ref_complex name={-1,0,{int(reptr),resubtype,retype},{int(imptr),imsubtype,imtype}};
-#define define_tab2_alias_gen(name,retype,resubtype,reptr,imtype,imsubtype,imptr) alias_gen name[]={{int(reptr),resubtype,retype},{int(imptr),imsubtype,imtype}};
+#define define_alias_gen(name,type,subtype,ptr) alias_gen name={int(ptr),0,subtype,type};
+#define define_alias_ref_symbolic(name,sommet,type,subtype,ptr) alias_ref_symbolic name={-1,(unary_function_eval *)sommet,int(ptr),0,subtype,type};
+#define define_alias_ref_fraction(name,numtype,numsubtype,numptr,dentype,densubtype,denptr) alias_ref_fraction name={-1,{int(numptr),0,numsubtype,numtype},{int(denptr),0,densubtype,dentype}};
+#define define_alias_ref_complex(name,retype,resubtype,reptr,imtype,imsubtype,imptr) alias_ref_complex name={-1,0,{int(reptr),0,resubtype,retype},{int(imptr),0,imsubtype,imtype}};
+#define define_tab2_alias_gen(name,retype,resubtype,reptr,imtype,imsubtype,imptr) alias_gen name[]={{int(reptr),0,resubtype,retype},{int(imptr),0,imsubtype,imtype}};
 #endif // DOUBLEVAL
 #endif // SMARTPTR64
 

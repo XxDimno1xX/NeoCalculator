@@ -1780,7 +1780,7 @@ namespace giac {
     }
     if (!is_inf(a) && !is_inf(b))
       return false;
-    if (b==plus_inf && a.type==_INT_ && Hyper){
+	if (is_inf(b) && b!=minus_inf && a.type==_INT_ && Hyper){
       polynome s,Q,R;
       // limit of q/r at infinity must be 0
       gen test=r2e(q,v,contextptr)/r2e(r,v,contextptr);
@@ -1808,7 +1808,7 @@ namespace giac {
     gen A,B,P;
     int type=is_meromorphic(g,x,A,B,P,contextptr);
     int even=is_even_odd(g,x,contextptr);
-    bool complete=(a==minus_inf && b==plus_inf);
+	bool complete=(a==minus_inf && is_inf(b) && b!=minus_inf);
     if (type==2){
       if (!is_zero(limit(g,*x._IDNTptr,plus_inf,0,contextptr))){
 	res=undef;

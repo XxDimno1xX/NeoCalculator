@@ -1751,7 +1751,7 @@ index_status(yyextra)=1; (*yylval) = cst_euler_gamma; return T_LITERAL;
 case 48:
 YY_RULE_SETUP
 #line 232 "input_lexer.ll"
-index_status(yyextra)=1; (*yylval) = unsigned_inf; return T_LITERAL;
+index_status(yyextra)=1; (*yylval) = plus_inf; return T_LITERAL;
 	YY_BREAK
 case 49:
 YY_RULE_SETUP
@@ -1766,7 +1766,7 @@ index_status(yyextra)=1; (*yylval) = plus_inf; return T_LITERAL;
 case 51:
 YY_RULE_SETUP
 #line 235 "input_lexer.ll"
-index_status(yyextra)=1; (*yylval) = unsigned_inf; return T_LITERAL;
+index_status(yyextra)=1; (*yylval) = plus_inf; return T_LITERAL;
 	YY_BREAK
 case 52:
 YY_RULE_SETUP

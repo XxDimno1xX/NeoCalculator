@@ -2519,6 +2519,21 @@ extern "C" void Sleep(unsigned int miliSecond);
       }
 #endif
       string ts(s);
+      if (ts=="I"){
+  res=cst_i;
+  index_status(contextptr)=1;
+  return T_LITERAL;
+      }
+      if (ts=="inf" || ts=="+inf"){
+  res=plus_inf;
+    	index_status(contextptr)=1;
+    	return T_LITERAL;
+      }
+      if (ts=="-inf"){
+    	res=minus_inf;
+    	index_status(contextptr)=1;
+    	return T_LITERAL;
+      }
       int lo=0,hi=int(builtin_lexer_functions_number)-1,pos=-1;
       while (lo<=hi){
   int mid=(lo+hi)>>1;

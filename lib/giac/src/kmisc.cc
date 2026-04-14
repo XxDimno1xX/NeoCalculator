@@ -283,7 +283,11 @@ namespace giac {
 #endif
 
   static const char _set_language_s []="set_language";
-static define_unary_function_eval (__set_language,&_scatterplot,_set_language_s);
+  gen _set_language(const gen & g,GIAC_CONTEXT){
+    if ( g.type==_STRNG && g.subtype==-1) return  g;
+    return 1;
+  }
+static define_unary_function_eval (__set_language,&_set_language,_set_language_s);
   define_unary_function_ptr5( at_set_language ,alias_at_set_language,&__set_language,0,true);
 
   gen _scalar_product(const gen & args,GIAC_CONTEXT){

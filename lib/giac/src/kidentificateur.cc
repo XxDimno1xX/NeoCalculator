@@ -103,9 +103,9 @@ namespace giac {
   const gen & cst_euler_gamma = cst_euler_gamma_storage;
 
   const char string_pi[]="pi";
-  static const alias_identificateur alias_identificateur_pi={0,0,string_pi,0,0};
   const identificateur & _IDNT_pi(){
-    return *(const identificateur *) & alias_identificateur_pi;
+    static const identificateur id_pi(string_pi);
+    return id_pi;
   }
   const alias_ref_identificateur ref_pi={-1,0,0,string_pi,0,0};
   const define_alias_gen(alias_cst_pi,_IDNT,0,&ref_pi);
@@ -113,9 +113,9 @@ namespace giac {
   const gen & cst_pi = cst_pi_storage;
 
   const char string_infinity[]="infinity";
-  static const alias_identificateur alias_identificateur_infinity={0,0,string_infinity,0,0};
   const identificateur & _IDNT_infinity(){
-    return * (const identificateur *) &alias_identificateur_infinity;
+    static const identificateur id_infinity(string_infinity);
+    return id_infinity;
   }
   const alias_ref_identificateur ref_infinity={-1,0,0,string_infinity,0,0};
   const define_alias_gen(alias_unsigned_inf,_IDNT,0,&ref_infinity);
@@ -123,9 +123,9 @@ namespace giac {
   const gen & unsigned_inf = unsigned_inf_storage;
 
   const char string_undef[]="undef";
-  static const alias_identificateur alias_identificateur_undef={0,0,string_undef,0,0};
   const identificateur & _IDNT_undef(){
-    return * (const identificateur *) &alias_identificateur_undef;
+    static const identificateur id_undef(string_undef);
+    return id_undef;
   }
   static const alias_ref_identificateur ref_undef={-1,0,0,string_undef,0,0};
   const define_alias_gen(alias_undef,_IDNT,0,&ref_undef);

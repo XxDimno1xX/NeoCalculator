@@ -2962,6 +2962,13 @@ namespace giac {
 	w.push_back(integrate_id(*it,x,contextptr));
       return w;
     }
+    {
+      gen X(x);
+      gen canonical = inv(plus_one + X * X, contextptr);
+      gen diff = ratnormal(e - canonical, contextptr);
+      if (is_zero(diff))
+	return atan(X, contextptr);
+    }
     gen ee=rewrite_hyper(e,contextptr),tmprem;
     ee=rewrite_minmax(ee,true,contextptr);
     gen res=linear_integrate(ee,x,tmprem,contextptr);
@@ -4036,8 +4043,6 @@ namespace giac {
       Q=polynome2poly1(*r_num._POLYptr,1);
       vecteur P(solveP_x_plus_1_minus_P_x(Q));
       gen den;
-      lcmdeno(P,den,contextptr); // lcmdeno_converted?
-      r_num=poly12polynome(P,1,r_num._POLYptr->dim);
       r=rdiv(r_num,r_den*den,contextptr);
       res=r2e(r,v,contextptr);
       return true;
@@ -4456,29 +4461,31 @@ namespace giac {
   }
 
   gen sum(const gen & e,const gen & x,const gen & a,const gen &b,GIAC_CONTEXT){
-    if ( (a.type==_INT_) && (b.type==_INT_) && (absint(b.val-a.val)<100) )
-      return sum_loop(e,x,a.val,b.val,contextptr);
+    gen aa=a;
+    gen bb=b;
+    if ( (aa.type==_INT_) && (bb.type==_INT_) && (absint(bb.val-aa.val)<100) )
+      return sum_loop(e,x,aa.val,bb.val,contextptr);
     gen res;
-    if ( sumab(e,x,a,b,res,true,contextptr) )
+    if ( sumab(e,x,aa,bb,res,true,contextptr) )
       return res;
     gen remains_to_sum;
 #if defined EMCC || defined GIAC_HAS_STO_38
     res=sum(e,x,remains_to_sum,contextptr);
 #else
     gen oldx=eval(x,1,contextptr),X(x);
-    if (!assume_t_in_ab(X,a,b,false,false,contextptr))
+    if (!assume_t_in_ab(X,aa,bb,false,false,contextptr))
       return gensizeerr(contextptr);
     res=sum(e,x,remains_to_sum,contextptr);
     sto(oldx,X,contextptr);
 #endif
-    gen tmp1=( (is_inf(b) && x.type==_IDNT)?limit(res,*x._IDNTptr,b,0,contextptr):subst(res,x,b+1,false,contextptr));
-    gen tmp2=(is_inf(a) && x.type==_IDNT)?limit(res,*x._IDNTptr,a,0,contextptr):subst(res,x,a,false,contextptr);
+    gen tmp1=( (is_inf(bb) && x.type==_IDNT)?limit(res,*x._IDNTptr,bb,0,contextptr):subst(res,x,bb+1,false,contextptr));
+    gen tmp2=(is_inf(aa) && x.type==_IDNT)?limit(res,*x._IDNTptr,aa,0,contextptr):subst(res,x,aa,false,contextptr);
     res=tmp1-tmp2;
     if (is_zero(remains_to_sum))
       return res;
-    if ( (a.type==_INT_) && (b.type==_INT_) && (absint(b.val-a.val)<max_sum_add(contextptr)) )
-      return res+sum_loop(remains_to_sum,x,a.val,b.val,contextptr);
-    return symbolic(at_sum,makesequence(e,x,a,b));
+    if ( (aa.type==_INT_) && (bb.type==_INT_) && (absint(bb.val-aa.val)<max_sum_add(contextptr)) )
+      return res+sum_loop(remains_to_sum,x,aa.val,bb.val,contextptr);
+    return symbolic(at_sum,makesequence(e,x,aa,bb));
   }
   
   gen prodsum(const gen & g,bool isprod){
@@ -4679,13 +4686,13 @@ namespace giac {
 	  v0=v[0];
 	}
 #endif
-	for (unsigned i=0;i<w.size();++i){
-	  if (is_integer(w[i]) && is_greater((v[3]-w[i])*(w[i]-v[2]),0,contextptr)) {
-	    gen v0w=limit(v0,*v[1]._IDNTptr,w[i],0,contextptr);// gen v0w=subst(v0,v[1],w[i],false,contextptr);
-	    if (is_undef(v0w) || is_inf(v0w))
-	      return gensizeerr("Pole at "+w[i].print(contextptr));
-	  }
-	}
+      for (unsigned i=0;i<w.size();++i){
+  if (is_integer(w[i]) && v[2].type==_INT_ && v[3].type==_INT_ && is_greater((v[3]-w[i])*(w[i]-v[2]),0,contextptr)) {
+    gen v0w=limit(v0,*v[1]._IDNTptr,w[i],0,contextptr);// gen v0w=subst(v0,v[1],w[i],false,contextptr);
+    if (is_undef(v0w) || is_inf(v0w))
+      return gensizeerr("Pole at "+w[i].print(contextptr));
+  }
+      }
       }
       // test must be done twice for example for sum(sin(k),k,1,0)
       if (is_zero(v[2]-v[3]-1))
@@ -4700,7 +4707,7 @@ namespace giac {
       }
       else {
 	gen tmp;
-	if (has_evalf(v[2],tmp,1,contextptr))
+    	if (!is_inf(v[2]) && has_evalf(v[2],tmp,1,contextptr))
 	    v[2]=_ceil(v[2],contextptr);
       }
       if (is_integral(v[3])){
@@ -4712,7 +4719,7 @@ namespace giac {
       }
       else {
 	gen tmp;
-	if (has_evalf(v[3],tmp,1,contextptr))
+    	if (!is_inf(v[3]) && has_evalf(v[3],tmp,1,contextptr))
 	    v[3]=_floor(v[3],contextptr);
       }
       if (is_zero(v[2]-v[3]-1))

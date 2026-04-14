@@ -1527,7 +1527,7 @@ namespace giac {
 #ifdef DOUBLEVAL
       _DOUBLE_val=a;
 #else
-      *((double *) this) = a;
+	*((double *) this) = a;
 #endif
       type=_DOUBLE_;
     }
@@ -5491,8 +5491,8 @@ namespace giac {
 #ifdef DOUBLEVAL
       tmp._DOUBLE_val=a._DOUBLE_val*b._DOUBLE_val;
 #else
-      *((double *) &tmp) = (*((double *) &a)) * (*((double *) &b));
-      tmp.type = _DOUBLE_;
+  *((double *) &tmp) = (*((double *) &a)) * (*((double *) &b));
+  tmp.type = _DOUBLE_;
 #endif
       return ;
     }
@@ -5523,8 +5523,8 @@ namespace giac {
 #ifdef DOUBLEVAL
       c._DOUBLE_val += a._DOUBLE_val*b._DOUBLE_val;
 #else
-      *((double *) &c) += (*((double *) &a)) * (*((double *) &b));
-      c.type = _DOUBLE_;
+  *((double *) &c) += (*((double *) &a)) * (*((double *) &b));
+  c.type = _DOUBLE_;
 #endif
       return ;
     }
@@ -5603,8 +5603,8 @@ namespace giac {
 #ifdef DOUBLEVAL
       c._DOUBLE_val -= a._DOUBLE_val*b._DOUBLE_val;
 #else
-      *((double *) &c) -= (*((double *) &a)) * (*((double *) &b));
-      c.type = _DOUBLE_;
+  *((double *) &c) -= (*((double *) &a)) * (*((double *) &b));
+  c.type = _DOUBLE_;
 #endif
       return ;
     }
@@ -7038,15 +7038,20 @@ namespace giac {
     if (is_minus_one(base))
       return exponent%2?-1:1;
     unsigned long int expo=exponent;
-    gen b;
-    if (base.type<=_ZINT && has_evalf(base,b,0,context0) && !is_inf(b) &&
-	is_greater(abs(exponent*log(abs(b,context0),context0),context0),powlog2float,context0)){
+    bool exponent_overflow=false;
+    if (base.type==_INT_){
+      int absbase=absint(base.val);
+      if (absbase>1){
+        long double bits=exponent*std::log((long double)absbase)/std::log((long double)2.0);
+        exponent_overflow=bits>MPZ_MAXLOG2;
+      }
+    }
+    if (base.type==_ZINT){
+      long double bits=mpz_sizeinbase(*base._ZINTptr,2);
+      exponent_overflow=bits*exponent>MPZ_MAXLOG2;
+    }
+    if (exponent_overflow){
       return gensizeerr("Exponent overflow");
-      *logptr(context0) << "Exponent overflow" << endl;
-      if (is_strictly_greater(1,abs(b,context0),context0))
-	return 0;
-      return (exponent%2==0 || is_greater(b,0,context0))?plus_inf:minus_inf; // overflow
-      // return pow(b,expo);
     }
     return(pow(base,expo));
   }

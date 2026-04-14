@@ -9354,7 +9354,8 @@ double my_tan(double arg){
   const gen & plus_one = *(const gen *) & alias_plus_one;
   define_alias_ref_complex(cst_i_ref,_INT_,0,0,_INT_,0,1);
   const define_alias_gen(alias_cst_i,_CPLX,0,&cst_i_ref);
-  const gen & cst_i = *(const gen *) & alias_cst_i;
+  static const gen cst_i_storage(0,1);
+  const gen & cst_i = cst_i_storage;
 
   const define_alias_gen(alias_minus_one,_INT_,0,-1);
   const gen & minus_one = *(const gen *) & alias_minus_one;
@@ -9487,11 +9488,11 @@ double my_tan(double arg){
 
   const define_alias_ref_symbolic( plus_inf_symb ,alias_at_plus,_IDNT,0,&ref_infinity);
   const define_alias_gen(alias_plus_inf,_SYMB,0,&plus_inf_symb);
-  static const gen plus_inf_storage(symbolic(at_plus,unsigned_inf));
+  static const gen plus_inf_storage(symbolic(at_plus,_IDNT_infinity()));
   const gen & plus_inf = plus_inf_storage;
   const define_alias_ref_symbolic( minus_inf_symb ,alias_at_neg,_IDNT,0,&ref_infinity);
   const define_alias_gen(alias_minus_inf,_SYMB,0,&minus_inf_symb);
-  static const gen minus_inf_storage(symbolic(at_neg,unsigned_inf));
+  static const gen minus_inf_storage(symbolic(at_neg,_IDNT_infinity()));
   const gen & minus_inf = minus_inf_storage;
 
   const define_alias_ref_fraction(plus_one_half_ref,_INT_,0,1,_INT_,0,2);

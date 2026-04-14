@@ -2,6 +2,7 @@
 #include <exception>
 #include <iostream>
 #include <cctype>
+#include <vector>
 
 #include "config.h"
 #include "gen.h"
@@ -25,16 +26,119 @@ namespace giac {
 
 static giac::context global_context;
 
+static std::string trimCopy(const std::string &s);
+
+static bool containsRootofText(const std::string &s) {
+  return s.find("rootof(") != std::string::npos;
+}
+
+static bool startsWithIgnoreCase(const std::string &s, const char *prefix) {
+  const size_t n = std::char_traits<char>::length(prefix);
+  if (s.size() < n) return false;
+  for (size_t i = 0; i < n; ++i) {
+    unsigned char a = (unsigned char)s[i];
+    unsigned char b = (unsigned char)prefix[i];
+    if (std::tolower(a) != std::tolower(b)) return false;
+  }
+  return true;
+}
+
+static std::string mapPresentationCommandAliases(const std::string &expr) {
+  std::string trimmed = trimCopy(expr);
+
+  struct TrigAlias {
+    const char *name;
+  };
+  static const TrigAlias kTrigAliases[] = {
+    {"trigsimplify("},
+    {"trigsimp("},
+    {"trig_simplify("},
+    {"simplifytrig("}
+  };
+
+  for (size_t i = 0; i < sizeof(kTrigAliases) / sizeof(kTrigAliases[0]); ++i) {
+    const size_t prefixLen = std::char_traits<char>::length(kTrigAliases[i].name);
+    if (startsWithIgnoreCase(trimmed, kTrigAliases[i].name) && trimmed.size() > prefixLen && trimmed.back() == ')') {
+      const std::string inner = trimmed.substr(prefixLen, trimmed.size() - prefixLen - 1);
+      return "simplify(texpand(" + inner + "))";
+    }
+  }
+
+  struct Alias {
+    const char *from;
+    const char *to;
+  };
+  static const Alias kAliases[] = {
+    {"trigexpand(", "texpand("}
+  };
+
+  for (size_t i = 0; i < sizeof(kAliases) / sizeof(kAliases[0]); ++i) {
+    const size_t fromLen = std::char_traits<char>::length(kAliases[i].from);
+    if (startsWithIgnoreCase(trimmed, kAliases[i].from)) {
+      return std::string(kAliases[i].to) + trimmed.substr(fromLen);
+    }
+  }
+  return trimmed;
+}
+
+static giac::gen evalInBridgeContext(const std::string &expr) {
+  giac::gen g(expr, &global_context);
+  return giac::eval(g, giac::eval_level(&global_context), &global_context);
+}
+
+static giac::gen prettifyRootofIfNeeded(const giac::gen &input) {
+  std::string printed = input.print(&global_context);
+  if (!containsRootofText(printed)) return input;
+
+  giac::gen best = input;
+
+  try {
+    giac::gen candidate = evalInBridgeContext("normal(" + printed + ")");
+    if (!is_undef(candidate)) {
+      best = candidate;
+      printed = best.print(&global_context);
+    }
+  } catch (...) {
+    // Keep original if normalization fails.
+  }
+
+  if (containsRootofText(printed)) {
+    try {
+      giac::gen candidate = evalInBridgeContext("radsimp(" + printed + ")");
+      if (!is_undef(candidate)) {
+        best = candidate;
+        printed = best.print(&global_context);
+      }
+    } catch (...) {
+      // Keep last valid representation.
+    }
+  }
+
+  if (containsRootofText(printed)) {
+    try {
+      giac::gen candidate = giac::evalf(best, 1, &global_context);
+      if (!is_undef(candidate)) {
+        best = candidate;
+      }
+    } catch (...) {
+      // Keep symbolic form if numeric approximation fails.
+    }
+  }
+
+  return best;
+}
+
 static void initGiac() {
   static bool initialized = false;
   if (!initialized) {
     giac::xcas_mode(0, &global_context);
     giac::approx_mode(false, &global_context);
     giac::complex_mode(false, &global_context);
+    giac::complex_variables(false, &global_context);
+    giac::i_sqrt_minus1(1, &global_context);
     giac::withsqrt(true, &global_context);
     giac::eval_level(&global_context) = 1;
-    // Enable step-by-step infolevel for debugging/capture
-    giac::step_infolevel(&global_context) = 1;
+    giac::step_infolevel(&global_context) = 0;
     // This Giac snapshot does not expose symbolic_mode(...); keep symbolic behavior
     // via exact evaluation level and approx_mode(false).
     giac::language(0, &global_context);
@@ -232,16 +336,7 @@ String solveWithGiac(String expr) {
       std_expr = trimCopy(std_expr.substr(1));
     }
 
-    // Extract common ODE shorthand to avoid parser ambiguity on y'.
-    std::string desolve_y;
-    std::string desolve_rhs;
-    bool has_desolve_prime = extractDesolvePrimeCall(std_expr, desolve_y, desolve_rhs);
-    if (!has_desolve_prime) {
-      // Fallback textual normalization for other forms.
-      normalizeDesolvePrimeNotation(std_expr);
-    }
-    std::vector<std::string> limit_args;
-    bool has_limit_call = parseFunctionCallArgs(std_expr, "limit", limit_args);
+    std_expr = mapPresentationCommandAliases(std_expr);
 
     std::ostringstream step_buf;
     giac::gen g;
@@ -252,36 +347,10 @@ String solveWithGiac(String expr) {
       std::ostream *old_log = giac::logptr(&global_context);
       giac::logptr(&step_buf, &global_context);
 
-      if (has_desolve_prime) {
-        giac::gen x{giac::identificateur("x")};
-        giac::gen y{giac::identificateur(desolve_y)};
-        giac::gen rhs(desolve_rhs, &global_context);
-        int ordre = 0;
-        giac::vecteur parameters;
-        giac::gen ode = symb_equal(symb_derive(y, x), rhs);
-        g = giac::desolve(ode, x, y, ordre, parameters, &global_context);
-        g = giac::eval(g, giac::eval_level(&global_context), &global_context);
-      } else if (has_limit_call) {
-        giac::vecteur giac_args;
-        giac_args.reserve(limit_args.size() + 1);
-        int aliasDir = 0;
-        bool hasAliasInf = (limit_args.size() >= 3) && parseInfinityAliasDirection(limit_args[2], aliasDir);
-        giac::gen mappedInf = hasAliasInf ? makeUnsignedInfinity() : giac::gen(0);
-        for (size_t i = 0; i < limit_args.size(); ++i) {
-          if (i == 2 && hasAliasInf) {
-            giac_args.push_back(mappedInf);
-          } else {
-            giac_args.push_back(giac::gen(limit_args[i], &global_context));
-          }
-        }
-        if (hasAliasInf && limit_args.size() == 3) {
-          giac_args.push_back(giac::gen(aliasDir));
-        }
-        g = giac::_limit(giac::gen(giac_args, _SEQ__VECT), &global_context);
-      } else {
-        g = giac::gen(std_expr, &global_context);
-        g = giac::eval(g, giac::eval_level(&global_context), &global_context);
-      }
+      g = giac::gen(std_expr, &global_context);
+      g = giac::eval(g, giac::eval_level(&global_context), &global_context);
+
+      g = prettifyRootofIfNeeded(g);
 
       // Canonicalize egvl diagonal-matrix output to eigenvalue list.
       if (startsWith(std_expr, "egvl(")) {

@@ -3560,12 +3560,14 @@ yyreduce:
   case 49:
 #line 243 "input_parser.yy" /* yacc.c:1646  */
     { 
-					if ((yyvsp[0])==unsigned_inf){
-						(yyval) = (yyvsp[-1])==at_binary_minus?minus_inf:plus_inf;
+					if ((yyvsp[0])==unsigned_inf || (yyvsp[0])==plus_inf){
+            (yyval) = (yyvsp[-1])==at_binary_minus?minus_inf:plus_inf;
 					}
 					else {
-					 if ((yyvsp[-1])==at_binary_minus)
-					   if ((yyvsp[0]).type==_INT_) (yyval)=(-(yyvsp[0]).val); else { if ((yyvsp[0]).type==_DOUBLE_) (yyval)=(-(yyvsp[0])._DOUBLE_val); else (yyval)=symbolic(at_neg,(yyvsp[0])); }
+           if ((yyvsp[-1])==at_binary_minus)
+             if ((yyvsp[0]).type==_INT_) (yyval)=(-(yyvsp[0]).val); else { if ((yyvsp[0]).type==_DOUBLE_) (yyval)=(-(yyvsp[0])._DOUBLE_val); else (yyval)=symbolic(at_neg,(yyvsp[0])); }
+           else
+             (yyval)=(yyvsp[0]);
 					   }
 				}
 #line 3572 "y.tab.c" /* yacc.c:1646  */

@@ -1767,8 +1767,34 @@ namespace giac {
       }
     }
     if ( (approx_mode(contextptr) || has_num_coeff(e)) && lidnt(e)==makevecteur(x)){
+      if (!approx_mode(contextptr) && has_num_coeff(e)){
+  gen e_exact=exact(e,contextptr);
+  if (!is_undef(e_exact) && !has_num_coeff(e_exact)){
+    vecteur exact_res=solve(e_exact,x,isolate_mode,contextptr);
+    if (!is_undef(exact_res) && !exact_res.empty()){
+      vecteur num_res;
+      for (unsigned i=0;i<exact_res.size();++i){
+        gen cur=exact_res[i];
+        vecteur ids=lidnt(cur);
+        for (unsigned j=0;j<ids.size();++j){
+    if (ids[j].type!=_IDNT)
+      continue;
+    string nid=ids[j].print(contextptr);
+    if (nid.size()>2 && nid[0]=='n' && nid[1]=='_')
+      cur=subst(cur,ids[j],0,false,contextptr);
+        }
+        num_res.push_back(evalf(cur,1,contextptr));
+      }
+      num_res=solve_numeric_check(e_check,x,num_res,contextptr);
+      solve_ckrange(x,num_res,isolate_mode,contextptr);
+      if (!num_res.empty())
+        return num_res;
+    }
+  }
+      }
       vecteur vtmp=makevecteur(e,x);
       vecteur res=gen2vecteur(in_fsolve(vtmp,contextptr));
+      res=solve_numeric_check(e_check,x,res,contextptr);
       solve_ckrange(x,res,isolate_mode,contextptr);
       return res;
     }
