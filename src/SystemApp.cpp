@@ -1,4 +1,4 @@
-/**
+﻿/**
  * SystemApp.cpp
  * NumOS System Application — Full implementation.
  * 
@@ -998,7 +998,7 @@ void SystemApp::powerOff() {
     // Label "Apagando..." sutil, centrado
     lv_obj_t* lblBye = lv_label_create(scrOff);
     lv_label_set_text(lblBye, LV_SYMBOL_POWER " Apagando...");
-    lv_obj_set_style_text_font(lblBye, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(lblBye, &stix_math_18, 0);
     lv_obj_set_style_text_color(lblBye, lv_color_make(0x80, 0x80, 0x80), 0);
     lv_obj_set_style_text_align(lblBye, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(lblBye, LV_ALIGN_CENTER, 0, 0);
@@ -1031,3 +1031,4 @@ void SystemApp::powerOff() {
     // No se ejecuta nada después de aquí
     */   // === FIN DEEP SLEEP ORIGINAL ===
 }
+

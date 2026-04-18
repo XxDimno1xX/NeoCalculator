@@ -1,4 +1,4 @@
-/**
+﻿/**
  * StatisticsApp.cpp — Statistics application for NumOS.
  *
  * Three-tab LVGL app: Data Entry, Results, Histogram.
@@ -155,7 +155,7 @@ void StatisticsApp::createTabBar() {
 
         _tabLabels[i] = lv_label_create(_tabBtns[i]);
         lv_label_set_text(_tabLabels[i], names[i]);
-        lv_obj_set_style_text_font(_tabLabels[i], &lv_font_montserrat_12, LV_PART_MAIN);
+        lv_obj_set_style_text_font(_tabLabels[i], &stix_math_18, LV_PART_MAIN);
         lv_obj_align(_tabLabels[i], LV_ALIGN_CENTER, 0, 0);
     }
 }
@@ -184,7 +184,7 @@ void StatisticsApp::createDataTab() {
     lv_table_set_column_width(_table, 1, 150);
     lv_obj_set_size(_table, SCREEN_W - 8, panelH - 24);
     lv_obj_set_pos(_table, 4, 2);
-    lv_obj_set_style_text_font(_table, &lv_font_montserrat_12, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_table, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_border_width(_table, 1, LV_PART_MAIN);
     lv_obj_set_style_border_color(_table, lv_color_hex(0xD0D0D0), LV_PART_MAIN);
 
@@ -200,7 +200,7 @@ void StatisticsApp::createDataTab() {
     _dataHint = lv_label_create(_dataPanel);
     lv_label_set_text(_dataHint,
         LV_SYMBOL_UP LV_SYMBOL_DOWN " Nav  ENTER Edit  DEL Clear  AC New row");
-    lv_obj_set_style_text_font(_dataHint, &lv_font_montserrat_10, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_dataHint, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_dataHint, lv_color_hex(COL_HINT), LV_PART_MAIN);
     lv_obj_set_pos(_dataHint, 6, panelH - 18);
 }
@@ -238,14 +238,14 @@ void StatisticsApp::createStatsTab() {
         // Name label (left)
         lv_obj_t* name = lv_label_create(_statsPanel);
         lv_label_set_text(name, statNames[i]);
-        lv_obj_set_style_text_font(name, &lv_font_montserrat_12, LV_PART_MAIN);
+        lv_obj_set_style_text_font(name, &stix_math_18, LV_PART_MAIN);
         lv_obj_set_style_text_color(name, lv_color_hex(COL_TEXT), LV_PART_MAIN);
         lv_obj_set_pos(name, 10, y);
 
         // Value label (right)
         _statLabels[i] = lv_label_create(_statsPanel);
         lv_label_set_text(_statLabels[i], "---");
-        lv_obj_set_style_text_font(_statLabels[i], &lv_font_montserrat_14, LV_PART_MAIN);
+        lv_obj_set_style_text_font(_statLabels[i], &stix_math_18, LV_PART_MAIN);
         lv_obj_set_style_text_color(_statLabels[i], lv_color_hex(0x1565C0), LV_PART_MAIN);
         lv_obj_set_pos(_statLabels[i], 180, y);
     }
@@ -649,3 +649,4 @@ void StatisticsApp::handleKeyGraph(const KeyEvent& ev) {
     // Graph tab is read-only — no special keys needed
     (void)ev;
 }
+

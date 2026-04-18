@@ -1,4 +1,4 @@
-/**
+﻿/**
  * CalculusApp.cpp — Unified Symbolic Calculus App for NumOS.
  *
  * Phase 4: Unified Calculus (Derivatives + Integrals).
@@ -248,7 +248,7 @@ void CalculusApp::createUI() {
     {
         lv_obj_t* lbl = lv_label_create(_tabDerivative);
         lv_label_set_text(lbl, "d/dx  Differentiate");
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, LV_PART_MAIN);
+        lv_obj_set_style_text_font(lbl, &stix_math_18, LV_PART_MAIN);
         lv_obj_center(lbl);
     }
 
@@ -262,9 +262,8 @@ void CalculusApp::createUI() {
     lv_obj_remove_flag(_tabIntegral, LV_OBJ_FLAG_CLICKABLE);
     {
         lv_obj_t* lbl = lv_label_create(_tabIntegral);
-        // Use ASCII text — Montserrat font lacks the ∫ (U+222B) glyph
-        lv_label_set_text(lbl, "Integral dx  Integrate");
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, LV_PART_MAIN);
+        lv_label_set_text(lbl, "\xE2\x88\xABdx  Integrate");
+        lv_obj_set_style_text_font(lbl, &stix_math_18, LV_PART_MAIN);
         lv_obj_center(lbl);
     }
 
@@ -286,7 +285,7 @@ void CalculusApp::createUI() {
 
     _inputTitle = lv_label_create(_inputContainer);
     lv_label_set_text(_inputTitle, "Introduce f(x):");
-    lv_obj_set_style_text_font(_inputTitle, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_inputTitle, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_inputTitle, lv_color_hex(accentColor()), LV_PART_MAIN);
     lv_obj_set_pos(_inputTitle, PAD, 4);
 
@@ -296,7 +295,7 @@ void CalculusApp::createUI() {
 
     _inputHint = lv_label_create(_inputContainer);
     lv_label_set_text(_inputHint, "EXE: Differentiate   GRAPH: Mode   AC: Back");
-    lv_obj_set_style_text_font(_inputHint, &lv_font_montserrat_12, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_inputHint, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_inputHint, lv_color_hex(COL_HINT_HEX), LV_PART_MAIN);
     lv_obj_set_pos(_inputHint, PAD, contentH - 18);
 
@@ -313,7 +312,7 @@ void CalculusApp::createUI() {
 
     _computingLabel = lv_label_create(_computingContainer);
     lv_label_set_text(_computingLabel, "Computing...");
-    lv_obj_set_style_text_font(_computingLabel, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_computingLabel, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_computingLabel, lv_color_hex(COL_SEP_HEX), LV_PART_MAIN);
     lv_obj_align(_computingLabel, LV_ALIGN_CENTER, 0, -20);
 
@@ -339,13 +338,13 @@ void CalculusApp::createUI() {
 
     _resultTitle = lv_label_create(_resultContainer);
     lv_label_set_text(_resultTitle, "Result");
-    lv_obj_set_style_text_font(_resultTitle, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_resultTitle, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_resultTitle, lv_color_hex(accentColor()), LV_PART_MAIN);
     lv_obj_set_pos(_resultTitle, PAD, 4);
 
     _originalLabel = lv_label_create(_resultContainer);
     lv_label_set_text(_originalLabel, "f(x) =");
-    lv_obj_set_style_text_font(_originalLabel, &lv_font_montserrat_12, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_originalLabel, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_originalLabel, lv_color_hex(COL_HINT_HEX), LV_PART_MAIN);
     lv_obj_set_pos(_originalLabel, PAD, 24);
 
@@ -356,7 +355,7 @@ void CalculusApp::createUI() {
 
     _resultLabel = lv_label_create(_resultContainer);
     lv_label_set_text(_resultLabel, "f'(x) =");
-    lv_obj_set_style_text_font(_resultLabel, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_resultLabel, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_resultLabel, lv_color_hex(COL_RESULT_HEX), LV_PART_MAIN);
     lv_obj_set_pos(_resultLabel, PAD, 58);
 
@@ -367,7 +366,7 @@ void CalculusApp::createUI() {
 
     _resultHint = lv_label_create(_resultContainer);
     lv_label_set_text(_resultHint, "STEPS: See steps    AC: New");
-    lv_obj_set_style_text_font(_resultHint, &lv_font_montserrat_12, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_resultHint, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_resultHint, lv_color_hex(COL_HINT_HEX), LV_PART_MAIN);
     lv_obj_set_pos(_resultHint, PAD, contentH - 22);
 
@@ -1022,7 +1021,7 @@ void CalculusApp::buildStepsDisplay() {
     if (steps.empty()) {
         lv_obj_t* lbl = lv_label_create(_stepsContainer);
         lv_label_set_text(lbl, "No steps available.");
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, LV_PART_MAIN);
+        lv_obj_set_style_text_font(lbl, &stix_math_18, LV_PART_MAIN);
         lv_obj_set_style_text_color(lbl, lv_color_hex(COL_HINT_HEX), LV_PART_MAIN);
         return;
     }
@@ -1064,7 +1063,7 @@ void CalculusApp::buildStepsDisplay() {
             lv_label_set_text(descLbl, buf);
             lv_obj_set_width(descLbl, SCREEN_W - 2 * PAD - 8);
             lv_label_set_long_mode(descLbl, LV_LABEL_LONG_WRAP);
-            lv_obj_set_style_text_font(descLbl, &lv_font_montserrat_12,
+            lv_obj_set_style_text_font(descLbl, &stix_math_18,
                                        LV_PART_MAIN);
 
             // Smart Highlighter: use accent colour when a sub-expression
@@ -1087,7 +1086,7 @@ void CalculusApp::buildStepsDisplay() {
         if (step.highlightExpr) {
             lv_obj_t* hlLbl = lv_label_create(_stepsContainer);
             lv_label_set_text(hlLbl, "\xe2\x96\xb6 Modified:");  // ▶ Modified:
-            lv_obj_set_style_text_font(hlLbl, &lv_font_montserrat_12, LV_PART_MAIN);
+            lv_obj_set_style_text_font(hlLbl, &stix_math_18, LV_PART_MAIN);
             lv_obj_set_style_text_color(hlLbl, lv_color_hex(0xE65100), LV_PART_MAIN);  // orange
 
             vpam::NodePtr hlNode = cas::SymExprToAST::convert(step.highlightExpr);
@@ -1109,7 +1108,8 @@ void CalculusApp::buildStepsDisplay() {
     lv_obj_t* hintLbl = lv_label_create(_stepsContainer);
     lv_label_set_text(hintLbl,
                       LV_SYMBOL_UP LV_SYMBOL_DOWN " Scroll    AC: Back");
-    lv_obj_set_style_text_font(hintLbl, &lv_font_montserrat_12, LV_PART_MAIN);
+    lv_obj_set_style_text_font(hintLbl, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(hintLbl, lv_color_hex(COL_HINT_HEX),
                                 LV_PART_MAIN);
 }
+

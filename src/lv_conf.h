@@ -1,16 +1,16 @@
 /**
  * lv_conf.h
- * Configuración de LVGL 9.2 para NumOS (ESP32-S3 N16R8)
+ * Configuraci�n de LVGL 9.2 para NumOS (ESP32-S3 N16R8)
  *
  * Basado en lv_conf_template.h de LVGL 9.2.
  * Solo se habilitan los widgets y features que NumOS necesita para
  * minimizar el uso de Flash y RAM interna.
  *
  * Estrategia de memoria:
- *  - LVGL usa la PSRAM como heap a través de heap_caps_malloc().
- *  - Los draw-buffers se asignan también en PSRAM desde main.cpp.
- *  - Los objetos y estilos LVGL vivirán en PSRAM liberando la SRAM
- *    interna para el Math Engine (stacks, variables de cálculo, etc.)
+ *  - LVGL usa la PSRAM como heap a trav�s de heap_caps_malloc().
+ *  - Los draw-buffers se asignan tambi�n en PSRAM desde main.cpp.
+ *  - Los objetos y estilos LVGL vivir�n en PSRAM liberando la SRAM
+ *    interna para el Math Engine (stacks, variables de c�lculo, etc.)
  */
 
 #if 1  /* Set it to "1" to enable content */
@@ -30,7 +30,7 @@
 /** Profundidad de color: 16 = RGB565, perfecto para ST7789/ILI9341 */
 #define LV_COLOR_DEPTH 16
 
-/** Intercambio de bytes RGB565 (el SPI de TFT_eSPI envía MSB primero) */
+/** Intercambio de bytes RGB565 (el SPI de TFT_eSPI env�a MSB primero) */
 #define LV_BIG_ENDIAN_SYSTEM 0
 
 /*====================
@@ -38,13 +38,13 @@
  *====================*/
 
 /**
- * Allocator personalizado → heap_caps_malloc en PSRAM.
- * Requiere que BOARD_HAS_PSRAM esté definido (ver platformio.ini).
+ * Allocator personalizado ? heap_caps_malloc en PSRAM.
+ * Requiere que BOARD_HAS_PSRAM est� definido (ver platformio.ini).
  */
 #define LV_MEM_CUSTOM 1
 #if LV_MEM_CUSTOM
   #ifdef NATIVE_SIM
-    /* PC nativo: usar malloc/realloc/free estándar */
+    /* PC nativo: usar malloc/realloc/free est�ndar */
     #define LV_MEM_CUSTOM_INCLUDE <stdlib.h>
     #define LV_MEM_CUSTOM_ALLOC(size)        malloc(size)
     #define LV_MEM_CUSTOM_REALLOC(ptr, size) realloc((ptr), (size))
@@ -110,7 +110,7 @@
 
 #define LV_USE_ASSERT_NULL      1
 #define LV_USE_ASSERT_MALLOC    1
-#define LV_USE_ASSERT_OBJ       0   /* Costoso en producción */
+#define LV_USE_ASSERT_OBJ       0   /* Costoso en producci�n */
 #define LV_USE_ASSERT_STYLE     0
 
 /*====================
@@ -119,19 +119,28 @@
 
 #define LV_DRAW_COMPLEX         1   /* Sombras, gradientes, transformaciones */
 #define LV_SHADOW_CACHE_SIZE    0
-#define LV_IMG_CACHE_DEF_SIZE   4   /* Caché pequeño para los 10 iconos */
+#define LV_IMG_CACHE_DEF_SIZE   4   /* Cach� peque�o para los 10 iconos */
 
 /*====================
    FUENTES (Fonts)
  *====================*/
 
 /*
- * Fuentes Montserrat con anti-aliasing (bpp=4).
- * Solo se incluyen los tamaños que usa la UI de NumOS:
- *   12 → nombre de app (pequeño)
- *   14 → fuente por defecto / labels generales
- *   20 → título del header
+ * STIX Two Math (custom LVGL font) disponible para zonas matematicas.
+ * Se mantiene declarado aqui para los modulos que lo usan de forma selectiva.
  */
+#ifndef __ASSEMBLY__
+#ifdef __cplusplus
+extern "C" {
+#endif
+struct _lv_font_t;
+typedef struct _lv_font_t lv_font_t;
+extern const lv_font_t stix_math_18;
+#ifdef __cplusplus
+}
+#endif
+#endif
+
 #define LV_FONT_MONTSERRAT_10   1
 #define LV_FONT_MONTSERRAT_12   1
 #define LV_FONT_MONTSERRAT_14   1
@@ -143,7 +152,7 @@
 #define LV_FONT_UNSCII_8        1
 #define LV_FONT_MONTSERRAT_22   0
 #define LV_FONT_MONTSERRAT_24   0
-#define LV_FONT_MONTSERRAT_28   1
+#define LV_FONT_MONTSERRAT_28   0
 #define LV_FONT_MONTSERRAT_32   0
 #define LV_FONT_MONTSERRAT_36   0
 #define LV_FONT_MONTSERRAT_48   0
@@ -168,7 +177,7 @@
 #define LV_USE_IMG          1   /* Iconos de apps */
 #define LV_USE_IMGBTN       0
 #define LV_USE_KEYBOARD     0
-#define LV_USE_LABEL        1   /* Nombres de apps y títulos */
+#define LV_USE_LABEL        1   /* Nombres de apps y t�tulos */
 #define LV_USE_LED          0
 #define LV_USE_LINE         1   /* Requerido por widgets internos (scale) */
 #define LV_USE_LIST         1   /* Stats results list */
@@ -196,8 +205,8 @@
 
 /*====================
    EXTRA: GRIDNAV
-   Permite navegación 2D con flechas en contenedores grid.
-   Imprescindible para el launcher 3-columnas + teclado físico.
+   Permite navegaci�n 2D con flechas en contenedores grid.
+   Imprescindible para el launcher 3-columnas + teclado f�sico.
  *====================*/
 #define LV_USE_GRIDNAV  1
 
@@ -223,13 +232,13 @@
    MISC
  *====================*/
 
-/** Alineación de datos malloc — ESP32 requiere 4 bytes */
+/** Alineaci�n de datos malloc � ESP32 requiere 4 bytes */
 #define LV_ATTRIBUTE_MEM_ALIGN      __attribute__((aligned(4)))
-/** No usar IRAM_ATTR aquí: puede provocar desbordamiento de IRAM en ESP32-S3.
- *  Las funciones críticas de LVGL van a flash cacheada (DROM), que es suficientemente rápida. */
+/** No usar IRAM_ATTR aqu�: puede provocar desbordamiento de IRAM en ESP32-S3.
+ *  Las funciones cr�ticas de LVGL van a flash cacheada (DROM), que es suficientemente r�pida. */
 #define LV_ATTRIBUTE_FAST_MEM
 
-/** Screenshot / monkey test — deshabilitados en producción */
+/** Screenshot / monkey test � deshabilitados en producci�n */
 #define LV_USE_SNAPSHOT     0
 #define LV_USE_MONKEY       0
 
@@ -249,3 +258,5 @@
 
 #endif /* LV_CONF_H */
 #endif /* Enable/Disable content */
+
+

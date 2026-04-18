@@ -24,6 +24,11 @@ bool setting_edu_steps = false;
 #include "SystemApp.h"
 #include "ui/SplashScreen.h"
 
+#ifdef NUMOS_STIX_DIAGNOSTICS
+#include "ui/StixGlyphGallery.h"
+#include "fonts/StixMathFont.h"
+#endif
+
 // CAS tests (enable via -DCAS_RUN_TESTS in platformio.ini)
 #ifdef CAS_RUN_TESTS
   #include "../tests/CASTest.h"
@@ -141,6 +146,15 @@ void setup() {
         lv_timer_handler();
         delay(5);
     }
+
+    #ifdef NUMOS_STIX_DIAGNOSTICS
+    // -- 6b. STIX Two Math validation (glyph coverage + baseline check) --
+    const bool stixDiagOk = ui::runStixGlyphAlignmentDiagnostics(&stix_math_18);
+    Serial.printf("[STIX] Alignment diagnostics: %s\n", stixDiagOk ? "PASS" : "WARN");
+
+    // Show the required glyph gallery briefly on real hardware.
+    ui::showStixGlyphGallery(1800);
+    #endif
 
     // -- 7. SystemApp (carga launcher, LittleFS, etc.) --
     g_app.begin();

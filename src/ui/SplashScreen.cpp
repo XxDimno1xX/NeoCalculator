@@ -1,4 +1,4 @@
-/**
+﻿/**
  * SplashScreen.cpp
  * Implementación de la pantalla de arranque con fade-in LVGL.
  *
@@ -110,3 +110,4 @@ void SplashScreen::onAnimDone(lv_anim_t* a) {
         self->_onComplete();
     }
 }
+

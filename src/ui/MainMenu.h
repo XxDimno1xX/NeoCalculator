@@ -8,7 +8,7 @@
  *  - Focus: blue border (#0074D9) + 1.05× scale + overshoot animation
  *  - Shadows: diffuse 4 px normal, intensified on focus
  *  - Dot-grid background pattern (#D1D1D1 on #F5F5F5)
- *  - Anti-aliased Montserrat 14 throughout
+ *  - Anti-aliased UI default font (Montserrat)
  */
 
 #pragma once

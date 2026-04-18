@@ -1,4 +1,4 @@
-/**
+﻿/**
  * EquationsApp.cpp — Equation Solver App for NumOS.
  *
  * NumWorks-inspired redesign:
@@ -578,7 +578,7 @@ void EquationsApp::createUI() {
         char buf[8];
         snprintf(buf, sizeof(buf), "E%d:", i + 1);
         lv_label_set_text(_eqLabels[i], buf);
-        lv_obj_set_style_text_font(_eqLabels[i], &lv_font_montserrat_14, LV_PART_MAIN);
+        lv_obj_set_style_text_font(_eqLabels[i], &stix_math_18, LV_PART_MAIN);
         lv_obj_set_style_text_color(_eqLabels[i], lv_color_hex(COL_ACCENT_HEX), LV_PART_MAIN);
         lv_obj_set_pos(_eqLabels[i], 8, (ROW_H - 14) / 2);
 
@@ -593,7 +593,7 @@ void EquationsApp::createUI() {
     _addRow = createRowContainer(_listContainer, addY, rowW, ROW_H, COL_ROW_BG_HEX);
     _addLabel = lv_label_create(_addRow);
     lv_label_set_text(_addLabel, LV_SYMBOL_PLUS "  Add an equation");
-    lv_obj_set_style_text_font(_addLabel, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_addLabel, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_addLabel, lv_color_hex(COL_HINT_HEX), LV_PART_MAIN);
     lv_obj_align(_addLabel, LV_ALIGN_LEFT_MID, 10, 0);
 
@@ -601,14 +601,14 @@ void EquationsApp::createUI() {
     _solveRow = createRowContainer(_listContainer, addY + ROW_H + ROW_GAP, rowW, ROW_H, COL_SOLVE_HEX);
     _solveLabel = lv_label_create(_solveRow);
     lv_label_set_text(_solveLabel, "Solve the equation");
-    lv_obj_set_style_text_font(_solveLabel, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_solveLabel, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_solveLabel, lv_color_white(), LV_PART_MAIN);
     lv_obj_align(_solveLabel, LV_ALIGN_CENTER, 0, 0);
 
     // Hint at bottom
     _listHint = lv_label_create(_listContainer);
     lv_label_set_text(_listHint, LV_SYMBOL_UP LV_SYMBOL_DOWN " Navigate   ENTER Select   DEL Remove");
-    lv_obj_set_style_text_font(_listHint, &lv_font_montserrat_12, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_listHint, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_listHint, lv_color_hex(COL_HINT_HEX), LV_PART_MAIN);
     lv_obj_set_pos(_listHint, PAD, SCREEN_H - BAR_H - 20);
 
@@ -631,7 +631,7 @@ void EquationsApp::createUI() {
 
     _templateTitle = lv_label_create(_templateOverlay);
     lv_label_set_text(_templateTitle, "Use a template:");
-    lv_obj_set_style_text_font(_templateTitle, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_templateTitle, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_templateTitle, lv_color_hex(COL_SEP_HEX), LV_PART_MAIN);
     lv_obj_set_pos(_templateTitle, 12, 8);
 
@@ -652,7 +652,7 @@ void EquationsApp::createUI() {
         // Text prefix label
         _templateLabels[i] = lv_label_create(_templateItems[i]);
         lv_label_set_text(_templateLabels[i], TEMPLATE_LABELS[i]);
-        lv_obj_set_style_text_font(_templateLabels[i], &lv_font_montserrat_14, LV_PART_MAIN);
+        lv_obj_set_style_text_font(_templateLabels[i], &stix_math_18, LV_PART_MAIN);
 
         // MathCanvas for the formula (templates 1-3 have math)
         if (i > 0) {
@@ -684,7 +684,7 @@ void EquationsApp::createUI() {
     lv_obj_remove_flag(_editContainer, LV_OBJ_FLAG_SCROLLABLE);
 
     _editTitle = lv_label_create(_editContainer);
-    lv_obj_set_style_text_font(_editTitle, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_editTitle, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_editTitle, lv_color_hex(COL_ACCENT_HEX), LV_PART_MAIN);
     lv_obj_set_pos(_editTitle, PAD, 4);
 
@@ -695,7 +695,7 @@ void EquationsApp::createUI() {
     _editHint = lv_label_create(_editContainer);
     lv_label_set_text(_editHint, LV_SYMBOL_LEFT LV_SYMBOL_RIGHT " Move   "
                                   "= Equals   ENTER Confirm   AC Cancel");
-    lv_obj_set_style_text_font(_editHint, &lv_font_montserrat_12, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_editHint, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_editHint, lv_color_hex(COL_HINT_HEX), LV_PART_MAIN);
     lv_obj_set_pos(_editHint, PAD, SCREEN_H - BAR_H - 20);
 
@@ -714,7 +714,7 @@ void EquationsApp::createUI() {
 
     _solvingLabel = lv_label_create(_solvingContainer);
     lv_label_set_text(_solvingLabel, "Solving...");
-    lv_obj_set_style_text_font(_solvingLabel, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_solvingLabel, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_solvingLabel, lv_color_hex(COL_SEP_HEX), LV_PART_MAIN);
     lv_obj_align(_solvingLabel, LV_ALIGN_CENTER, 0, -20);
 
@@ -739,7 +739,7 @@ void EquationsApp::createUI() {
     lv_obj_remove_flag(_resultContainer, LV_OBJ_FLAG_SCROLLABLE);
 
     _resultTitle = lv_label_create(_resultContainer);
-    lv_obj_set_style_text_font(_resultTitle, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_resultTitle, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_resultTitle, lv_color_hex(COL_ACCENT_HEX), LV_PART_MAIN);
     lv_obj_set_pos(_resultTitle, PAD, 4);
 
@@ -996,7 +996,7 @@ void EquationsApp::showSteps() {
         lv_label_set_text(lbl, text);
         lv_obj_set_width(lbl, SCREEN_W - 2 * PAD - 8);
         lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, LV_PART_MAIN);
+        lv_obj_set_style_text_font(lbl, &stix_math_18, LV_PART_MAIN);
         lv_obj_set_style_text_color(lbl, lv_color_hex(colorHex), LV_PART_MAIN);
     };
 
@@ -1019,7 +1019,7 @@ void EquationsApp::showSteps() {
         lv_label_set_text(_stepsProgressLabel, "Preparing steps...");
         lv_obj_set_width(_stepsProgressLabel, SCREEN_W - 2 * PAD - 8);
         lv_label_set_long_mode(_stepsProgressLabel, LV_LABEL_LONG_WRAP);
-        lv_obj_set_style_text_font(_stepsProgressLabel, &lv_font_montserrat_12,
+        lv_obj_set_style_text_font(_stepsProgressLabel, &stix_math_18,
                                    LV_PART_MAIN);
         lv_obj_set_style_text_color(_stepsProgressLabel, lv_color_hex(COL_HINT_HEX),
                                     LV_PART_MAIN);
@@ -1072,7 +1072,7 @@ void EquationsApp::update() {
         if (!hintLbl) return false;
         lv_label_set_text(hintLbl,
                           LV_SYMBOL_UP LV_SYMBOL_DOWN " Scroll    AC: Back");
-        lv_obj_set_style_text_font(hintLbl, &lv_font_montserrat_12, LV_PART_MAIN);
+        lv_obj_set_style_text_font(hintLbl, &stix_math_18, LV_PART_MAIN);
         lv_obj_set_style_text_color(hintLbl, lv_color_hex(COL_HINT_HEX),
                                     LV_PART_MAIN);
         return true;
@@ -1088,7 +1088,7 @@ void EquationsApp::update() {
         lv_label_set_text(lbl, text);
         lv_obj_set_width(lbl, CANVAS_MAX_W);
         lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, LV_PART_MAIN);
+        lv_obj_set_style_text_font(lbl, &stix_math_18, LV_PART_MAIN);
         lv_obj_set_style_text_color(lbl, lv_color_hex(colorHex), LV_PART_MAIN);
         return true;
     };
@@ -2672,7 +2672,7 @@ void EquationsApp::buildResultDisplay() {
 addHint:
     if (!_resultHint || lv_obj_get_parent(_resultHint) != _resultContainer) {
         _resultHint = lv_label_create(_resultContainer);
-        lv_obj_set_style_text_font(_resultHint, &lv_font_montserrat_12, LV_PART_MAIN);
+        lv_obj_set_style_text_font(_resultHint, &stix_math_18, LV_PART_MAIN);
         lv_obj_set_style_text_color(_resultHint, lv_color_hex(COL_HINT_HEX), LV_PART_MAIN);
     }
     lv_label_set_text(_resultHint, "STEPS: View steps    AC: Back");
@@ -2742,7 +2742,7 @@ void EquationsApp::buildStepsDisplay() {
             return;
         }
         lv_label_set_text(lbl, "No steps available.");
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, LV_PART_MAIN);
+        lv_obj_set_style_text_font(lbl, &stix_math_18, LV_PART_MAIN);
         lv_obj_set_style_text_color(lbl, lv_color_hex(COL_HINT_HEX), LV_PART_MAIN);
         return;
     }
@@ -2779,7 +2779,7 @@ void EquationsApp::buildStepsDisplay() {
             lv_label_set_text(descLbl, buf);
             lv_obj_set_width(descLbl, SCREEN_W - 2 * PAD - 8);
             lv_label_set_long_mode(descLbl, LV_LABEL_LONG_WRAP);
-            lv_obj_set_style_text_font(descLbl, &lv_font_montserrat_12,
+            lv_obj_set_style_text_font(descLbl, &stix_math_18,
                                        LV_PART_MAIN);
             lv_obj_set_style_text_color(descLbl, lv_color_hex(descColor),
                                         LV_PART_MAIN);
@@ -2876,7 +2876,7 @@ void EquationsApp::buildStepsDisplay() {
     }
     lv_label_set_text(hintLbl,
                       LV_SYMBOL_UP LV_SYMBOL_DOWN " Scroll    AC: Back");
-    lv_obj_set_style_text_font(hintLbl, &lv_font_montserrat_12, LV_PART_MAIN);
+    lv_obj_set_style_text_font(hintLbl, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(hintLbl, lv_color_hex(COL_HINT_HEX),
                                 LV_PART_MAIN);
 }
@@ -2918,7 +2918,7 @@ void EquationsApp::buildCASStepsDisplay() {
         lv_label_set_text(lbl, text);
         lv_obj_set_width(lbl, CANVAS_MAX_W);
         lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, LV_PART_MAIN);
+        lv_obj_set_style_text_font(lbl, &stix_math_18, LV_PART_MAIN);
         lv_obj_set_style_text_color(lbl, lv_color_hex(colorHex), LV_PART_MAIN);
         return true;
     };
@@ -3034,7 +3034,7 @@ void EquationsApp::buildCASStepsDisplay() {
         lv_label_set_text(descLbl, "0. Original Equation");
         lv_obj_set_width(descLbl, CANVAS_MAX_W);
         lv_label_set_long_mode(descLbl, LV_LABEL_LONG_WRAP);
-        lv_obj_set_style_text_font(descLbl, &lv_font_montserrat_12, LV_PART_MAIN);
+        lv_obj_set_style_text_font(descLbl, &stix_math_18, LV_PART_MAIN);
         lv_obj_set_style_text_color(descLbl, lv_color_hex(COL_DESC_HEX), LV_PART_MAIN);
         if (!emitCasCanvas(parsedEq, nullptr, lv_color_hex(0x4FC3F7))) {
             appendMemoryLimitReached(0);
@@ -3050,7 +3050,7 @@ void EquationsApp::buildCASStepsDisplay() {
                 return;
             }
             lv_label_set_text(lbl, "No further steps available.");
-            lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, LV_PART_MAIN);
+            lv_obj_set_style_text_font(lbl, &stix_math_18, LV_PART_MAIN);
             lv_obj_set_style_text_color(lbl, lv_color_hex(COL_HINT_HEX), LV_PART_MAIN);
         }
         return;
@@ -3085,7 +3085,7 @@ void EquationsApp::buildCASStepsDisplay() {
         lv_label_set_text(descLbl, buf);
         lv_obj_set_width(descLbl, CANVAS_MAX_W);
         lv_label_set_long_mode(descLbl, LV_LABEL_LONG_WRAP);
-        lv_obj_set_style_text_font(descLbl, &lv_font_montserrat_12,
+        lv_obj_set_style_text_font(descLbl, &stix_math_18,
                                    LV_PART_MAIN);
         lv_obj_set_style_text_color(descLbl, lv_color_hex(descColHex),
                                     LV_PART_MAIN);
@@ -3112,7 +3112,7 @@ void EquationsApp::buildCASStepsDisplay() {
             return;
         }
         lv_label_set_text(hintLbl, LV_SYMBOL_UP LV_SYMBOL_DOWN " Scroll    AC: Back");
-        lv_obj_set_style_text_font(hintLbl, &lv_font_montserrat_12, LV_PART_MAIN);
+        lv_obj_set_style_text_font(hintLbl, &stix_math_18, LV_PART_MAIN);
         lv_obj_set_style_text_color(hintLbl, lv_color_hex(COL_HINT_HEX),
                                     LV_PART_MAIN);
     }
@@ -3148,7 +3148,7 @@ void EquationsApp::buildSystemCASStepsDisplay() {
         lv_label_set_text(lbl, text);
         lv_obj_set_width(lbl, CANVAS_MAX_W);
         lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, LV_PART_MAIN);
+        lv_obj_set_style_text_font(lbl, &stix_math_18, LV_PART_MAIN);
         lv_obj_set_style_text_color(lbl, lv_color_hex(colorHex), LV_PART_MAIN);
         return true;
     };
@@ -3236,7 +3236,7 @@ void EquationsApp::buildSystemCASStepsDisplay() {
     lv_label_set_text(headerLbl, "System of Equations");
     lv_obj_set_width(headerLbl, CANVAS_MAX_W);
     lv_label_set_long_mode(headerLbl, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_font(headerLbl, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(headerLbl, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(headerLbl, lv_color_hex(COL_ACCENT_HEX), LV_PART_MAIN);
 
     // ── 5. Original equations ──────────────────────────────────────────
@@ -3248,7 +3248,7 @@ void EquationsApp::buildSystemCASStepsDisplay() {
     lv_label_set_text(origLbl, "0. Original System");
     lv_obj_set_width(origLbl, CANVAS_MAX_W);
     lv_label_set_long_mode(origLbl, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_font(origLbl, &lv_font_montserrat_12, LV_PART_MAIN);
+    lv_obj_set_style_text_font(origLbl, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(origLbl, lv_color_hex(COL_DESC_HEX), LV_PART_MAIN);
     if (!emitSysCasCanvas(parsedEq1) || !emitSysCasCanvas(parsedEq2)) {
         appendMemoryLimitReached(0);
@@ -3262,7 +3262,7 @@ void EquationsApp::buildSystemCASStepsDisplay() {
             return;
         }
         lv_label_set_text(lbl, "No further steps available.");
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, LV_PART_MAIN);
+        lv_obj_set_style_text_font(lbl, &stix_math_18, LV_PART_MAIN);
         lv_obj_set_style_text_color(lbl, lv_color_hex(COL_HINT_HEX), LV_PART_MAIN);
         return;
     }
@@ -3316,7 +3316,7 @@ void EquationsApp::buildSystemCASStepsDisplay() {
         lv_label_set_text(descLbl, buf);
         lv_obj_set_width(descLbl, CANVAS_MAX_W);
         lv_label_set_long_mode(descLbl, LV_LABEL_LONG_WRAP);
-        lv_obj_set_style_text_font(descLbl, &lv_font_montserrat_12, LV_PART_MAIN);
+        lv_obj_set_style_text_font(descLbl, &stix_math_18, LV_PART_MAIN);
         lv_obj_set_style_text_color(descLbl, lv_color_hex(COL_DESC_HEX), LV_PART_MAIN);
 
         if ((step.eq1Tree && !emitSysCasCanvas(step.eq1Tree)) ||
@@ -3334,7 +3334,8 @@ void EquationsApp::buildSystemCASStepsDisplay() {
             return;
         }
         lv_label_set_text(hintLbl, LV_SYMBOL_UP LV_SYMBOL_DOWN " Scroll    AC: Back");
-        lv_obj_set_style_text_font(hintLbl, &lv_font_montserrat_12, LV_PART_MAIN);
+        lv_obj_set_style_text_font(hintLbl, &stix_math_18, LV_PART_MAIN);
         lv_obj_set_style_text_color(hintLbl, lv_color_hex(COL_HINT_HEX), LV_PART_MAIN);
     }
 }
+

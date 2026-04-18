@@ -1,4 +1,4 @@
-/**
+﻿/**
  * MatricesApp.cpp — Linear algebra matrix application for NumOS.
  *
  * Two-view LVGL app: Matrix Manager + Matrix Editor.
@@ -161,7 +161,7 @@ void MatricesApp::createManagerView() {
     // Section title: Matrices
     lv_obj_t* secTitle = lv_label_create(_managerPanel);
     lv_label_set_text(secTitle, "Matrices");
-    lv_obj_set_style_text_font(secTitle, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(secTitle, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(secTitle, lv_color_hex(COL_TEXT), LV_PART_MAIN);
     lv_obj_set_pos(secTitle, 12, 6);
 
@@ -183,11 +183,11 @@ void MatricesApp::createManagerView() {
 
         _matLabels[i] = lv_label_create(_matBtns[i]);
         lv_label_set_text(_matLabels[i], matNames[i]);
-        lv_obj_set_style_text_font(_matLabels[i], &lv_font_montserrat_14, LV_PART_MAIN);
+        lv_obj_set_style_text_font(_matLabels[i], &stix_math_18, LV_PART_MAIN);
         lv_obj_align(_matLabels[i], LV_ALIGN_TOP_MID, 0, 6);
 
         _matDimLabels[i] = lv_label_create(_matBtns[i]);
-        lv_obj_set_style_text_font(_matDimLabels[i], &lv_font_montserrat_10, LV_PART_MAIN);
+        lv_obj_set_style_text_font(_matDimLabels[i], &stix_math_18, LV_PART_MAIN);
         lv_obj_set_style_text_color(_matDimLabels[i], lv_color_hex(COL_HINT), LV_PART_MAIN);
         lv_obj_align(_matDimLabels[i], LV_ALIGN_BOTTOM_MID, 0, -6);
     }
@@ -196,7 +196,7 @@ void MatricesApp::createManagerView() {
     // Section title: Operations
     lv_obj_t* opTitle = lv_label_create(_managerPanel);
     lv_label_set_text(opTitle, "Operations");
-    lv_obj_set_style_text_font(opTitle, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(opTitle, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(opTitle, lv_color_hex(COL_TEXT), LV_PART_MAIN);
     lv_obj_set_pos(opTitle, 12, btnY + btnH + 14);
 
@@ -218,7 +218,7 @@ void MatricesApp::createManagerView() {
 
         _opLabels[i] = lv_label_create(_opBtns[i]);
         lv_label_set_text(_opLabels[i], opNames[i]);
-        lv_obj_set_style_text_font(_opLabels[i], &lv_font_montserrat_12, LV_PART_MAIN);
+        lv_obj_set_style_text_font(_opLabels[i], &stix_math_18, LV_PART_MAIN);
         lv_obj_set_style_text_color(_opLabels[i], lv_color_hex(COL_BTN_OP_TXT), LV_PART_MAIN);
         lv_obj_align(_opLabels[i], LV_ALIGN_CENTER, 0, 0);
     }
@@ -227,13 +227,13 @@ void MatricesApp::createManagerView() {
     _managerHint = lv_label_create(_managerPanel);
     lv_label_set_text(_managerHint,
         LV_SYMBOL_LEFT LV_SYMBOL_RIGHT " Select  ENTER Open/Run  " LV_SYMBOL_UP LV_SYMBOL_DOWN " Row");
-    lv_obj_set_style_text_font(_managerHint, &lv_font_montserrat_10, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_managerHint, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_managerHint, lv_color_hex(COL_HINT), LV_PART_MAIN);
     lv_obj_set_pos(_managerHint, 6, panelH - 18);
 
     // Error label (initially hidden)
     _errorLabel = lv_label_create(_managerPanel);
-    lv_obj_set_style_text_font(_errorLabel, &lv_font_montserrat_12, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_errorLabel, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_errorLabel, lv_color_hex(COL_ERROR_TXT), LV_PART_MAIN);
     lv_obj_set_style_bg_color(_errorLabel, lv_color_hex(COL_ERROR_BG), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(_errorLabel, LV_OPA_COVER, LV_PART_MAIN);
@@ -264,21 +264,21 @@ void MatricesApp::createEditorView() {
     // Title
     _editorTitle = lv_label_create(_editorPanel);
     lv_label_set_text(_editorTitle, "Edit MatA");
-    lv_obj_set_style_text_font(_editorTitle, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_editorTitle, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_editorTitle, lv_color_hex(COL_TEXT), LV_PART_MAIN);
     lv_obj_set_pos(_editorTitle, 8, 4);
 
     // Dimension label
     _dimLabel = lv_label_create(_editorPanel);
     lv_label_set_text(_dimLabel, "2\xC3\x97""2");
-    lv_obj_set_style_text_font(_dimLabel, &lv_font_montserrat_12, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_dimLabel, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_dimLabel, lv_color_hex(COL_HINT), LV_PART_MAIN);
     lv_obj_set_pos(_dimLabel, SCREEN_W - 60, 6);
 
     // Table
     _editorTable = lv_table_create(_editorPanel);
     lv_obj_set_pos(_editorTable, 8, 26);
-    lv_obj_set_style_text_font(_editorTable, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_editorTable, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_border_width(_editorTable, 1, LV_PART_MAIN);
     lv_obj_set_style_border_color(_editorTable, lv_color_hex(COL_BORDER), LV_PART_MAIN);
 
@@ -286,7 +286,7 @@ void MatricesApp::createEditorView() {
     _editorHint = lv_label_create(_editorPanel);
     lv_label_set_text(_editorHint,
         "F1 +Row  F2 -Row  F3 +Col  F4 -Col  AC Back");
-    lv_obj_set_style_text_font(_editorHint, &lv_font_montserrat_10, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_editorHint, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_editorHint, lv_color_hex(COL_HINT), LV_PART_MAIN);
     lv_obj_set_pos(_editorHint, 6, panelH - 18);
 }
@@ -311,14 +311,14 @@ void MatricesApp::createResultView() {
     // Title
     _resultTitle = lv_label_create(_resultPanel);
     lv_label_set_text(_resultTitle, "Result");
-    lv_obj_set_style_text_font(_resultTitle, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_resultTitle, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_resultTitle, lv_color_hex(COL_RES_TITLE), LV_PART_MAIN);
     lv_obj_set_pos(_resultTitle, 8, 4);
 
     // Result table
     _resultTable = lv_table_create(_resultPanel);
     lv_obj_set_pos(_resultTable, 8, 26);
-    lv_obj_set_style_text_font(_resultTable, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_resultTable, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_border_width(_resultTable, 1, LV_PART_MAIN);
     lv_obj_set_style_border_color(_resultTable, lv_color_hex(COL_BORDER), LV_PART_MAIN);
     lv_obj_add_flag(_resultTable, LV_OBJ_FLAG_HIDDEN);
@@ -326,7 +326,7 @@ void MatricesApp::createResultView() {
     // Scalar result label
     _resultScalarLabel = lv_label_create(_resultPanel);
     lv_label_set_text(_resultScalarLabel, "");
-    lv_obj_set_style_text_font(_resultScalarLabel, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_resultScalarLabel, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_resultScalarLabel, lv_color_hex(COL_TEXT), LV_PART_MAIN);
     lv_obj_set_pos(_resultScalarLabel, 20, 60);
     lv_obj_add_flag(_resultScalarLabel, LV_OBJ_FLAG_HIDDEN);
@@ -909,3 +909,4 @@ void MatricesApp::handleKeyResult(const KeyEvent& ev) {
         showManager();
     }
 }
+

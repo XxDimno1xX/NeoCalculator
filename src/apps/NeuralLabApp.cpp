@@ -1,4 +1,4 @@
-/**
+﻿/**
  * NeuralLabApp.cpp
  * Visual Neural Network Playground for NumOS — "Neural Lab"
  * App ID 16 — LVGL-native, decision boundary visualization.
@@ -189,14 +189,14 @@ void NeuralLabApp::createUI() {
     // ── Info label at bottom ──
     _infoLabel = lv_label_create(_screen);
     lv_obj_set_style_text_color(_infoLabel, lv_color_hex(COL_ACCENT), 0);
-    lv_obj_set_style_text_font(_infoLabel, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_font(_infoLabel, &stix_math_18, 0);
     lv_obj_align(_infoLabel, LV_ALIGN_BOTTOM_LEFT, 4, -2);
     lv_label_set_text(_infoLabel, "Neural Lab | F2:Train F4:Scenario");
 
     // ── Topology HUD label (top-left overlay) ──
     _hudLabel = lv_label_create(_screen);
     lv_obj_set_style_text_color(_hudLabel, lv_color_hex(COL_ACCENT), 0);
-    lv_obj_set_style_text_font(_hudLabel, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_font(_hudLabel, &stix_math_18, 0);
     lv_obj_set_style_bg_color(_hudLabel, lv_color_hex(COL_HUD_BG), 0);
     lv_obj_set_style_bg_opa(_hudLabel, LV_OPA_70, 0);
     lv_obj_set_style_pad_all(_hudLabel, 3, 0);
@@ -1172,3 +1172,4 @@ void NeuralLabApp::handleKey(const KeyEvent& ev) {
         _enterHandled = false;
     }
 }
+

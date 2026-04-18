@@ -1,4 +1,4 @@
-/**
+﻿/**
  * SettingsApp.cpp — Settings configuration panel for NumOS.
  *
  * Clean NumWorks-inspired settings UI with toggle rows.
@@ -138,13 +138,13 @@ void SettingsApp::createUI() {
         // Label (left side)
         _labels[i] = lv_label_create(_rows[i]);
         lv_label_set_text(_labels[i], labels[i]);
-        lv_obj_set_style_text_font(_labels[i], &lv_font_montserrat_14, LV_PART_MAIN);
+        lv_obj_set_style_text_font(_labels[i], &stix_math_18, LV_PART_MAIN);
         lv_obj_set_style_text_color(_labels[i], lv_color_hex(COL_TEXT), LV_PART_MAIN);
         lv_obj_align(_labels[i], LV_ALIGN_LEFT_MID, 12, 0);
 
         // Value (right side)
         _values[i] = lv_label_create(_rows[i]);
-        lv_obj_set_style_text_font(_values[i], &lv_font_montserrat_14, LV_PART_MAIN);
+        lv_obj_set_style_text_font(_values[i], &stix_math_18, LV_PART_MAIN);
         lv_obj_align(_values[i], LV_ALIGN_RIGHT_MID, -12, 0);
     }
 
@@ -152,7 +152,7 @@ void SettingsApp::createUI() {
     _hintLabel = lv_label_create(_container);
     lv_label_set_text(_hintLabel,
         LV_SYMBOL_UP LV_SYMBOL_DOWN " Navigate   ENTER Toggle   MODE Back");
-    lv_obj_set_style_text_font(_hintLabel, &lv_font_montserrat_12, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_hintLabel, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_hintLabel, lv_color_hex(COL_HINT), LV_PART_MAIN);
     lv_obj_set_pos(_hintLabel, PAD, SCREEN_H - barH - 22);
 
@@ -293,3 +293,4 @@ void SettingsApp::handleKey(const KeyEvent& ev) {
             break;
     }
 }
+

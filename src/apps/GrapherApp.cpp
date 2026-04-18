@@ -1,4 +1,4 @@
-/**
+﻿/**
  * GrapherApp.cpp — Grapher 2.0 (100 % LVGL 9)
  *
  * Everything built from lv_obj + lv_label + lv_line,
@@ -229,7 +229,7 @@ static lv_obj_t* makeContainer(lv_obj_t* parent, int x, int y, int w, int h,
 
 static lv_obj_t* makeLabel(lv_obj_t* parent, int x, int y,
                             const char* txt, uint32_t col = 0x000000,
-                            const lv_font_t* font = &lv_font_montserrat_14) {
+                            const lv_font_t* font = &stix_math_18) {
     lv_obj_t* lbl = lv_label_create(parent);
     lv_obj_set_pos(lbl, x, y);
     lv_label_set_text(lbl, txt);
@@ -280,7 +280,7 @@ void GrapherApp::createTabBar() {
         _tabPills[i] = pill;
 
         _tabLabels[i] = makeLabel(pill, (tw - 4) / 2 - 30, (TAB_H - 6 - 12) / 2,
-                                   titles[i], COL_TAB_TXT_I, &lv_font_montserrat_12);
+                                   titles[i], COL_TAB_TXT_I, &stix_math_18);
         lv_obj_set_style_text_align(_tabLabels[i], LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     }
 }
@@ -372,7 +372,7 @@ void GrapherApp::createExpressionsPanel() {
         lv_obj_set_style_border_color(_tplBtns[i], lv_color_hex(COL_ROW_BRD), LV_PART_MAIN);
         lv_obj_set_style_pad_all(_tplBtns[i], 0, LV_PART_MAIN);
         lv_obj_remove_flag(_tplBtns[i], LV_OBJ_FLAG_SCROLLABLE);
-        makeLabel(_tplBtns[i], 6, (ROW_H - 6 - 12) / 2, "Templates", 0x666666, &lv_font_montserrat_12);
+        makeLabel(_tplBtns[i], 6, (ROW_H - 6 - 12) / 2, "Templates", 0x666666, &stix_math_18);
         lv_obj_add_flag(_tplBtns[i], LV_OBJ_FLAG_HIDDEN);
 
         lv_obj_add_flag(_exprRows[i], LV_OBJ_FLAG_HIDDEN);
@@ -400,7 +400,7 @@ void GrapherApp::createExpressionsPanel() {
 
     // Bottom hint
     _exprHint = makeLabel(_panelExpr, PAD, SCREEN_H - BAR_H - TAB_H - 20,
-                           "ENTER=edit  AC=back", COL_HINT, &lv_font_montserrat_12);
+                           "ENTER=edit  AC=back", COL_HINT, &stix_math_18);
 
     refreshExprList();
 }
@@ -446,7 +446,7 @@ static void graphTickLabelsCb(lv_event_t* e) {
     lv_draw_label_dsc_t ldsc;
     lv_draw_label_dsc_init(&ldsc);
     ldsc.color = lv_color_hex(0x666666);
-    ldsc.font  = &lv_font_montserrat_10;
+    ldsc.font  = &stix_math_18;
 
     char buf[16];
     float mainStep = niceStep(xRange, 8);
@@ -502,7 +502,7 @@ void GrapherApp::createGraphPanel() {
     int tw = SCREEN_W / 4;
     for (int i = 0; i < 4; ++i) {
         _toolLabels[i] = makeLabel(_graphToolbar, i * tw + 4, (TOOLBAR_H - 12) / 2,
-                                    tools[i], COL_TB_TXT, &lv_font_montserrat_12);
+                                    tools[i], COL_TB_TXT, &stix_math_18);
     }
 
     // ── Graph area (below toolbar, above info bar) ──
@@ -527,7 +527,7 @@ void GrapherApp::createGraphPanel() {
         lv_obj_t* errLabel = lv_label_create(_graphArea);
         lv_label_set_text(errLabel, LV_SYMBOL_WARNING " ERR: INSUFFICIENT PSRAM\nClose other apps.");
         lv_obj_set_style_text_color(errLabel, lv_color_hex(0xCC0000), LV_PART_MAIN);
-        lv_obj_set_style_text_font(errLabel, &lv_font_montserrat_14, LV_PART_MAIN);
+        lv_obj_set_style_text_font(errLabel, &stix_math_18, LV_PART_MAIN);
         lv_obj_set_style_text_align(errLabel, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
         lv_obj_center(errLabel);
     }
@@ -609,13 +609,13 @@ void GrapherApp::createGraphPanel() {
     lv_obj_set_pos(_tracePillLabel, 14, 5);
     lv_label_set_text(_tracePillLabel, "");
     lv_obj_set_style_text_color(_tracePillLabel, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_set_style_text_font(_tracePillLabel, &lv_font_montserrat_12, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_tracePillLabel, &stix_math_18, LV_PART_MAIN);
 
     // ── Info bar at bottom ──
     _infoBar = makeContainer(_panelGraph, 0, panelH - INFO_BAR_H, SCREEN_W, INFO_BAR_H, COL_TB_BG);
-    _infoLabel = makeLabel(_infoBar, PAD, 2, "", 0x333333, &lv_font_montserrat_12);
+    _infoLabel = makeLabel(_infoBar, PAD, 2, "", 0x333333, &stix_math_18);
     // Mode badge on the right side of info bar: "[Trace]" or "[Pan]"
-    _modeBadge = makeLabel(_infoBar, SCREEN_W - 50, 2, "[Trace]", 0x4A90E2, &lv_font_montserrat_12);
+    _modeBadge = makeLabel(_infoBar, SCREEN_W - 50, 2, "[Trace]", 0x4A90E2, &stix_math_18);
 }
 
 // ── Table zebra-stripe draw event (LVGL 9) ──────────────────────────────
@@ -658,9 +658,9 @@ void GrapherApp::createTablePanel() {
 
     // Header labels: "x" and "f(x)"
     _tblHdrLabels[0] = makeLabel(_tblHeaderBar, SCREEN_W / 4 - 4, (TBL_HDR_H - 12) / 2,
-                                  "x", 0x000000, &lv_font_montserrat_12);
+                                  "x", 0x000000, &stix_math_18);
     _tblHdrLabels[1] = makeLabel(_tblHeaderBar, SCREEN_W * 3 / 4 - 4, (TBL_HDR_H - 12) / 2,
-                                  "f(x)", 0x000000, &lv_font_montserrat_12);
+                                  "f(x)", 0x000000, &stix_math_18);
     // Separator between header columns
     lv_obj_t* sep = lv_obj_create(_tblHeaderBar);
     lv_obj_set_pos(sep, SCREEN_W / 2, 0);
@@ -697,7 +697,7 @@ void GrapherApp::createTablePanel() {
     // Style: white bg, black text, subtle border
     lv_obj_set_style_bg_color(_tblTable, lv_color_hex(0xFFFFFF), LV_PART_ITEMS);
     lv_obj_set_style_text_color(_tblTable, lv_color_hex(0x000000), LV_PART_ITEMS);
-    lv_obj_set_style_text_font(_tblTable, &lv_font_montserrat_12, LV_PART_ITEMS);
+    lv_obj_set_style_text_font(_tblTable, &stix_math_18, LV_PART_ITEMS);
     lv_obj_set_style_border_width(_tblTable, 1, LV_PART_ITEMS);
     lv_obj_set_style_border_color(_tblTable, lv_color_hex(0xE0E0E0), LV_PART_ITEMS);
     lv_obj_set_style_pad_top(_tblTable, 4, LV_PART_ITEMS);
@@ -1370,7 +1370,7 @@ void GrapherApp::showTemplates() {
     lv_obj_set_style_border_color(card, lv_color_hex(COL_ROW_BRD), LV_PART_MAIN);
 
     // Title
-    makeLabel(card, cardW / 2 - 40, 6, "Templates", 0x333333, &lv_font_montserrat_14);
+    makeLabel(card, cardW / 2 - 40, 6, "Templates", 0x333333, &stix_math_18);
 
     // Create template row containers (UI shells) immediately
     _tplCount = NUM_TEMPLATES;
@@ -2634,7 +2634,7 @@ void GrapherApp::openCalcMenu() {
         lv_label_set_text(lbl, CALC_MENU_LABELS[i]);
         lv_obj_center(lbl);
         lv_obj_set_style_text_color(lbl, lv_color_hex(i == 0 ? 0xFFFFFF : 0x333333), LV_PART_MAIN);
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, LV_PART_MAIN);
+        lv_obj_set_style_text_font(lbl, &stix_math_18, LV_PART_MAIN);
     }
 }
 
@@ -2944,3 +2944,4 @@ void GrapherApp::clearTangent() {
     _tangentFuncIdx = -1;
     _tangentX = 0.0f;
 }
+

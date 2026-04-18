@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Fluid2DApp.cpp — Real-Time 2D Fluid Simulator for NumOS.
  *
  * Implements Jos Stam's "Stable Fluids" (SIGGRAPH 1999) with:
@@ -235,7 +235,7 @@ void Fluid2DApp::createUI() {
 
     _infoLabel = lv_label_create(_screen);
     lv_obj_set_pos(_infoLabel, 4, SCREEN_H - INFO_H - 2);
-    lv_obj_set_style_text_font(_infoLabel, &lv_font_montserrat_10, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_infoLabel, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_infoLabel, lv_color_hex(COL_TEXT_DIM), LV_PART_MAIN);
     updateInfoLabel();
 
@@ -1287,7 +1287,7 @@ void Fluid2DApp::onDraw(lv_event_t* e) {
             lv_draw_label_dsc_t tipLbl;
             lv_draw_label_dsc_init(&tipLbl);
             tipLbl.color = lv_color_hex(0xE0E0E0);
-            tipLbl.font = &lv_font_montserrat_10;
+            tipLbl.font = &stix_math_18;
             tipLbl.text = probeBuf;
             lv_draw_label(layer, &tipLbl, &tipBg);
         }
@@ -1505,3 +1505,4 @@ void Fluid2DApp::autoLoad() {
     }
 #endif
 }
+

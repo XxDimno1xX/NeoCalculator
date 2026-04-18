@@ -1,4 +1,4 @@
-/**
+﻿/**
  * PythonApp.cpp — MicroPython IDE (100% LVGL 9)
  *
  * Three-tab Python IDE: Scripts, Editor, Console.
@@ -56,7 +56,7 @@ static lv_obj_t* makePanel(lv_obj_t* parent, int x, int y, int w, int h,
 
 static lv_obj_t* makeLabel(lv_obj_t* parent, int x, int y,
                             const char* text, uint32_t color,
-                            const lv_font_t* font = &lv_font_montserrat_12) {
+                            const lv_font_t* font = &stix_math_18) {
     lv_obj_t* lbl = lv_label_create(parent);
     lv_label_set_text(lbl, text);
     lv_obj_set_pos(lbl, x, y);
@@ -179,7 +179,7 @@ void PythonApp::createTabBar() {
         _tabPills[i] = pill;
 
         _tabLabels[i] = makeLabel(pill, (tw - 4) / 2 - 24, (TAB_H - 6 - 12) / 2,
-                                   titles[i], COL_TAB_TXT_I, &lv_font_montserrat_12);
+                                   titles[i], COL_TAB_TXT_I, &stix_math_18);
         lv_obj_set_style_text_align(_tabLabels[i], LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     }
 }
@@ -199,15 +199,15 @@ void PythonApp::createScriptsPanel() {
     int bw = (SCREEN_W - 4 * 6) / 3;  // 3 buttons with padding
     _btnNew = makePanel(_btnBarScripts, 6, 3, bw, BTN_BAR_H - 6, COL_BTN_BG);
     lv_obj_set_style_radius(_btnNew, 4, LV_PART_MAIN);
-    makeLabel(_btnNew, bw / 2 - 12, (BTN_BAR_H - 6 - 12) / 2, "New", COL_BTN_TXT, &lv_font_montserrat_12);
+    makeLabel(_btnNew, bw / 2 - 12, (BTN_BAR_H - 6 - 12) / 2, "New", COL_BTN_TXT, &stix_math_18);
 
     _btnRun = makePanel(_btnBarScripts, 6 + bw + 6, 3, bw, BTN_BAR_H - 6, COL_BTN_BG);
     lv_obj_set_style_radius(_btnRun, 4, LV_PART_MAIN);
-    makeLabel(_btnRun, bw / 2 - 12, (BTN_BAR_H - 6 - 12) / 2, "Run", COL_BTN_TXT, &lv_font_montserrat_12);
+    makeLabel(_btnRun, bw / 2 - 12, (BTN_BAR_H - 6 - 12) / 2, "Run", COL_BTN_TXT, &stix_math_18);
 
     _btnDelete = makePanel(_btnBarScripts, 6 + (bw + 6) * 2, 3, bw, BTN_BAR_H - 6, 0xCC3333);
     lv_obj_set_style_radius(_btnDelete, 4, LV_PART_MAIN);
-    makeLabel(_btnDelete, bw / 2 - 18, (BTN_BAR_H - 6 - 12) / 2, "Delete", COL_BTN_TXT, &lv_font_montserrat_12);
+    makeLabel(_btnDelete, bw / 2 - 18, (BTN_BAR_H - 6 - 12) / 2, "Delete", COL_BTN_TXT, &stix_math_18);
 
     _btnIdx = 0;
     _btnFocus = false;
@@ -372,15 +372,15 @@ void PythonApp::refreshScriptList() {
         lv_obj_set_style_border_color(_scriptRows[i], lv_color_hex(0xD1D1D1), LV_PART_MAIN);
 
         // Python file icon (emoji-like "py" tag)
-        makeLabel(_scriptRows[i], 6, (ROW_H - 12) / 2, "py", 0xF57F17, &lv_font_montserrat_12);
+        makeLabel(_scriptRows[i], 6, (ROW_H - 12) / 2, "py", 0xF57F17, &stix_math_18);
 
         _scriptLabels[i] = makeLabel(_scriptRows[i], 28, (ROW_H - 12) / 2,
-                                      _scriptNames[i], 0x333333, &lv_font_montserrat_12);
+                                      _scriptNames[i], 0x333333, &stix_math_18);
     }
 
     if (_scriptCount == 0) {
         makeLabel(_panelScripts, SCREEN_W / 2 - 50, CONTENT_H / 2 - 20,
-                  "No scripts found", 0x999999, &lv_font_montserrat_12);
+                  "No scripts found", 0x999999, &stix_math_18);
     }
 
     refreshScriptFocus();
@@ -910,3 +910,4 @@ void PythonApp::handleConsoleKey(const KeyEvent& ev) {
             break;
     }
 }
+

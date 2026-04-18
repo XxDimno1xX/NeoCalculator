@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Components.cpp — Circuit component implementations.
  *
  * Each component implements:
@@ -429,7 +429,7 @@ void MCUComponent::draw(lv_layer_t* layer, int offsetX, int offsetY) {
     lv_draw_label_dsc_t labdsc;
     lv_draw_label_dsc_init(&labdsc);
     labdsc.color = lv_color_hex(0xFFFFFF);
-    labdsc.font  = &lv_font_montserrat_10;
+    labdsc.font  = &stix_math_18;
     labdsc.text  = "uC";
 
     lv_area_t labArea;
@@ -1362,3 +1362,4 @@ void SevenSegment::draw(lv_layer_t* layer, int offsetX, int offsetY) {
     dsc.p2.x = cx + 20; dsc.p2.y = cy;
     lv_draw_line(layer, &dsc);
 }
+

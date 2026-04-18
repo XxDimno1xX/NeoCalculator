@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ProbabilityApp.cpp — Probability Distributions application for NumOS.
  *
  * Gaussian bell curve with PDF/CDF computation.
@@ -149,12 +149,12 @@ void ProbabilityApp::createUI() {
 
         _paramLabels[i] = lv_label_create(_paramRows[i]);
         lv_label_set_text(_paramLabels[i], labels[i]);
-        lv_obj_set_style_text_font(_paramLabels[i], &lv_font_montserrat_12, LV_PART_MAIN);
+        lv_obj_set_style_text_font(_paramLabels[i], &stix_math_18, LV_PART_MAIN);
         lv_obj_set_style_text_color(_paramLabels[i], lv_color_hex(COL_TEXT), LV_PART_MAIN);
         lv_obj_align(_paramLabels[i], LV_ALIGN_LEFT_MID, 6, 0);
 
         _paramValues[i] = lv_label_create(_paramRows[i]);
-        lv_obj_set_style_text_font(_paramValues[i], &lv_font_montserrat_14, LV_PART_MAIN);
+        lv_obj_set_style_text_font(_paramValues[i], &stix_math_18, LV_PART_MAIN);
         lv_obj_set_style_text_color(_paramValues[i], lv_color_hex(COL_VALUE), LV_PART_MAIN);
         lv_obj_align(_paramValues[i], LV_ALIGN_RIGHT_MID, -6, 0);
     }
@@ -170,13 +170,13 @@ void ProbabilityApp::createUI() {
 
     _pdfLabel = lv_label_create(_resultPanel);
     lv_label_set_text(_pdfLabel, "PDF: ---");
-    lv_obj_set_style_text_font(_pdfLabel, &lv_font_montserrat_12, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_pdfLabel, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_pdfLabel, lv_color_hex(COL_RESULT), LV_PART_MAIN);
     lv_obj_set_pos(_pdfLabel, 8, 4);
 
     _cdfLabel = lv_label_create(_resultPanel);
     lv_label_set_text(_cdfLabel, "P(X<x): ---");
-    lv_obj_set_style_text_font(_cdfLabel, &lv_font_montserrat_12, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_cdfLabel, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_cdfLabel, lv_color_hex(COL_RESULT), LV_PART_MAIN);
     lv_obj_set_pos(_cdfLabel, 8, 24);
 
@@ -184,7 +184,7 @@ void ProbabilityApp::createUI() {
     _hintLabel = lv_label_create(_screen);
     lv_label_set_text(_hintLabel,
         LV_SYMBOL_UP LV_SYMBOL_DOWN " Select  ENTER Edit  MODE Back");
-    lv_obj_set_style_text_font(_hintLabel, &lv_font_montserrat_10, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_hintLabel, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_hintLabel, lv_color_hex(COL_HINT), LV_PART_MAIN);
     lv_obj_set_pos(_hintLabel, 8, SCREEN_H - 16);
 }
@@ -484,3 +484,4 @@ void ProbabilityApp::handleKey(const KeyEvent& ev) {
             break;
     }
 }
+

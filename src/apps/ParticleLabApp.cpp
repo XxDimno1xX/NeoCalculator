@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ParticleLabApp.cpp
  * Falling-sand particle simulation — LVGL integration, rendering, input.
  *
@@ -180,7 +180,7 @@ void ParticleLabApp::createUI() {
     // Info label
     _infoLabel = lv_label_create(_screen);
     lv_obj_set_pos(_infoLabel, 4, SCREEN_H - INFO_H - 2);
-    lv_obj_set_style_text_font(_infoLabel, &lv_font_montserrat_10, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_infoLabel, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_infoLabel, lv_color_hex(COL_TEXT_DIM), LV_PART_MAIN);
     updateInfoLabel();
 
@@ -758,3 +758,4 @@ void ParticleLabApp::onSimTimer(lv_timer_t* timer) {
     // Trigger redraw
     if (app->_drawObj) lv_obj_invalidate(app->_drawObj);
 }
+

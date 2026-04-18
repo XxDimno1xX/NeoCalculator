@@ -1,9 +1,9 @@
-/**
+﻿/**
  * MainMenu.cpp
  * Launcher NumOS — Pixel-Perfect NumWorks High-Fidelity
  *
  * Feature summary:
- *  1. Montserrat 14 everywhere, full-opacity anti-aliased text
+ *  1. UI typography via LV_FONT_DEFAULT (Montserrat), full-opacity anti-aliased text
  *  2. Dot-grid background #D1D1D1 on #F5F5F5, 1 px dots, 20 px spacing
  *  3. Cards: shadow_width 12, shadow_spread 2; focus → blue/orange glow
  *  4. Focus anim: 1.05× scale via lv_anim_path_overshoot (250 ms)
@@ -232,7 +232,7 @@ void MainMenu::create() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// buildStatusBar() — 24 px orange bar, Montserrat 14, anti-aliased
+// buildStatusBar() — 24 px orange bar, UI default font, anti-aliased
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void MainMenu::buildStatusBar() {
@@ -249,7 +249,7 @@ void MainMenu::buildStatusBar() {
     // Left: angle mode
     lv_obj_t* modeLabel = lv_label_create(bar);
     lv_label_set_text(modeLabel, "rad");
-    lv_obj_set_style_text_font(modeLabel, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(modeLabel, LV_FONT_DEFAULT, 0);
     lv_obj_set_style_text_color(modeLabel, lv_color_hex(COL_STATUS_TEXT), 0);
     lv_obj_set_style_text_opa(modeLabel, LV_OPA_COVER, 0);
     lv_obj_align(modeLabel, LV_ALIGN_LEFT_MID, 8, 0);
@@ -257,7 +257,7 @@ void MainMenu::buildStatusBar() {
     // Centre: title
     lv_obj_t* title = lv_label_create(bar);
     lv_label_set_text(title, "APPLICATIONS");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(title, LV_FONT_DEFAULT, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(COL_STATUS_TEXT), 0);
     lv_obj_set_style_text_opa(title, LV_OPA_COVER, 0);
     lv_obj_set_style_text_letter_space(title, 1, 0);
@@ -266,7 +266,7 @@ void MainMenu::buildStatusBar() {
     // Right: battery
     lv_obj_t* batt = lv_label_create(bar);
     lv_label_set_text(batt, LV_SYMBOL_BATTERY_FULL);
-    lv_obj_set_style_text_font(batt, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(batt, LV_FONT_DEFAULT, 0);
     lv_obj_set_style_text_color(batt, lv_color_hex(COL_STATUS_TEXT), 0);
     lv_obj_set_style_text_opa(batt, LV_OPA_COVER, 0);
     lv_obj_align(batt, LV_ALIGN_RIGHT_MID, -8, 0);
@@ -372,7 +372,7 @@ lv_obj_t* MainMenu::buildCard(lv_obj_t* parent, const AppEntry& app)
     // ── Geometric vector icon ───────────────────────────────────────────
     createAppIcon(card, app);
 
-    // ── App name (Montserrat 14, anti-aliased) ──────────────────────────
+    // ── App name (UI default font, anti-aliased) ────────────────────────
     lv_obj_t* name = lv_label_create(card);
     lv_label_set_text(name, app.name);
     lv_obj_add_style(name, &_styleAppName, LV_PART_MAIN);
@@ -804,9 +804,9 @@ void MainMenu::initStyles() {
     lv_style_set_border_width(&_styleIconBox, 0);
     lv_style_set_pad_all(&_styleIconBox,     0);
 
-    // ── App name (Montserrat 14, full-opa anti-aliased text) ────────────
+    // ── App name (UI default font) ──────────────────────────────────────
     lv_style_init(&_styleAppName);
-    lv_style_set_text_font(&_styleAppName,  &lv_font_montserrat_14);
+    lv_style_set_text_font(&_styleAppName,  LV_FONT_DEFAULT);
     lv_style_set_text_color(&_styleAppName, lv_color_hex(COL_LABEL_TEXT));
     lv_style_set_text_opa(&_styleAppName,   LV_OPA_COVER);
     lv_style_set_text_align(&_styleAppName, LV_TEXT_ALIGN_CENTER);
@@ -963,3 +963,4 @@ void MainMenu::onCardFocused(lv_event_t* e) {
     // Auto-scroll the grid so the focused card is always visible
     lv_obj_scroll_to_view(card, LV_ANIM_ON);
 }
+

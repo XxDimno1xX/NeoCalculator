@@ -1,4 +1,4 @@
-/**
+﻿/**
  * OpticsLabApp.cpp
  * OpticsLab — 2D Ray-Tracing Application for NumOS (App ID 17).
  *
@@ -228,7 +228,7 @@ void OpticsLabApp::createUI() {
     // key-binding hints.
     _infoLabel = lv_label_create(_screen);
     lv_obj_align(_infoLabel, LV_ALIGN_BOTTOM_LEFT, 2, -2);
-    lv_obj_set_style_text_font(_infoLabel, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_font(_infoLabel, &stix_math_18, 0);
     lv_obj_set_style_text_color(_infoLabel,
                                  lv_color_hex(0xAAAAAA), 0);
     lv_obj_set_style_bg_opa(_infoLabel, LV_OPA_TRANSP, 0);
@@ -583,3 +583,4 @@ void OpticsLabApp::onSimTimer(lv_timer_t* timer) {
         lv_obj_invalidate(app->_drawObj);
     }
 }
+

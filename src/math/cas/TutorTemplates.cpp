@@ -440,7 +440,6 @@ SolveResult solveQuadraticTutor(const SymEquation& eq, char var,
     
     // ── 2. Generic Formula: x = (-b ± √(b² - 4ac)) / (2a) ───────────
     // Uses standard ASCII variable names: a, b, c for the formula display.
-    // These must be ASCII (0x61, 0x62, 0x63) so Montserrat font renders them.
     {
         SymExpr* bVar = symVar(*arena, 'b');   // ASCII 'b' (0x62)
         SymExpr* aVar = symVar(*arena, 'a');   // ASCII 'a' (0x61)

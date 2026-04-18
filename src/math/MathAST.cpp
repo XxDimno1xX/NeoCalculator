@@ -19,6 +19,8 @@
 #include "MathAST.h"
 #include <algorithm>
 
+#include "../ui/MathSymbols.h"
+
 #ifdef ARDUINO
   #include <esp_heap_caps.h>
 #endif
@@ -198,8 +200,8 @@ const char* NodeOperator::symbol() const {
     switch (_op) {
         case OpKind::Add:       return "+";
         case OpKind::Sub:       return "-";              // ASCII hyphen-minus (U+002D)
-        case OpKind::Mul:       return "\xc3\x97";       // × (U+00D7)
-        case OpKind::PlusMinus: return "\xc2\xb1";       // ± (U+00B1)
+        case OpKind::Mul:       return numos::mathsym::SYMB_TIMES;
+        case OpKind::PlusMinus: return numos::mathsym::SYMB_PLUS_MINUS;
     }
     return "?";
 }
@@ -622,7 +624,7 @@ NodeConstant::NodeConstant(ConstKind kind)
 
 const char* NodeConstant::symbol() const {
     switch (_kind) {
-        case ConstKind::Pi:   return "\xcf\x80";  // π (U+03C0)
+        case ConstKind::Pi:   return numos::mathsym::SYMB_PI;
         case ConstKind::E:    return "e";          // Euler's number (blue via drawConstant)
         case ConstKind::Imag: return "i";          // imaginary unit (blue via drawConstant)
     }

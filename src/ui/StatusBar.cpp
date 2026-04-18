@@ -1,4 +1,4 @@
-/**
+﻿/**
  * StatusBar.cpp — Barra de estado global LVGL (24 px)
  *
  * Implementación:
@@ -268,3 +268,4 @@ void StatusBar::updateBatteryIcon() {
 }
 
 } // namespace ui
+

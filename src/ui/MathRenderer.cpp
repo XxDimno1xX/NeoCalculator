@@ -1,4 +1,4 @@
-/**
+﻿/**
  * MathRenderer.cpp — Motor de Renderizado LVGL 9.5 para el AST Matemático
  *
  * Fase 3 del Motor V.P.A.M.
@@ -16,6 +16,9 @@
 #include <cstring>
 #include <string>
 
+#include "MathSymbols.h"
+#include "MathTypography.h"
+
 namespace vpam {
 
 namespace {
@@ -32,8 +35,8 @@ struct SymbolAlias {
 
 // ASCII token -> UTF-8 fallback map for broad math symbol input.
 static const SymbolAlias kSymbolAliases[] = {
-    {"\\alpha",  "\xCE\xB1"}, {"\\beta",   "\xCE\xB2"}, {"\\Gamma", "\xCE\x93"},
-    {"\\gamma",  "\xCE\xB3"}, {"\\Delta",  "\xCE\x94"}, {"\\delta", "\xCE\xB4"},
+    {"\\alpha",  numos::mathsym::SYMB_ALPHA}, {"\\beta",   numos::mathsym::SYMB_BETA}, {"\\Gamma", "\xCE\x93"},
+    {"\\gamma",  numos::mathsym::SYMB_GAMMA}, {"\\Delta",  "\xCE\x94"}, {"\\delta", "\xCE\xB4"},
     {"\\epsilon","\xCE\xB5"}, {"\\zeta",   "\xCE\xB6"}, {"\\eta",   "\xCE\xB7"},
     {"\\Theta",  "\xCE\x98"}, {"\\theta",  "\xCE\xB8"}, {"\\iota",  "\xCE\xB9"},
     {"\\kappa",  "\xCE\xBA"}, {"\\Lambda", "\xCE\x9B"}, {"\\lambda","\xCE\xBB"},
@@ -44,34 +47,44 @@ static const SymbolAlias kSymbolAliases[] = {
     {"\\Phi",    "\xCE\xA6"}, {"\\phi",    "\xCF\x86"}, {"\\chi",   "\xCF\x87"},
     {"\\Psi",    "\xCE\xA8"}, {"\\psi",    "\xCF\x88"}, {"\\Omega", "\xCE\xA9"},
     {"\\omega",  "\xCF\x89"},
-    {"\\infty",  "\xE2\x88\x9E"}, {"\\partial","\xE2\x88\x82"}, {"\\nabla","\xE2\x88\x87"},
-    {"\\int",    "\xE2\x88\xAB"}, {"\\iint",  "\xE2\x88\xAC"}, {"\\iiint","\xE2\x88\xAD"},
+    {"\\infty",  numos::mathsym::SYMB_INFINITY}, {"\\partial",numos::mathsym::SYMB_PARTIAL}, {"\\nabla",numos::mathsym::SYMB_NABLA},
+    {"\\int",    numos::mathsym::SYMB_INT}, {"\\iint",  "\xE2\x88\xAC"}, {"\\iiint","\xE2\x88\xAD"},
     {"\\oint",   "\xE2\x88\xAE"}, {"\\oiint", "\xE2\x88\xAF"},
     {"\\forall", "\xE2\x88\x80"}, {"\\exists","\xE2\x88\x83"}, {"\\nexists","\xE2\x88\x84"},
     {"\\therefore","\xE2\x88\xB4"}, {"\\because","\xE2\x88\xB5"}, {"\\implies","\xE2\x87\x92"},
     {"\\iff",    "\xE2\x87\x94"}, {"\\neg",   "\xC2\xAC"}, {"\\land", "\xE2\x88\xA7"},
-    {"\\lor",    "\xE2\x88\xA8"}, {"\\in",    "\xE2\x88\x88"}, {"\\notin","\xE2\x88\x89"},
-    {"\\subset", "\xE2\x8A\x82"}, {"\\subseteq","\xE2\x8A\x86"}, {"\\cup","\xE2\x88\xAA"},
-    {"\\cap",    "\xE2\x88\xA9"}, {"\\setminus","\xE2\x88\x96"}, {"\\emptyset","\xE2\x88\x85"},
-    {"\\equiv",  "\xE2\x89\xA1"}, {"\\notequiv","\xE2\x89\xA2"}, {"\\to","\xE2\x86\x92"},
-    {"\\leftarrow","\xE2\x86\x90"}, {"\\leftrightarrow","\xE2\x86\x94"}, {"\\oplus","\xE2\x8A\x95"},
+    {"\\lor",    "\xE2\x88\xA8"}, {"\\in",    numos::mathsym::SYMB_IN}, {"\\notin",numos::mathsym::SYMB_NOT_IN},
+    {"\\subset", numos::mathsym::SYMB_SUBSET}, {"\\subseteq",numos::mathsym::SYMB_SUBSETEQ}, {"\\cup",numos::mathsym::SYMB_UNION},
+    {"\\cap",    numos::mathsym::SYMB_INTERSECTION}, {"\\setminus","\xE2\x88\x96"}, {"\\emptyset",numos::mathsym::SYMB_EMPTY_SET},
+    {"\\equiv",  "\xE2\x89\xA1"}, {"\\notequiv","\xE2\x89\xA2"}, {"\\to",numos::mathsym::SYMB_ARROW_R},
+    {"\\leftarrow",numos::mathsym::SYMB_ARROW_L}, {"\\leftrightarrow",numos::mathsym::SYMB_ARROW_LR}, {"\\oplus","\xE2\x8A\x95"},
     {"\\propto", "\xE2\x88\x9D"}, {"\\otimes","\xE2\x8A\x97"}, {"\\perp","\xE2\x8A\xA5"},
     {"\\parallel","\xE2\x88\xA5"}, {"\\angle","\xE2\x88\xA0"}, {"\\cong","\xE2\x89\x85"},
     {"\\sim",    "\xE2\x88\xBC"}, {"\\approx","\xE2\x89\x88"}, {"\\degree","\xC2\xB0"},
-    {"\\triangle","\xE2\x96\xB3"}, {"\\leq","\xE2\x89\xA4"}, {"\\geq","\xE2\x89\xA5"},
-    {"\\neq",    "\xE2\x89\xA0"}, {"\\mp","\xE2\x88\x93"}, {"\\times","\xC3\x97"},
+    {"\\triangle","\xE2\x96\xB3"}, {"\\leq",numos::mathsym::SYMB_LEQ}, {"\\geq",numos::mathsym::SYMB_GEQ},
+    {"\\neq",    numos::mathsym::SYMB_NEQ}, {"\\mp","\xE2\x88\x93"}, {"\\times",numos::mathsym::SYMB_TIMES},
     {"\\ll",     "\xE2\x89\xAA"}, {"\\gg","\xE2\x89\xAB"}, {"\\circ","\xE2\x88\x98"},
     {"\\square", "\xE2\x96\xA1"}, {"\\aleph_0","\xE2\x84\xB5\xE2\x82\x80"},
     {"\\lfloor", "\xE2\x8C\x8A"}, {"\\rfloor","\xE2\x8C\x8B"}, {"\\lceil","\xE2\x8C\x88"},
     {"\\rceil",  "\xE2\x8C\x89"}, {"\\dagger","\xE2\x80\xA0"}, {"\\ast","\xE2\x88\x97"},
-    {"\\hbar",   "\xE2\x84\x8F"}, {"\\mathbbN","\xE2\x84\x95"}, {"\\mathbbZ","\xE2\x84\xA4"},
-    {"\\mathbbQ","\xE2\x84\x9A"}, {"\\mathbbR","\xE2\x84\x9D"}, {"\\mathbbC","\xE2\x84\x82"},
+    {"\\hbar",   "\xE2\x84\x8F"}, {"\\mathbbN",numos::mathsym::SYMB_N}, {"\\mathbbZ",numos::mathsym::SYMB_Z},
+    {"\\mathbbQ",numos::mathsym::SYMB_Q}, {"\\mathbbR",numos::mathsym::SYMB_REAL}, {"\\mathbbC",numos::mathsym::SYMB_COMPLEX},
     {"\\mathbbH","\xE2\x84\x8D"}
 };
 
 static std::string normalizeSymbolText(const char* in) {
     if (!in) return {};
     std::string out(in);
+
+    for (const auto& e : numos::mathsym::kVpamSymbolMap) {
+        std::string::size_type pos = 0;
+        const std::string token(e.token);
+        while ((pos = out.find(token, pos)) != std::string::npos) {
+            out.replace(pos, token.size(), e.glyph);
+            pos += std::strlen(e.glyph);
+        }
+    }
+
     for (const auto& e : kSymbolAliases) {
         std::string::size_type pos = 0;
         const std::string token(e.token);
@@ -93,8 +106,8 @@ MathCanvas::MathCanvas()
     : _obj(nullptr)
     , _root(nullptr)
     , _cursorCtrl(nullptr)
-    , _fontNormal(&lv_font_montserrat_14)
-    , _fontSmall(&lv_font_montserrat_12)
+    , _fontNormal(ui::mathPrimaryFont())
+    , _fontSmall(ui::mathPrimaryFont())
     , _cursorTimer(nullptr)
     , _cursorVisible(true)
     , _cursorX(0), _cursorY(0), _cursorH(0)
@@ -1574,3 +1587,4 @@ void MathCanvas::drawBorderRect(lv_layer_t* layer,
 }
 
 } // namespace vpam
+

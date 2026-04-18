@@ -1,4 +1,4 @@
-/**
+﻿/**
  * PeriodicTableApp.cpp — Interactive Periodic Table for NumOS.
  *
  * LVGL-native app: custom-drawn grid, detail panel, molar mass, balancer.
@@ -164,7 +164,7 @@ void PeriodicTableApp::createTabBar() {
 
         _tabLabels[i] = lv_label_create(_tabBtns[i]);
         lv_label_set_text(_tabLabels[i], tabNames[i]);
-        lv_obj_set_style_text_font(_tabLabels[i], &lv_font_montserrat_10, LV_PART_MAIN);
+        lv_obj_set_style_text_font(_tabLabels[i], &stix_math_18, LV_PART_MAIN);
         lv_obj_set_style_text_color(_tabLabels[i], lv_color_hex(COL_TEXT), LV_PART_MAIN);
         lv_obj_center(_tabLabels[i]);
     }
@@ -203,43 +203,43 @@ void PeriodicTableApp::createTableTab() {
 
     // Giant symbol (left side)
     _detSymbol = lv_label_create(_detailPanel);
-    lv_obj_set_style_text_font(_detSymbol, &lv_font_montserrat_28, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_detSymbol, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_detSymbol, lv_color_hex(COL_CURSOR), LV_PART_MAIN);
     lv_obj_set_pos(_detSymbol, 6, 6);
 
     // Atomic number (small, above-right of symbol)
     _detNumber = lv_label_create(_detailPanel);
-    lv_obj_set_style_text_font(_detNumber, &lv_font_montserrat_12, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_detNumber, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_detNumber, lv_color_hex(COL_TEXT_DIM), LV_PART_MAIN);
     lv_obj_set_pos(_detNumber, 6, 40);
 
     // Full name (large, prominent)
     _detName = lv_label_create(_detailPanel);
-    lv_obj_set_style_text_font(_detName, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_detName, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_detName, lv_color_white(), LV_PART_MAIN);
     lv_obj_set_pos(_detName, 56, 6);
 
     // Category label (colored)
     _detCategory = lv_label_create(_detailPanel);
-    lv_obj_set_style_text_font(_detCategory, &lv_font_montserrat_10, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_detCategory, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_detCategory, lv_color_hex(COL_TEXT_DIM), LV_PART_MAIN);
     lv_obj_set_pos(_detCategory, 56, 22);
 
     // Mass (right-aligned block)
     _detMass = lv_label_create(_detailPanel);
-    lv_obj_set_style_text_font(_detMass, &lv_font_montserrat_12, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_detMass, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_detMass, lv_color_hex(COL_TEXT), LV_PART_MAIN);
     lv_obj_set_pos(_detMass, 56, 36);
 
     // Electron config (bottom row left)
     _detConfig = lv_label_create(_detailPanel);
-    lv_obj_set_style_text_font(_detConfig, &lv_font_montserrat_10, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_detConfig, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_detConfig, lv_color_hex(COL_TEXT_DIM), LV_PART_MAIN);
     lv_obj_set_pos(_detConfig, 56, 52);
 
     // Electronegativity (bottom row right)
     _detEN = lv_label_create(_detailPanel);
-    lv_obj_set_style_text_font(_detEN, &lv_font_montserrat_12, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_detEN, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_detEN, lv_color_hex(COL_RESULT_OK), LV_PART_MAIN);
     lv_obj_set_pos(_detEN, 220, 6);
 
@@ -261,21 +261,21 @@ void PeriodicTableApp::createMolarTab() {
     // Title
     lv_obj_t* title = lv_label_create(_molarContainer);
     lv_label_set_text(title, "Molar Mass Calculator");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(title, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(title, lv_color_hex(COL_TEXT), LV_PART_MAIN);
     lv_obj_set_pos(title, 0, 4);
 
     // "Formula:" label
     lv_obj_t* fLabel = lv_label_create(_molarContainer);
     lv_label_set_text(fLabel, "Formula:");
-    lv_obj_set_style_text_font(fLabel, &lv_font_montserrat_10, LV_PART_MAIN);
+    lv_obj_set_style_text_font(fLabel, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(fLabel, lv_color_hex(COL_TEXT_DIM), LV_PART_MAIN);
     lv_obj_set_pos(fLabel, 0, 30);
 
     // Input display
     _molarInput = lv_label_create(_molarContainer);
     lv_label_set_text(_molarInput, "_");
-    lv_obj_set_style_text_font(_molarInput, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_molarInput, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_molarInput, lv_color_hex(COL_CURSOR), LV_PART_MAIN);
     lv_obj_set_pos(_molarInput, 0, 44);
     lv_obj_set_width(_molarInput, SCREEN_W - 24);
@@ -283,7 +283,7 @@ void PeriodicTableApp::createMolarTab() {
     // Result
     _molarResult = lv_label_create(_molarContainer);
     lv_label_set_text(_molarResult, "");
-    lv_obj_set_style_text_font(_molarResult, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_molarResult, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_molarResult, lv_color_hex(COL_RESULT_OK), LV_PART_MAIN);
     lv_obj_set_pos(_molarResult, 0, 80);
     lv_obj_set_width(_molarResult, SCREEN_W - 24);
@@ -292,7 +292,7 @@ void PeriodicTableApp::createMolarTab() {
     _molarHint = lv_label_create(_molarContainer);
     lv_label_set_text(_molarHint,
         "A-F keys=letters  NUM=digits  ()  ENTER=calc");
-    lv_obj_set_style_text_font(_molarHint, &lv_font_montserrat_10, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_molarHint, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_molarHint, lv_color_hex(COL_HINT), LV_PART_MAIN);
     lv_obj_set_pos(_molarHint, 0, SCREEN_H - topY - 30);
 }
@@ -312,21 +312,21 @@ void PeriodicTableApp::createBalanceTab() {
     // Title
     lv_obj_t* title = lv_label_create(_balContainer);
     lv_label_set_text(title, "Equation Balancer");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(title, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(title, lv_color_hex(COL_TEXT), LV_PART_MAIN);
     lv_obj_set_pos(title, 0, 4);
 
     // "Equation:" label
     lv_obj_t* eLabel = lv_label_create(_balContainer);
     lv_label_set_text(eLabel, "Equation:");
-    lv_obj_set_style_text_font(eLabel, &lv_font_montserrat_10, LV_PART_MAIN);
+    lv_obj_set_style_text_font(eLabel, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(eLabel, lv_color_hex(COL_TEXT_DIM), LV_PART_MAIN);
     lv_obj_set_pos(eLabel, 0, 30);
 
     // Input display
     _balInput = lv_label_create(_balContainer);
     lv_label_set_text(_balInput, "_");
-    lv_obj_set_style_text_font(_balInput, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_balInput, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_balInput, lv_color_hex(COL_CURSOR), LV_PART_MAIN);
     lv_obj_set_pos(_balInput, 0, 44);
     lv_obj_set_width(_balInput, SCREEN_W - 24);
@@ -334,7 +334,7 @@ void PeriodicTableApp::createBalanceTab() {
     // Result
     _balResult = lv_label_create(_balContainer);
     lv_label_set_text(_balResult, "");
-    lv_obj_set_style_text_font(_balResult, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_balResult, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_balResult, lv_color_hex(COL_RESULT_OK), LV_PART_MAIN);
     lv_obj_set_pos(_balResult, 0, 80);
     lv_obj_set_width(_balResult, SCREEN_W - 24);
@@ -343,7 +343,7 @@ void PeriodicTableApp::createBalanceTab() {
     _balHint = lv_label_create(_balContainer);
     lv_label_set_text(_balHint,
         "A-F=letters NUM=digits +=plus ==equals ENTER=balance");
-    lv_obj_set_style_text_font(_balHint, &lv_font_montserrat_10, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_balHint, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(_balHint, lv_color_hex(COL_HINT), LV_PART_MAIN);
     lv_obj_set_pos(_balHint, 0, SCREEN_H - topY - 30);
 }
@@ -553,7 +553,7 @@ void PeriodicTableApp::onGridDraw(lv_event_t* e) {
             lv_draw_label_dsc_t labelDsc;
             lv_draw_label_dsc_init(&labelDsc);
             labelDsc.color = isCursor ? lv_color_hex(0x000000) : lv_color_hex(COL_TEXT);
-            labelDsc.font = &lv_font_montserrat_10;
+            labelDsc.font = &stix_math_18;
             labelDsc.align = LV_TEXT_ALIGN_CENTER;
             labelDsc.opa = LV_OPA_COVER;
             labelDsc.text = el.symbol;
@@ -928,7 +928,7 @@ void PeriodicTableApp::openDeepDive() {
     // Helper lambda-like: create a row label
     auto makeRow = [&](const char* text, uint32_t color = COL_TEXT) {
         lv_obj_t* lbl = lv_label_create(_modalBox);
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, LV_PART_MAIN);
+        lv_obj_set_style_text_font(lbl, &stix_math_18, LV_PART_MAIN);
         lv_obj_set_style_text_color(lbl, lv_color_hex(color), LV_PART_MAIN);
         lv_obj_set_width(lbl, contentW);
         lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
@@ -939,7 +939,7 @@ void PeriodicTableApp::openDeepDive() {
     // ── Title: "Symbol — Name" ───────────────────────────────────────────
     snprintf(buf, sizeof(buf), "%s  -  %s", el.symbol, el.name);
     lv_obj_t* title = lv_label_create(_modalBox);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(title, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(title, lv_color_hex(COL_CURSOR), LV_PART_MAIN);
     lv_obj_set_width(title, contentW);
     lv_label_set_text(title, buf);
@@ -1072,12 +1072,12 @@ void PeriodicTableApp::openDeepDive() {
 
     // ── Fun Fact (Trivia) ────────────────────────────────────────────────
     lv_obj_t* triviaTitle = lv_label_create(_modalBox);
-    lv_obj_set_style_text_font(triviaTitle, &lv_font_montserrat_10, LV_PART_MAIN);
+    lv_obj_set_style_text_font(triviaTitle, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(triviaTitle, lv_color_hex(COL_HINT), LV_PART_MAIN);
     lv_label_set_text(triviaTitle, "Fun Fact:");
 
     lv_obj_t* triviaLbl = lv_label_create(_modalBox);
-    lv_obj_set_style_text_font(triviaLbl, &lv_font_montserrat_12, LV_PART_MAIN);
+    lv_obj_set_style_text_font(triviaLbl, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(triviaLbl, lv_color_white(), LV_PART_MAIN);
     lv_obj_set_width(triviaLbl, contentW);
     lv_label_set_long_mode(triviaLbl, LV_LABEL_LONG_WRAP);
@@ -1085,7 +1085,7 @@ void PeriodicTableApp::openDeepDive() {
 
     // ── Footer hint (fixed at bottom of overlay, outside scroll) ─────────
     lv_obj_t* hint = lv_label_create(_modalOverlay);
-    lv_obj_set_style_text_font(hint, &lv_font_montserrat_10, LV_PART_MAIN);
+    lv_obj_set_style_text_font(hint, &stix_math_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(hint, lv_color_hex(COL_HINT), LV_PART_MAIN);
     lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -2);
     lv_label_set_text(hint, "UP/DOWN: scroll  |  Any other key: close");
@@ -1103,3 +1103,4 @@ void PeriodicTableApp::closeDeepDive() {
     _modalOpen = false;
     _modalScrollY = 0;
 }
+

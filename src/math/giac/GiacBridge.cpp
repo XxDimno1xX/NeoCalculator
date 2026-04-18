@@ -3,6 +3,7 @@
 #include <iostream>
 #include <cctype>
 #include <vector>
+#include <cstring>
 
 #include "config.h"
 #include "gen.h"
@@ -16,6 +17,7 @@
 #include "series.h"
 
 #include "math/giac/GiacBridge.h"
+#include "ui/MathSymbols.h"
 
 using namespace giac;
 
@@ -27,6 +29,50 @@ namespace giac {
 static giac::context global_context;
 
 static std::string trimCopy(const std::string &s);
+
+static bool isWordBoundary(char c) {
+  const unsigned char uc = static_cast<unsigned char>(c);
+  return !(std::isalnum(uc) || c == '_');
+}
+
+static void replaceAll(std::string &text, const std::string &from, const char *to) {
+  if (from.empty()) return;
+  size_t pos = 0;
+  while ((pos = text.find(from, pos)) != std::string::npos) {
+    text.replace(pos, from.size(), to);
+    pos += std::strlen(to);
+  }
+}
+
+static void replaceWordToken(std::string &text, const std::string &token, const char *to) {
+  if (token.empty()) return;
+  size_t pos = 0;
+  while ((pos = text.find(token, pos)) != std::string::npos) {
+    const bool leftOk = (pos == 0) || isWordBoundary(text[pos - 1]);
+    const size_t end = pos + token.size();
+    const bool rightOk = (end >= text.size()) || isWordBoundary(text[end]);
+    if (leftOk && rightOk) {
+      text.replace(pos, token.size(), to);
+      pos += std::strlen(to);
+    } else {
+      pos += token.size();
+    }
+  }
+}
+
+static void applyDisplaySymbolMap(std::string &text) {
+  // Normalize common Giac textual operators into STIX-supported glyphs.
+  replaceWordToken(text, "infinity", numos::mathsym::SYMB_INFINITY);
+  replaceWordToken(text, "inf", numos::mathsym::SYMB_INFINITY);
+  replaceWordToken(text, "oo", numos::mathsym::SYMB_INFINITY);
+
+  replaceAll(text, "<=", numos::mathsym::SYMB_LEQ);
+  replaceAll(text, ">=", numos::mathsym::SYMB_GEQ);
+  replaceAll(text, "!=", numos::mathsym::SYMB_NEQ);
+  replaceAll(text, "<->", numos::mathsym::SYMB_ARROW_LR);
+  replaceAll(text, "<-", numos::mathsym::SYMB_ARROW_L);
+  replaceAll(text, "->", numos::mathsym::SYMB_ARROW_R);
+}
 
 static bool containsRootofText(const std::string &s) {
   return s.find("rootof(") != std::string::npos;
@@ -363,8 +409,10 @@ String solveWithGiac(String expr) {
     }
 
     std::string result = g.print(&global_context);
+    applyDisplaySymbolMap(result);
     std::string steps = step_buf.str();
     if (!steps.empty()) {
+      applyDisplaySymbolMap(steps);
       result += "\n[STEP_OUTPUT]\n";
       result += steps;
     }

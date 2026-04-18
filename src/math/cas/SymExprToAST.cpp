@@ -24,6 +24,8 @@
 #include <cstdlib>
 #include <string>
 
+#include "ui/MathSymbols.h"
+
 using namespace vpam;
 
 namespace {
@@ -483,10 +485,10 @@ NodePtr SymExprToAST::convertFunc(const SymFunc* f) {
             return row;
         }
         case SymFuncKind::Integral: {
-            // Integral f(x) dx — safe ASCII fallback (Montserrat lacks ∫)
+            // Integral f(x) dx with real integral glyph now that STIX is global.
             auto row = makeRow();
             auto* r = static_cast<NodeRow*>(row.get());
-            r->appendChild(makeNumber("S"));       // safe integral symbol
+            r->appendChild(makeNumber(numos::mathsym::SYMB_INT));
             r->appendChild(makeNumber("("));
             appendFlat(r, std::move(argNode));
             r->appendChild(makeNumber(")"));
