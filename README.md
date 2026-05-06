@@ -29,13 +29,20 @@
 > **👋 ¡Hola, lectores de Xataka!**
 > *Si venís desde el reportaje y compartís la misión de democratizar las calculadoras científicas, podéis apoyar el proyecto en **[Ko-fi](https://ko-fi.com/enderdesigns)**. Mientras el Grant de EE.UU. cubre el hardware, vuestras aportaciones financian la "parte invisible" (herramientas de IA para optimización C++, dominios y envío de betas) para que NumOS siga siendo independiente y Open Source.*
 
-<br>
+<div align="center">
+  </div>
 
-> [!IMPORTANT]
-> **Technical Status: Major Architectural Refactor (v0.2.0-alpha)**
+<br>
+</div>
+
+> [!IMPORTANT]  
+> **Technical Status: Major Architectural Refactor**  
 > We are currently migrating the core math engine to **Giac** and implementing **STIX Two Math** for LaTeX-quality rendering. If you are compiling from `main`, you might experience UI glitches. For a stable experience, please check the [Releases](https://github.com/El-EnderJ/NeoCalculator/releases) section.
 
 <br>
+
+<div align="center">
+  </div>
 
 </div>
 
