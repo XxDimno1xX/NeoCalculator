@@ -16,7 +16,7 @@
 [![Website](https://img.shields.io/badge/Website-neocalculator.tech-purple?logo=google-chrome&logoColor=white)](https://neocalculator.tech)
 [![Framework](https://img.shields.io/badge/Framework-Arduino-teal?logo=arduino&logoColor=white)](https://www.arduino.cc/)
 [![Language](https://img.shields.io/badge/Language-C%2B%2B17-blue?logo=cplusplus&logoColor=white)](https://en.cppreference.com/)
-[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+[![License](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Status](https://img.shields.io/badge/Status-Pro--CAS%20Production-brightgreen)](#project-status)
 [![RAM](https://img.shields.io/badge/RAM-29.7%25%20%E2%80%94%2097.2%20KB-informational)](#build-stats)
 [![Flash](https://img.shields.io/badge/Flash-23.2%25%20%E2%80%94%201.52%20MB-informational)](#build-stats)
@@ -26,8 +26,14 @@
 
 <br>
 
-> *A real open-source alternative to commercial scientific calculators.*
-> *Inspired by NumWorks · TI-84 Plus · HP Prime G2, built from scratch in C++17.*
+> **👋 ¡Hola, lectores de Xataka!**
+> *Si venís desde el reportaje y compartís la misión de democratizar las calculadoras científicas, podéis apoyar el proyecto en **[Ko-fi](https://ko-fi.com/enderdesigns)**. Mientras el Grant de EE.UU. cubre el hardware, vuestras aportaciones financian la "parte invisible" (herramientas de IA para optimización C++, dominios y envío de betas) para que NumOS siga siendo independiente y Open Source.*
+
+<br>
+
+> [!IMPORTANT]
+> **Technical Status: Major Architectural Refactor (v0.2.0-alpha)**
+> We are currently migrating the core math engine to **Giac** and implementing **STIX Two Math** for LaTeX-quality rendering. If you are compiling from `main`, you might experience UI glitches. For a stable experience, please check the [Releases](https://github.com/El-EnderJ/NeoCalculator/releases) section.
 
 <br>
 
@@ -595,12 +601,14 @@ Issues discovered and resolved during bring-up. **Essential** for any fork or ne
 
 ## Support the Project ☕
 
-The EV grant covers the main hardware. I've set up a **€500 goal** on Ko-fi to fund the "invisible" part of NumOS:
-1. **AI & Dev Tools:** Claude/Copilot for C++ optimization and porting.
-2. **Digital Presence:** Domain (`numos.org` or similar) and web services.
-3. **Shipping:** Sending beta units to expert contributors to grow the project.
+The EV grant graciously covers the core hardware prototyping. However, I have set a **€500 goal** on Ko-fi to fund the crucial **"invisible"** infrastructure of NumOS. 
 
-Your support keeps me focused on the mission, ensuring NumOS stays independent and open-source.
+Your support directly funds:
+1. ** AI & Dev Tools:** Subscriptions for Claude/Copilot to accelerate C++ optimization and the Giac engine porting.
+2. **Digital Presence:** Domain hosting (`neocalculator.tech` / `numos.org`) and backend web services.
+3. **Beta Shipping:** Sending physical beta units to expert contributors globally to accelerate community development.
+
+Every contribution keeps me focused on the mission and ensures NumOS stays independent and open-source.
 
 <a href="https://ko-fi.com/enderdesigns" target="_blank">
   <img src="https://ko-fi.com/img/githubbutton_sm.svg" border="0" alt="Support me on ko-fi.com" height="36">
@@ -649,6 +657,8 @@ We are proud to build upon the **Giac** engine by Bernard Parisse. In accordance
 
 Are **proprietary** and the intellectual property of Juan Ramón. No commercial use or reproduction of the hardware is permitted without express authorization.
 
+> **Note on Hardware IP:** This proprietary status is a necessary measure *for now*. Our primary goal is to maintain the strict hardware control required to eventually achieve official "Exam Legal" certification and to protect the project's integrity from low-quality, unauthorized clones. Once the ecosystem is mature and certified, we plan to evaluate open-hardware licensing models.
+
 ---
 
 <div align="center">
@@ -657,6 +667,6 @@ Are **proprietary** and the intellectual property of Juan Ramón. No commercial 
 
 **NumOS, The best open-source scientific calculator for ESP32-S3**
 
-*Last updated: March 2026*
+*Last updated: May 2026*
 
 </div>
