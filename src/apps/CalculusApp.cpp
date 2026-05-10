@@ -277,7 +277,7 @@ void CalculusApp::createUI() {
     lv_obj_remove_flag(_tabIntegral, LV_OBJ_FLAG_CLICKABLE);
     {
         lv_obj_t* lbl = lv_label_create(_tabIntegral);
-        lv_label_set_text(lbl, "\xE2\x88\xABdx  Integrate");
+        lv_label_set_text(lbl, u8"\u222Bdx  Integrate");
         lv_obj_set_style_text_font(lbl, &stix_math_18, LV_PART_MAIN);
         lv_obj_center(lbl);
     }

@@ -267,6 +267,28 @@ void runTutorTests() {
               radicalDump.find("TRUE") != std::string::npos);
     }
 
+    {
+        SymExprArena arena;
+        OmniSolver solver;
+        SymExpr* radical = symPow(arena,
+                                  symAdd(arena, symVar(arena, 'x'), symInt(arena, 5)),
+                                  symFrac(arena, 1, 2));
+        SymExpr* lhs = symAdd(arena,
+                              symAdd(arena, radical, symVar(arena, 'x')),
+                              symInt(arena, -1));
+        SymExpr* rhs = symInt(arena, 6);
+        OmniResult res = solver.solve(lhs, rhs, 'x', arena);
+
+        check("RadicalTutor sqrt(x+5)+x-1=6 ok", res.ok);
+        check("RadicalTutor sqrt(x+5)+x-1=6 count == 1", res.solutions.size() == 1);
+        if (!res.solutions.empty()) {
+            double numeric = res.solutions[0].isExact
+                ? res.solutions[0].exact.toDouble()
+                : res.solutions[0].numeric;
+            check("RadicalTutor sqrt(x+5)+x-1=6 root ~= 4", std::abs(numeric - 4.0) < 0.01);
+        }
+    }
+
     // ── Test 7: 3x² - 7x + 2 = 0 (Stress: Fractional root) ──────
     {
         SymPoly lhs('x');

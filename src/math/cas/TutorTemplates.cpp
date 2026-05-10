@@ -241,7 +241,17 @@ static bool isHalfPower(const SymExpr* expr, SymExpr*& inner) {
     return false;
 }
 
-static bool extractRadicalSide(SymExpr* expr,
+static SymExpr* foldAddTerms(SymExprArena& arena, const std::vector<SymExpr*>& terms) {
+    if (terms.empty()) return nullptr;
+
+    SymExpr* combined = terms[0];
+    for (size_t i = 1; i < terms.size(); ++i) {
+        combined = symAddRaw(arena, combined, terms[i]);
+    }
+    return combined;
+}
+
+static bool extractRadicalSide(SymExpr* expr, SymExprArena& arena,
                                SymExpr*& radicalExpr,
                                SymExpr*& radicalInner, SymExpr*& otherTerms) {
     radicalExpr = nullptr;
@@ -274,9 +284,7 @@ static bool extractRadicalSide(SymExpr* expr,
         if (foundRad && !rest.empty()) {
             radicalExpr = foundRad;
             radicalInner = foundInner;
-            if (rest.size() == 1) {
-                otherTerms = rest[0];
-            }
+            otherTerms = foldAddTerms(arena, rest);
             return true;
         }
     }
@@ -1076,9 +1084,9 @@ bool solveRadicalTutor(SymExpr* lhs, SymExpr* rhs, char var,
     SymExpr* extraTerms = nullptr;
     SymExpr* otherSide = nullptr;
 
-    if (extractRadicalSide(lhs, radicalExpr, radicalInner, extraTerms)) {
+    if (extractRadicalSide(lhs, arena, radicalExpr, radicalInner, extraTerms)) {
         otherSide = rhs;
-    } else if (extractRadicalSide(rhs, radicalExpr, radicalInner, extraTerms)) {
+    } else if (extractRadicalSide(rhs, arena, radicalExpr, radicalInner, extraTerms)) {
         otherSide = lhs;
     } else {
         return false;

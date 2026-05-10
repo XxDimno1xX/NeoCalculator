@@ -30,9 +30,15 @@
 
 namespace cas {
 
+// Fold 64-bit mixer constants down to the native word size so the logger keeps
+// good entropy on 32-bit ESP targets without compile-time overflow warnings.
+static constexpr size_t foldHashConstant(uint64_t value) {
+    return static_cast<size_t>(value ^ (value >> (sizeof(size_t) * 8U)));
+}
+
 // Hash mixing constants (SplitMix64 / FNV-derived)
-static constexpr size_t EXPR_HASH_MULTIPLIER = 0x9e3779b97f4a7c15ULL;
-static constexpr size_t KIND_HASH_MULTIPLIER = 0x517cc1b727220a95ULL;
+static constexpr size_t EXPR_HASH_MULTIPLIER = foldHashConstant(UINT64_C(0x9e3779b97f4a7c15));
+static constexpr size_t KIND_HASH_MULTIPLIER = foldHashConstant(UINT64_C(0x517cc1b727220a95));
 
 // ────────────────────────────────────────────────────────────────────
 // Constructor
