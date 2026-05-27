@@ -3,11 +3,28 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NeoCalculator — NumOS | Scientific Mastery, Decolonized</title>
+  <title>NeoCalculator — NumOS | The €20 Open-Source Graphing Calculator</title>
   <meta name="description" content="NumOS: Open-source scientific OS running CAS symbolic algebra, real-time physics, and 17 apps on a $5 ESP32-S3. Disrupting the $150 calculator monopoly." />
-  <meta property="og:title" content="NeoCalculator — NumOS" />
-  <meta property="og:description" content="Scientific Mastery, Decolonized. CAS Engine on $5 silicon." />
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="NeoCalculator: The €20 Open-Source Graphing Calculator" />
+  <meta property="og:description" content="NumOS runs a full CAS engine, real-time Navier-Stokes physics, and 17 university-grade apps on a $5 ESP32-S3 with 97 KB RAM. Open-source hardware disrupting the $150 calculator monopoly." />
   <meta property="og:url" content="https://neocalculator.tech" />
+  <meta property="og:image" content="https://neocalculator.tech/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:site_name" content="NeoCalculator" />
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="NeoCalculator: The €20 Open-Source Graphing Calculator" />
+  <meta name="twitter:description" content="NumOS: CAS engine + 17 apps on $5 silicon. Open-source hardware that surpasses a TI-84 at 8× lower cost." />
+  <meta name="twitter:image" content="https://neocalculator.tech/og-image.png" />
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔢</text></svg>" />
+
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
@@ -29,6 +46,9 @@
         <li><a href="#hardware">Hardware</a></li>
         <li><a href="#roadmap">Roadmap</a></li>
         <li><a href="https://github.com/El-EnderJ/NeoCalculator" target="_blank" rel="noopener" class="btn-nav">GitHub ↗</a></li>
+        <li><a href="mailto:el.enderj2020@gmail.com" class="btn-nav btn-outline">✉ Email me</a></li>
+        <li><a href="https://ko-fi.com/enderdesigns" target="_blank" rel="noopener" class="btn-nav btn-kofi">☕ Support Me</a></li>
+        <li><button onclick="openSponsorModal()" class="btn-nav btn-sponsor" style="border:none; cursor:pointer;">♥ Sponsor</button></li>
       </ul>
       <button class="nav-burger" aria-label="Menu" id="navBurger">
         <span></span><span></span><span></span>
@@ -44,7 +64,7 @@
     <div class="hero-content">
       <div class="hero-badge" id="heroBadge">
         <span class="badge-dot"></span>
-        Backed by validation from the <strong>1517 Fund</strong> community
+        <strong>Backed by Emergent Ventures</strong> (Mercatus Center, George Mason University)
       </div>
 
       <h1 class="hero-title" id="heroTitle">
@@ -77,18 +97,12 @@
         <a href="#moat" class="btn btn-ghost">See The Moat ↓</a>
       </div>
 
-      <div class="hero-video-placeholder" id="heroVideo">
-        <div class="video-frame">
-          <div class="video-icon">▶</div>
-          <div class="video-label">ESP32-S3 running NumOS CAS live demo</div>
-          <div class="video-sub">YouTube demo · coming soon</div>
-        </div>
-      </div>
+      <!-- Video demo removed -->
     </div>
 
     <div class="hero-stats" id="heroStats">
       <div class="stat-item" data-stat="bom">
-        <div class="stat-number"><span class="stat-val" id="statBom">$5</span></div>
+        <div class="stat-number"><span class="stat-val" id="statBom">$25</span></div>
         <div class="stat-label">BOM cost</div>
       </div>
       <div class="stat-divider"></div>
@@ -128,7 +142,7 @@
               <th class="col-feature">Capability</th>
               <th class="col-numos winner">
                 <div class="th-logo">NumOS</div>
-                <div class="th-price price-lime">~$15</div>
+                <div class="th-price price-lime">~$25</div>
                 <div class="th-badge">OPEN SOURCE</div>
               </th>
               <th>
@@ -189,7 +203,7 @@
               <td><span class="check dim">✓</span></td>
             </tr>
             <tr>
-              <td>Open-Source (MIT)</td>
+              <td>Open-Source (GPL v3)</td>
               <td class="winner"><span class="check">✓</span></td>
               <td><span class="cross">✗</span></td>
               <td><span class="cross">✗</span></td>
@@ -211,7 +225,7 @@
             </tr>
             <tr>
               <td>Hardware Cost (BOM)</td>
-              <td class="winner price-lime">~$15</td>
+              <td class="winner price-lime">~$25</td>
               <td>~$119</td>
               <td>~$179</td>
               <td>~$79</td>
@@ -331,7 +345,7 @@
         <div class="tech-card" id="tc1">
           <div class="tc-icon">📐</div>
           <h4>CAS Engine</h4>
-          <p>Immutable expression DAG with hash-consing (ConsTable). Slagle integral heuristic. Sylvester resultant solver. Built from scratch in C++17.</p>
+          <p>Powered by the Giac computer algebra system, with the initial backing and support of Bernard Parisse. Running smoothly on the ESP32-S3.</p>
         </div>
         <div class="tech-card" id="tc2">
           <div class="tc-icon">🌊</div>
@@ -350,8 +364,8 @@
         </div>
         <div class="tech-card" id="tc5">
           <div class="tc-icon">🔓</div>
-          <h4>MIT Licensed</h4>
-          <p>Every line is open. Fork it, run it on any ESP32-S3. No proprietary SDK, no locked bootloader, no vendor tie-in.</p>
+          <h4>GPL v3 + CERN-OHL-S</h4>
+          <p>Software under GPL v3. Hardware under CERN Open Hardware Licence. Fork it, build it, ship it — the ecosystem stays open forever.</p>
         </div>
       </div>
     </div>
@@ -372,7 +386,7 @@
             <div class="feat-eq">d/dx[sin(x²)] = 2x·cos(x²)</div>
             <div class="feat-eq">3x³−2x+1 = 0 → step-by-step</div>
           </div>
-          <p>Full Slagle symbolic integration (table lookup, u-sub, integration by parts/LIATE). 17-rule symbolic differentiation. Non-linear system solving via Sylvester resultant.</p>
+          <p>Powered by the robust Giac engine. Capable of limits, symbolic integration, differentiation, equation solving, and matrix operations directly on-device.</p>
         </div>
 
         <div class="feat-card" id="feat1">
@@ -435,7 +449,7 @@
           <p>Custom 4-layer PCB integrating ESP32-S3, TP4056 Li-Po charger, 5×10 mechanical keyboard matrix, display connector, and USB-C power delivery. KiCad schematic in active design.</p>
           <div class="hw-specs">
             <div class="hw-spec"><span class="spec-k">Layers</span><span class="spec-v">4 (Signal / GND / PWR / Signal)</span></div>
-            <div class="hw-spec"><span class="spec-k">Form factor</span><span class="spec-v">Casio ClassWiz size</span></div>
+            <div class="hw-spec"><span class="spec-k">Form factor</span><span class="spec-v">NumWorks/TI-84 Plus CE size</span></div>
             <div class="hw-spec"><span class="spec-k">Charging</span><span class="spec-v">TP4056 Li-Po via USB-C</span></div>
             <div class="hw-spec"><span class="spec-k">Tool</span><span class="spec-v">KiCad</span></div>
           </div>
@@ -449,7 +463,7 @@
           <div class="hw-specs">
             <div class="hw-spec"><span class="spec-k">Design tool</span><span class="spec-v">CAD (dimensions locked)</span></div>
             <div class="hw-spec"><span class="spec-k">Target</span><span class="spec-v">FDM + SLA prototypes</span></div>
-            <div class="hw-spec"><span class="spec-k">BOM target</span><span class="spec-v">&lt;$15 total hardware</span></div>
+            <div class="hw-spec"><span class="spec-k">BOM target</span><span class="spec-v">&lt;$25 total hardware</span></div>
           </div>
         </div>
       </div>
@@ -478,7 +492,7 @@
           <div class="tl-dot tl-dot-done"></div>
           <div class="tl-line"></div>
           <div class="tl-card">
-            <div class="tl-date">Nov 2025</div>
+            <div class="tl-date">Feb 2026</div>
             <h4>First Light</h4>
             <p>First correct numerical calculation on serial terminal. Tokenizer → Parser → Evaluator pipeline live.</p>
           </div>
@@ -488,7 +502,7 @@
           <div class="tl-dot tl-dot-done"></div>
           <div class="tl-line"></div>
           <div class="tl-card">
-            <div class="tl-date">Dec 2025</div>
+            <div class="tl-date">Feb 2026</div>
             <h4>Natural Display</h4>
             <p>Real stacked fractions on TFT screen. V.P.A.M. visual AST with 2D cursor navigation.</p>
           </div>
@@ -498,7 +512,7 @@
           <div class="tl-dot tl-dot-done"></div>
           <div class="tl-line"></div>
           <div class="tl-card">
-            <div class="tl-date">Jan 2026</div>
+            <div class="tl-date">Feb 2026</div>
             <h4>Launcher 3.0</h4>
             <p>LVGL 9.x · animated splash screen · 3×N icon grid · SerialBridge for PC control.</p>
           </div>
@@ -539,8 +553,8 @@
           <div class="tl-line"></div>
           <div class="tl-card">
             <div class="tl-date">Phase 7</div>
-            <h4>Matrices + Complex Numbers</h4>
-            <p>Matrix editor, determinant, inverse. Full complex number arithmetic. Definite integrals. Series expansion.</p>
+            <h4>Complete integration of Giac into the system</h4>
+            <p>Full integration of the Giac computer algebra system into the existing architecture to work seamlessly with every app.</p>
           </div>
         </div>
 
@@ -560,10 +574,54 @@
           <div class="tl-card">
             <div class="tl-date">V1.0</div>
             <h4>Global Open Hardware Release</h4>
-            <p>Production-ready PCB. BOM &lt;$15. Full documentation for community manufacturing. The open-source TI killer — shipped.</p>
+            <p>Production-ready PCB. BOM &lt;$25. Full documentation for community manufacturing. The open-source TI killer — shipped.</p>
           </div>
         </div>
 
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── WAITLIST ─── -->
+  <section class="section waitlist" id="waitlist">
+    <div class="container">
+      <div class="section-label">HARDWARE WAITLIST</div>
+      <h2 class="section-title">Join the <span class="hl-lime">Hardware Waitlist</span></h2>
+      <p class="section-sub">Get notified the exact day we launch our custom multi-layer PCB batch and open beta unit shipping.</p>
+
+      <div class="waitlist-card">
+        <!-- Hidden iframe to absorb Google Form redirection -->
+        <iframe name="hidden_iframe" id="hidden_iframe" style="display:none;" onload="if(submitted) { document.getElementById('waitlist-success').style.display='block'; document.getElementById('waitlist-form').style.display='none'; }"></iframe>
+
+        <!-- Waitlist Form -->
+        <form id="waitlist-form" action="https://docs.google.com/forms/u/0/d/e/1FAIpQLSfUGsT-RmTVXEdsH81NQQacNxyfCXgKxEXXilgURMApki_wiw/formResponse" method="POST" target="hidden_iframe" onsubmit="submitted=true;">
+          <div class="wl-row">
+            <div class="wl-field">
+              <label for="wl-name">Full Name</label>
+              <input type="text" id="wl-name" name="entry.815922704" placeholder="John Doe" required />
+            </div>
+            <div class="wl-field">
+              <label for="wl-role">Role / Position</label>
+              <input type="text" id="wl-role" name="entry.880764329" placeholder="Systems Engineer" required />
+            </div>
+          </div>
+          <div class="wl-field">
+            <label for="wl-email">Email Address</label>
+            <input type="email" id="wl-email" name="entry.1495404027" placeholder="john@example.com" required />
+          </div>
+          <button type="submit" class="btn btn-primary btn-wl">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            Join Waitlist
+          </button>
+          <div class="wl-privacy">🔒 We respect your privacy. Unsubscribe anytime.</div>
+        </form>
+
+        <!-- Success Message -->
+        <div id="waitlist-success" style="display:none;">
+          <div class="success-icon">🚀</div>
+          <h3>Welcome to the movement.</h3>
+          <p>You're on the list.</p>
+        </div>
       </div>
     </div>
   </section>
@@ -575,16 +633,20 @@
       <div class="cta-content">
         <div class="section-label">JOIN THE MISSION</div>
         <h2 class="cta-title">The calculator industry<br/>hasn't been disrupted yet.</h2>
-        <p class="cta-sub">Built by a 15-year-old systems architect from Spain. Invited to the <strong>1517 Fund</strong> builder community. Applying to Magnificent Grants. The code is live, the hardware works, and the monopoly is crumbling.</p>
+        <p class="cta-sub">Built by a 15-year-old systems architect from Spain. Invited to the <strong>1517 Fund</strong> builder community. EV Grantee. The code is live, the hardware works, and the monopoly is crumbling.</p>
         <div class="cta-actions">
           <a href="https://github.com/El-EnderJ/NeoCalculator" target="_blank" rel="noopener" class="btn btn-primary btn-xl">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
             Star on GitHub
           </a>
+          <button onclick="openSponsorModal()" class="btn btn-sponsor-cta btn-xl" style="border:none; cursor:pointer;">
+            ♥ Support the Revolution
+          </button>
+          <a href="mailto:el.enderj2020@gmail.com" class="btn btn-outline btn-xl">✉ Email me</a>
           <a href="https://github.com/El-EnderJ/NeoCalculator/issues" target="_blank" rel="noopener" class="btn btn-outline btn-xl">Contribute</a>
         </div>
         <div class="cta-meta">
-          <span>MIT Licensed</span>
+          <span>GPL v3 + CERN-OHL-S</span>
           <span class="meta-dot">·</span>
           <span>ESP32-S3 N16R8</span>
           <span class="meta-dot">·</span>
@@ -611,9 +673,36 @@
         <a href="https://github.com/El-EnderJ/NeoCalculator/blob/main/docs/HARDWARE.md" target="_blank" rel="noopener">Hardware</a>
         <a href="https://github.com/El-EnderJ/NeoCalculator/blob/main/docs/PROJECT_BIBLE.md" target="_blank" rel="noopener">Docs</a>
       </div>
-      <div class="footer-copy">© 2026 NeoCalculator · MIT License · neocalculator.tech</div>
+      <div class="footer-copy">© 2026 NeoCalculator · GPL v3 + CERN-OHL-S · neocalculator.tech</div>
     </div>
   </footer>
+
+  <!-- ─── SPONSOR MODAL ─── -->
+  <div class="modal-overlay" id="sponsorModal" onclick="closeSponsorModal(event)">
+    <div class="modal-box" onclick="event.stopPropagation()">
+      <button class="modal-close" onclick="closeSponsorModal()">×</button>
+      <h3 class="modal-title">Support the Revolution</h3>
+      <p class="modal-sub">Choose a platform to back the open-source hardware movement.</p>
+      
+      <div class="modal-options">
+        <div class="modal-option">
+          <h4>GitHub Sponsors</h4>
+          <p>Support directly through GitHub to help fund development.</p>
+          <iframe src="https://github.com/sponsors/El-EnderJ/card" title="Sponsor El-EnderJ" height="225" width="100%" style="border: 0; border-radius: 6px; overflow: hidden; max-width: 600px;"></iframe>
+        </div>
+        
+        <div class="modal-divider"></div>
+        
+        <div class="modal-option">
+          <h4>Ko-fi</h4>
+          <p>Make a one-time donation or become a member.</p>
+          <iframe id='kofiframe' src='https://ko-fi.com/enderdesigns/?hidefeed=true&widget=true&embed=true&preview=true' style='border:none;width:100%;padding:0;background:transparent;border-radius:8px;' height='712' title='enderdesigns'></iframe>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
 
   <!-- ─── SCRIPTS ─── -->
   <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>

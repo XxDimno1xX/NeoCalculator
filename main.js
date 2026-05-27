@@ -1,7 +1,4 @@
-/**
- * NumOS / NeoCalculator — Landing Page JavaScript
- * Vite + Vanilla JS + GSAP (CDN)
- */
+var submitted = false;
 
 /* ────────────────────────────────────────────
    0. GSAP SETUP
@@ -433,7 +430,7 @@ gsap.registerPlugin(ScrollTrigger);
 (function initStatCounters() {
   // Each entry: { id, from, to, prefix, suffix, unit }
   const counterData = [
-    { id: 'statBom',   from: 0,  to: 5,  prefix: '$', suffix: '',   unit: '' },
+    { id: 'statBom',   from: 0,  to: 25,  prefix: '$', suffix: '',   unit: '' },
     { id: 'statRam',   from: 0,  to: 97, prefix: '',  suffix: '',   unit: 'KB' },
     { id: 'statApps',  from: 0,  to: 17, prefix: '',  suffix: '',   unit: '' },
     { id: 'statTests', from: 0,  to: 85, prefix: '',  suffix: '+',  unit: '' },
@@ -597,3 +594,25 @@ gsap.registerPlugin(ScrollTrigger);
     });
   });
 })();
+
+/* ────────────────────────────────────────────
+   15. MODAL LOGIC
+──────────────────────────────────────────── */
+function openSponsorModal() {
+  const modal = document.getElementById('sponsorModal');
+  if (modal) {
+    modal.classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+}
+
+function closeSponsorModal(e) {
+  const modal = document.getElementById('sponsorModal');
+  if (modal) {
+    modal.classList.remove('open');
+    document.body.style.overflow = '';
+  }
+}
+
+window.openSponsorModal = openSponsorModal;
+window.closeSponsorModal = closeSponsorModal;
