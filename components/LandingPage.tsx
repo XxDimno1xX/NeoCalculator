@@ -572,7 +572,7 @@ export default function LandingPage() {
     });
 
     // 7) Chip hover sparkle
-    const chips = Array.from(root.querySelectorAll('.chip-highlight'));
+    const chips = Array.from(root.querySelectorAll<HTMLElement>('.chip-highlight'));
     chips.forEach((chip) => {
       const onEnter = () => {
         gsap.to(chip, {
@@ -597,7 +597,7 @@ export default function LandingPage() {
     });
 
     // 8) Feature card tilt (subtle 3D)
-    const tiltCards = Array.from(root.querySelectorAll('.feat-card, .tech-card'));
+    const tiltCards = Array.from(root.querySelectorAll<HTMLElement>('.feat-card, .tech-card'));
     tiltCards.forEach((card) => {
       const onMove = (e: MouseEvent) => {
         const rect = card.getBoundingClientRect();
@@ -632,7 +632,7 @@ export default function LandingPage() {
     });
 
     // 9) Compare table row highlight
-    const rows = Array.from(root.querySelectorAll('.compare-table tbody tr'));
+    const rows = Array.from(root.querySelectorAll<HTMLElement>('.compare-table tbody tr'));
     rows.forEach((row) => {
       const onEnter = () => {
         gsap.to(row, {
