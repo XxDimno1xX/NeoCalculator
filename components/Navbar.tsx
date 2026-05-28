@@ -1,28 +1,56 @@
-import Link from 'next/link';
-import { Calculator } from 'lucide-react';
+'use client';
+
+import { useEffect, useState } from 'react';
 
 export default function Navbar() {
+  const [isOpen, setIsOpen] = useState(false);
+  const [isScrolled, setIsScrolled] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => {
+      setIsScrolled(window.scrollY > 40);
+    };
+
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  const handleLinkClick = () => {
+    setIsOpen(false);
+  };
+
   return (
-    <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 w-[90%] max-w-4xl">
-      <header className="rounded-full border border-white/10 bg-white/5 backdrop-blur-lg shadow-[0_0_15px_rgba(0,0,0,0.5)] supports-[backdrop-filter]:bg-white/5">
-        <div className="px-6 h-14 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2 group">
-            <Calculator className="w-5 h-5 text-[#ccff00] transition-transform group-hover:rotate-12" />
-            <span className="font-bold text-white tracking-tight">NumOS</span>
-          </Link>
-          <nav className="hidden md:flex items-center gap-6 text-sm font-mono tracking-wider">
-            <Link href="/manifesto" className="text-gray-400 hover:text-white transition-colors">The Mission</Link>
-            <Link href="/compare" className="text-gray-400 hover:text-[#ccff00] transition-colors">Compare</Link>
-            <Link href="/roadmap" className="text-gray-400 hover:text-white transition-colors">Roadmap</Link>
-            <Link href="/docs" className="text-gray-400 hover:text-white transition-colors">Interactive Docs</Link>
-          </nav>
-          <div className="flex items-center gap-4">
-            <a href="https://github.com/El-EnderJ/NeoCalculator" target="_blank" rel="noopener noreferrer" className="hidden sm:inline-block border border-white/20 hover:border-[#ccff00] hover:text-[#ccff00] text-xs font-mono px-4 py-1.5 rounded-full transition-colors">
-              GITHUB
-            </a>
-          </div>
-        </div>
-      </header>
-    </div>
+    <nav className={`nav${isScrolled ? ' scrolled' : ''}`} id="nav">
+      <div className="nav-inner">
+        <a href="#" className="nav-logo" onClick={handleLinkClick}>
+          <span className="logo-neo">Neo</span><span className="logo-calc">Calculator</span>
+          <span className="logo-badge">NumOS</span>
+        </a>
+        <ul className={`nav-links${isOpen ? ' open' : ''}`}>
+          <li><a href="#moat" onClick={handleLinkClick}>The Moat</a></li>
+          <li><a href="#tech" onClick={handleLinkClick}>Tech Stack</a></li>
+          <li><a href="#hardware" onClick={handleLinkClick}>Hardware</a></li>
+          <li><a href="#roadmap" onClick={handleLinkClick}>Roadmap</a></li>
+          <li><a href="https://github.com/El-EnderJ/NeoCalculator" target="_blank" rel="noopener" className="btn-nav" onClick={handleLinkClick}>GitHub ↗</a></li>
+          <li><a href="mailto:el.enderj2020@gmail.com" className="btn-nav btn-outline" onClick={handleLinkClick}>✉ Email me</a></li>
+          <li><a href="https://ko-fi.com/enderdesigns" target="_blank" rel="noopener" className="btn-nav btn-kofi" onClick={handleLinkClick}>☕ Support Me</a></li>
+          <li>
+            <button type="button" className="btn-nav btn-sponsor" data-sponsor-open onClick={() => setIsOpen(false)}>
+              ♥ Sponsor
+            </button>
+          </li>
+        </ul>
+        <button
+          type="button"
+          className="nav-burger"
+          aria-label="Menu"
+          id="navBurger"
+          onClick={() => setIsOpen((prev) => !prev)}
+        >
+          <span></span><span></span><span></span>
+        </button>
+      </div>
+    </nav>
   );
 }
