@@ -11,6 +11,7 @@ node_modules/
 .piobuild/
 *piobuild*
 fluid2d_plan.md
+.claude
 
 # Next.js / Web build artifacts
 .next/
@@ -32,3 +33,4 @@ yarn-error.log*
 *.local
 /web
 Giac Integration Roadmap for NumOS.md
+CLAUDE.md

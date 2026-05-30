@@ -359,11 +359,11 @@ void NodePower::calculateLayout(const FontMetrics& fm) {
     _layout.width = baseL.width + expL.width;
 
     // 4. Elevación del exponente:
-    //    El fondo del exponente se sitúa a EXP_RAISE_NUM/EXP_RAISE_DEN
-    //    (≈45%) del ascent de la base sobre el baseline.
+    //    El baseline del exponente se sitúa a EXP_RAISE_NUM/EXP_RAISE_DEN
+    //    (50%) del capHeight de la base sobre el baseline principal.
     //
-    //    expShift = distancia del baseline al fondo del exponente
-    int16_t expShift = static_cast<int16_t>((fm.ascent * EXP_RAISE_NUM) / EXP_RAISE_DEN);
+    //    expShift = distancia del baseline principal al baseline del exponente
+    int16_t expShift = static_cast<int16_t>((fm.capHeight * EXP_RAISE_NUM) / EXP_RAISE_DEN);
 
     // El tope del exponente está a expShift + expL.ascent sobre el baseline
     _layout.ascent  = std::max(baseL.ascent,
@@ -488,9 +488,15 @@ void NodeParen::calculateLayout(const FontMetrics& fm) {
     // Ancho: paréntesis izquierdo + pad + contenido + pad + paréntesis derecho
     _layout.width = PAREN_W * 2 + INNER_PAD * 2 + cl.width;
 
-    // Los paréntesis se estiran para cubrir todo el contenido + un poco más
-    _layout.ascent  = cl.ascent  + VERT_PAD;
-    _layout.descent = cl.descent + VERT_PAD;
+    // Symmetric paren height around the math axis.
+    // The delimiter extends equally far above and below the axis.
+    const int16_t axis      = fm.axisHeight();
+    const int16_t aboveAxis = (cl.ascent > axis) ? static_cast<int16_t>(cl.ascent - axis)
+                                                  : static_cast<int16_t>(axis - cl.ascent);
+    const int16_t belowAxis = static_cast<int16_t>(cl.descent + axis);
+    const int16_t maxHalf   = static_cast<int16_t>(std::max(aboveAxis, belowAxis) + VERT_PAD);
+    _layout.ascent  = static_cast<int16_t>(axis + maxHalf);
+    _layout.descent = static_cast<int16_t>(maxHalf - axis);
 }
 
 MathNode* NodeParen::child(int index) const {
@@ -555,11 +561,16 @@ void NodeFunction::calculateLayout(const FontMetrics& fm) {
     _layout.width = _labelWidth + LABEL_GAP
                   + PAREN_W + INNER_PAD + argL.width + INNER_PAD + PAREN_W;
 
-    // 4. Ascent/descent: máximo entre etiqueta y contenido + paren
-    _layout.ascent  = std::max(fm.ascent,
-                               static_cast<int16_t>(argL.ascent + VERT_PAD));
-    _layout.descent = std::max(fm.descent,
-                               static_cast<int16_t>(argL.descent + VERT_PAD));
+    // 4. Symmetric paren height around math axis, must cover label too
+    const int16_t axis      = fm.axisHeight();
+    const int16_t aboveAxis = (argL.ascent > axis) ? static_cast<int16_t>(argL.ascent - axis)
+                                                    : static_cast<int16_t>(axis - argL.ascent);
+    const int16_t belowAxis = static_cast<int16_t>(argL.descent + axis);
+    const int16_t maxHalf   = static_cast<int16_t>(std::max(aboveAxis, belowAxis) + VERT_PAD);
+    const int16_t symAscent  = static_cast<int16_t>(axis + maxHalf);
+    const int16_t symDescent = static_cast<int16_t>(maxHalf - axis);
+    _layout.ascent  = std::max(fm.ascent, symAscent);
+    _layout.descent = std::max(fm.descent, symDescent);
 }
 
 MathNode* NodeFunction::child(int index) const {
@@ -619,12 +630,19 @@ void NodeLogBase::calculateLayout(const FontMetrics& fm) {
     // El fondo del subíndice está a subDrop + baseL.descent bajo el baseline
     int16_t subBottom = subDrop + baseL.descent;
 
-    // 6. Ascent: mayor entre texto normal y paréntesis
-    _layout.ascent = std::max(fm.ascent,
-                              static_cast<int16_t>(argL.ascent + VERT_PAD));
-    // 7. Descent: mayor entre normal, subíndice, y paréntesis
-    _layout.descent = std::max({fm.descent, subBottom,
-                                static_cast<int16_t>(argL.descent + VERT_PAD)});
+    // 6. Symmetric paren height around math axis
+    const int16_t axis      = fm.axisHeight();
+    const int16_t aboveAxis = (argL.ascent > axis) ? static_cast<int16_t>(argL.ascent - axis)
+                                                    : static_cast<int16_t>(axis - argL.ascent);
+    const int16_t belowAxis = static_cast<int16_t>(argL.descent + axis);
+    const int16_t maxHalf   = static_cast<int16_t>(std::max(aboveAxis, belowAxis) + VERT_PAD);
+    const int16_t symAscent  = static_cast<int16_t>(axis + maxHalf);
+    const int16_t symDescent = static_cast<int16_t>(maxHalf - axis);
+
+    // 7. Ascent: max of label, symmetric paren
+    _layout.ascent = std::max(fm.ascent, symAscent);
+    // 8. Descent: max of label, subscript, and symmetric paren
+    _layout.descent = std::max({fm.descent, subBottom, symDescent});
 }
 
 MathNode* NodeLogBase::child(int index) const {
@@ -781,7 +799,7 @@ void NodePeriodicDecimal::calculateLayout(const FontMetrics& fm) {
 
     // Si hay dígitos periódicos, necesitamos espacio extra encima para la overline
     if (!_repeat.empty()) {
-        _layout.ascent = fm.ascent + OVERLINE_GAP + OVERLINE_T;
+        _layout.ascent = static_cast<int16_t>(fm.ascent + OVERLINE_GAP + OVERLINE_T);
     } else {
         _layout.ascent = fm.ascent;
     }

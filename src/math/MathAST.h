@@ -125,8 +125,9 @@ enum class ConstKind : uint8_t {
 // ════════════════════════════════════════════════════════════════════════════
 struct FontMetrics {
     int16_t charWidth;   ///< Ancho promedio de un dígito (monoespaciado)
-    int16_t ascent;      ///< Píxeles del baseline al tope del glyph
+    int16_t ascent;      ///< Píxeles del baseline al tope de la línea (line_height)
     int16_t descent;     ///< Píxeles del baseline a la parte baja (≥0)
+    int16_t capHeight;   ///< Píxeles del baseline al tope de las mayúsculas (Cap Height)
     uint8_t scriptLevel = 0;             ///< 0 = base, 1 = script
     const FontMetrics* script = nullptr; ///< Métricas del nivel de script (Level 1)
 
@@ -150,8 +151,9 @@ struct FontMetrics {
         };
         FontMetrics out;
         out.charWidth = clamp(charWidth, 6);
-        out.ascent = clamp(ascent, 8);
-        out.descent = clamp(descent, 1);
+        out.ascent   = clamp(ascent, 8);
+        out.descent  = clamp(descent, 1);
+        out.capHeight = clamp(capHeight, 8);
         out.scriptLevel = 1;
         out.script = nullptr;
         return out;
@@ -160,7 +162,7 @@ struct FontMetrics {
 
 /// Métricas por defecto razonables (≈ STIX Two Math 18 a ~10 px de ancho).
 inline FontMetrics defaultFontMetrics() {
-    return { 10, 14, 3, 0, nullptr };
+    return { 10, 14, 3, 10, 0, nullptr };
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -351,8 +353,8 @@ public:
 
     // ── Constantes de estilo ──
     static constexpr int16_t BAR_THICK = 1;   ///< Grosor de la barra (px)
-    static constexpr int16_t BAR_H_PAD = 3;   ///< Padding horizontal barra↔borde
-    static constexpr int16_t BAR_V_GAP = 2;   ///< Espacio vertical barra↔contenido
+    static constexpr int16_t BAR_H_PAD = 2;   ///< Padding horizontal barra↔borde
+    static constexpr int16_t BAR_V_GAP = 1;   ///< Espacio vertical barra↔contenido (tight)
 
 private:
     NodePtr _numerator;
@@ -389,9 +391,9 @@ public:
     void setBase(NodePtr node);
     void setExponent(NodePtr node);
 
-    /// Fracción del ascent de la base donde arranca el fondo del exponente
-    static constexpr int16_t EXP_RAISE_NUM = 9;   // numerador
-    static constexpr int16_t EXP_RAISE_DEN = 20;  // denominador → 9/20 = 45%
+    /// Fracción del capHeight de la base donde arranca el baseline del exponente
+    static constexpr int16_t EXP_RAISE_NUM = 1;   // numerador
+    static constexpr int16_t EXP_RAISE_DEN = 2;   // denominador → 1/2 = 50% de capHeight
 
 private:
     NodePtr _base;

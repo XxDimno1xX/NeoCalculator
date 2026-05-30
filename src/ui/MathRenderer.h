@@ -142,6 +142,9 @@ public:
      */
     static FontMetrics metricsFromFont(const lv_font_t* font);
 
+    // ── Layout constants (public for dynamic UI sizing) ────────────────────
+    static constexpr int16_t  VPAM_VERT_PAD   = 6;    ///< Vertical padding (3px top + 3px bottom) — tight
+
 private:
     // ── Datos internos ───────────────────────────────────────────────────
     lv_obj_t*               _obj;
@@ -179,7 +182,6 @@ private:
     static constexpr uint32_t CURSOR_COLOR  = 0x000000;  ///< Color del cursor (negro puro, máximo contraste)
     static constexpr int16_t  EMPTY_SIZE    = 8;    ///< Tamaño del cuadrado placeholder
     static constexpr int      MAX_RENDER_DEPTH = 12;  ///< Limit recursion depth to avoid stack overflow
-    static constexpr int16_t  VPAM_VERT_PAD   = 10;   ///< Vertical padding (5px top + 5px bottom) for auto-size
 
     // ── Event callback (estático → instancia) ────────────────────────────
     static void drawEventCb(lv_event_t* e);
@@ -308,25 +310,24 @@ private:
                              lv_color_t color);
 
     /**
-     * Draw a rounded elastic parenthesis using a quadratic curve.
-     * @param x      Left edge of the parenthesis bounding box.
-     * @param yTop   Top y coordinate.
-     * @param yBottom Bottom y coordinate.
-     * @param width  Parenthesis width in pixels.
-     * @param left   True for '(' and false for ')'.
+     * Draw a scalable delimiter using OpenType Math Glyph Assembly.
+     *
+     * Renders top hook + repeated extensions + bottom hook from the
+     * STIX Two Math font. Falls back to a single standard parenthesis
+     * glyph when the total height is too short for assembly.
+     *
+     * @param layer      LVGL draw layer.
+     * @param x          Left edge X of the paren bounding box.
+     * @param yTop       Y coordinate of the top of the delimiter.
+     * @param yBottom    Y coordinate of the bottom of the delimiter.
+     * @param left       true for '(', false for ')'.
+     * @param color      Glyph colour.
+     * @param font       Font containing the assembly glyphs.
      */
-    void drawRoundedParenthesis(lv_layer_t* layer,
+    void drawAssembledDelimiter(lv_layer_t* layer,
                                 int16_t x, int16_t yTop, int16_t yBottom,
-                                int16_t width, bool left, lv_color_t color);
-
-    /// Draw a quadratic Bezier curve approximated with line segments.
-    void drawQuadraticCurve(lv_layer_t* layer,
-                            int16_t x0, int16_t y0,
-                            int16_t cx, int16_t cy,
-                            int16_t x1, int16_t y1,
-                            int16_t segments,
-                            int16_t stroke,
-                            lv_color_t color);
+                                bool left, lv_color_t color,
+                                const lv_font_t* font);
 
     // ── Cursor ───────────────────────────────────────────────────────────
     void drawCursor(lv_layer_t* layer);

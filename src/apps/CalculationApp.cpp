@@ -46,15 +46,15 @@ static constexpr uint32_t COL_BG_HEX     = 0xFFFFFF;   // Blanco puro
 static constexpr uint32_t COL_SEP_HEX    = 0x333333;   // Gris separador
 
 // ── Dimensiones ──
-static constexpr int SCREEN_W    = 320;
-static constexpr int SCREEN_H    = 240;
-static constexpr int BAR_H       = ui::StatusBar::HEIGHT + 1;  // 24 + 1 separador
-static constexpr int PAD          = 6;     // Margen de seguridad en todos los bordes
-static constexpr int CANVAS_Y    = BAR_H;
-static constexpr int EXPR_H      = 98;     // Altura zona expresión
-static constexpr int SEP_Y       = CANVAS_Y + EXPR_H;
-static constexpr int RESULT_Y    = SEP_Y + 1;
-static constexpr int RESULT_H    = SCREEN_H - RESULT_Y;
+static constexpr int SCREEN_W      = 320;
+static constexpr int SCREEN_H      = 240;
+static constexpr int BAR_H         = ui::StatusBar::HEIGHT + 1;  // 24 + 1 separator
+static constexpr int PAD           = 6;     // Safety margin on all edges
+static constexpr int CONTENT_TOP   = BAR_H;                     // y = 25: top of content area
+static constexpr int CONTENT_BOT   = SCREEN_H - PAD;            // y = 234: bottom of content area
+static constexpr int CONTENT_FULL_H = CONTENT_BOT - CONTENT_TOP; // 209 px: full edit-mode height
+static constexpr int CONTENT_W     = SCREEN_W - 2 * PAD;        // 308 px: usable content width
+static constexpr int SEP_GAP       = 2;   // Gap between expression bottom → separator → result top
 
 // ════════════════════════════════════════════════════════════════════════════
 // Constructor / Destructor
@@ -150,31 +150,28 @@ void CalculationApp::createUI() {
     _statusBar.setTitle("Calculation");
     _statusBar.setBatteryLevel(100);
 
-    // ── MathCanvas — Expresión (zona superior, con padding lateral) ──
+    // ── MathCanvas — Expression (full-area, vertically centered in edit mode) ──
     _mathCanvas.create(_screen);
-    lv_obj_set_pos(_mathCanvas.obj(), PAD, CANVAS_Y);
-    lv_obj_set_size(_mathCanvas.obj(), SCREEN_W - 2 * PAD, EXPR_H);
+    lv_obj_set_pos(_mathCanvas.obj(), PAD, CONTENT_TOP);
+    lv_obj_set_size(_mathCanvas.obj(), CONTENT_W, CONTENT_FULL_H);
     lv_obj_add_style(_mathCanvas.obj(), &ui::style_math_primary, LV_PART_MAIN);
 
-    // ── Línea separadora expr↔resultado (#333) ──
+    // ── Separator line expr↔result (#333) — initially hidden ──
     _resultSep = lv_obj_create(_screen);
-    lv_obj_set_size(_resultSep, SCREEN_W - 2 * PAD, 1);
-    lv_obj_set_pos(_resultSep, PAD, SEP_Y);
+    lv_obj_set_size(_resultSep, CONTENT_W, 1);
     lv_obj_set_style_bg_color(_resultSep, lv_color_hex(COL_SEP_HEX), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(_resultSep, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(_resultSep, 0, LV_PART_MAIN);
     lv_obj_set_style_radius(_resultSep, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(_resultSep, 0, LV_PART_MAIN);
     lv_obj_remove_flag(_resultSep, LV_OBJ_FLAG_SCROLLABLE);
-    // Ocultar separador hasta que haya resultado
     lv_obj_add_flag(_resultSep, LV_OBJ_FLAG_HIDDEN);
 
-    // ── MathCanvas — Resultado (zona inferior, con padding lateral) ──
+    // ── MathCanvas — Result (fills remaining area when visible) ──
     _resultCanvas.create(_screen);
-    lv_obj_set_pos(_resultCanvas.obj(), PAD, RESULT_Y);
-    lv_obj_set_size(_resultCanvas.obj(), SCREEN_W - 2 * PAD, RESULT_H - PAD);
+    lv_obj_set_pos(_resultCanvas.obj(), PAD, CONTENT_TOP);
+    lv_obj_set_size(_resultCanvas.obj(), CONTENT_W, CONTENT_FULL_H);
     lv_obj_add_style(_resultCanvas.obj(), &ui::style_math_primary, LV_PART_MAIN);
-    // Ocultar canvas de resultado hasta que se evalúe
     lv_obj_add_flag(_resultCanvas.obj(), LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -488,9 +485,7 @@ void CalculationApp::handleKey(const KeyEvent& ev) {
                 _resultCanvas.setExpression(_resultRow, nullptr);
                 _resultCanvas.resetScroll();
                 _resultCanvas.invalidate();
-                // Mostrar canvas de resultado
-                if (_resultSep)  lv_obj_remove_flag(_resultSep, LV_OBJ_FLAG_HIDDEN);
-                if (_resultCanvas.obj()) lv_obj_remove_flag(_resultCanvas.obj(), LV_OBJ_FLAG_HIDDEN);
+                applyResultLayout();  // dynamic reposition for Result Mode
             }
             changed = false;
             break;
@@ -558,6 +553,36 @@ void CalculationApp::evaluateExpression() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// applyResultLayout() — Dynamically trim expression, reveal separator, fill result
+//
+// Called after ENTER (evaluation) or FACT (factorization) to transition
+// from full-screen Edit Mode to the split-screen Result Mode layout.
+// ════════════════════════════════════════════════════════════════════════════
+
+void CalculationApp::applyResultLayout() {
+    // 1. Trim expression canvas to actual content height + tight padding
+    const auto& exprL = _rootRow->layout();
+    int16_t exprContentH = static_cast<int16_t>(
+        exprL.ascent + exprL.descent + vpam::MathCanvas::VPAM_VERT_PAD);
+    lv_obj_set_size(_mathCanvas.obj(), CONTENT_W, exprContentH);
+
+    // Expression stays at CONTENT_TOP (its position from createUI)
+    int16_t exprBottom = CONTENT_TOP + exprContentH;
+
+    // 2. Separator: position directly below trimmed expression
+    lv_obj_set_pos(_resultSep, PAD, exprBottom);
+    lv_obj_remove_flag(_resultSep, LV_OBJ_FLAG_HIDDEN);
+
+    // 3. Result canvas: fill remaining space below separator
+    int16_t resultTop = static_cast<int16_t>(exprBottom + 1 + SEP_GAP);
+    int16_t resultH   = static_cast<int16_t>(SCREEN_H - resultTop - PAD);
+    if (resultH < 20) resultH = 20;  // safety minimum
+    lv_obj_set_pos(_resultCanvas.obj(), PAD, resultTop);
+    lv_obj_set_size(_resultCanvas.obj(), CONTENT_W, resultH);
+    lv_obj_remove_flag(_resultCanvas.obj(), LV_OBJ_FLAG_HIDDEN);
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // showResult() — Genera y muestra el AST del resultado (3 estados)
 // ════════════════════════════════════════════════════════════════════════════
 
@@ -583,9 +608,8 @@ void CalculationApp::showResult() {
     // Calcular layout del resultado
     _resultRow->calculateLayout(_resultCanvas.normalMetrics());
 
-    // Hacer visibles separador y canvas de resultado
-    lv_obj_remove_flag(_resultSep, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_remove_flag(_resultCanvas.obj(), LV_OBJ_FLAG_HIDDEN);
+    // Dynamic layout: trim expression, position separator, fill result area
+    applyResultLayout();
 
     _resultCanvas.invalidate();
     _mathCanvas.invalidate();
@@ -612,9 +636,13 @@ void CalculationApp::clearResult() {
     _eduArena.reset();
     _hasEduSteps = false;
 
-    // Ocultar separador y canvas de resultado
+    // Hide separator and result canvas
     if (_resultSep) lv_obj_add_flag(_resultSep, LV_OBJ_FLAG_HIDDEN);
     if (_resultCanvas.obj()) lv_obj_add_flag(_resultCanvas.obj(), LV_OBJ_FLAG_HIDDEN);
+
+    // Restore expression canvas to full-area vertically-centered Edit Mode
+    lv_obj_set_height(_mathCanvas.obj(), CONTENT_FULL_H);
+    _mathCanvas.invalidate();
 
     // Restore title
     _statusBar.setTitle("Calculation");

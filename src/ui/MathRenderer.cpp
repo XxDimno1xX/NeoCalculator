@@ -34,17 +34,11 @@
 #include "MathSymbols.h"
 #include "MathTypography.h"
 
-// Ajuste empírico para centrar la caja de STIX Two Math con la caja de los nodos VPAM
-#define STIX_Y_OFFSET -8
-
 namespace vpam {
 
 namespace {
 
 constexpr int16_t kPlusMinusStrokeDivisor = 10;
-constexpr int16_t kParenMinSegments = 7;
-constexpr int16_t kParenSegmentHeightDivisor = 6;
-constexpr int16_t kParenStrokeWidthDivisor = 5;
 
 struct SymbolAlias {
     const char* token;
@@ -152,22 +146,28 @@ MathCanvas::~MathCanvas() {
 
 FontMetrics MathCanvas::metricsFromFont(const lv_font_t* font) {
     FontMetrics fm;
-    fm.ascent  = static_cast<int16_t>(font->line_height - font->base_line);
-    fm.descent = static_cast<int16_t>(font->base_line);
     fm.scriptLevel = 0;
-    fm.script = nullptr;
+    fm.script   = nullptr;
 
-    // Derivar ascent/descent desde un glyph representativo (baseline-aware).
-    lv_font_glyph_dsc_t refGlyph;
-    bool refOk = lv_font_get_glyph_dsc(font, &refGlyph, 'x', '1');
-    if (refOk) {
-        int16_t top = static_cast<int16_t>(refGlyph.ofs_y);
-        int16_t bottom = static_cast<int16_t>(refGlyph.ofs_y + refGlyph.box_h);
-        fm.ascent = std::max<int16_t>(0, static_cast<int16_t>(-top));
-        fm.descent = std::max<int16_t>(0, bottom);
+    // ── Canonical ascent / descent from LVGL font header ────────────────
+    // These are the TRUE font metrics. The math axis (ascent/2) depends on
+    // these canonical values for correct alignment of fraction bars with
+    // operator crossbars (e.g. '+' centre). Do NOT replace with capHeight.
+    fm.ascent   = static_cast<int16_t>(font->line_height - font->base_line);
+    fm.descent  = static_cast<int16_t>(font->base_line);
+
+    // ── Cap Height from 'M' glyph (U+004D) ──────────────────────────────
+    // Used ONLY for optical positioning (e.g. superscript baseline raise).
+    // This does NOT affect the math axis or baseline grid.
+    lv_font_glyph_dsc_t capGlyph;
+    if (lv_font_get_glyph_dsc(font, &capGlyph, 'M', '\0')) {
+        fm.capHeight = static_cast<int16_t>(-capGlyph.ofs_y);
+        if (fm.capHeight < 1) fm.capHeight = fm.ascent;
+    } else {
+        fm.capHeight = fm.ascent;
     }
 
-    // Medir el ancho del carácter '0' como referencia
+    // ── Character width from '0' glyph (advance width) ──────────────────
     lv_font_glyph_dsc_t widthGlyph;
     bool widthOk = lv_font_get_glyph_dsc(font, &widthGlyph, '0', '1');
     fm.charWidth = widthOk ? static_cast<int16_t>(widthGlyph.adv_w)
@@ -360,7 +360,7 @@ void MathCanvas::onDraw(lv_event_t* e) {
 void MathCanvas::computeCursorPosition(int16_t baseX, int16_t baseY) {
     if (!_cursorCtrl || !_cursorCtrl->cursor().isValid()) {
         _cursorX = baseX;
-        int16_t cursorCap = static_cast<int16_t>(std::min<int16_t>(14, _fmNormal.ascent));
+        int16_t cursorCap = _root ? _root->layout().ascent : _fmNormal.ascent;
         _cursorY = static_cast<int16_t>(baseY - cursorCap - CURSOR_PAD);
         _cursorH = static_cast<int16_t>(cursorCap + 2 * CURSOR_PAD);
         return;
@@ -440,7 +440,7 @@ void MathCanvas::computeCursorPosition(int16_t baseX, int16_t baseY) {
 
                 // Exponente (fuente reducida)
                 FontMetrics fmSup = fm.superscript();
-                int32_t expShift = (static_cast<int32_t>(fm.ascent)
+                int32_t expShift = (static_cast<int32_t>(fm.capHeight)
                                     * NodePower::EXP_RAISE_NUM) / NodePower::EXP_RAISE_DEN;
                 int16_t expX = static_cast<int16_t>(x + baseL.width);
                 int16_t expBaseline = static_cast<int16_t>(yBaseline - expShift);
@@ -623,13 +623,13 @@ void MathCanvas::computeCursorPosition(int16_t baseX, int16_t baseY) {
     if (finder.result.found) {
         int16_t offsetX = childXOffset(cur.row, cur.index, finder.result.fm);
         _cursorX = static_cast<int16_t>(finder.result.x + offsetX);
-        int16_t cursorCap = static_cast<int16_t>(std::min<int16_t>(14, finder.result.fm.ascent));
+        int16_t cursorCap = cur.row->layout().ascent;
         _cursorY = static_cast<int16_t>(finder.result.yBaseline - cursorCap - CURSOR_PAD);
         _cursorH = static_cast<int16_t>(cursorCap + 2 * CURSOR_PAD);
     } else {
         // Fallback: inicio de la expresión
         _cursorX = baseX;
-        int16_t cursorCap = static_cast<int16_t>(std::min<int16_t>(14, _fmNormal.ascent));
+        int16_t cursorCap = _root ? _root->layout().ascent : _fmNormal.ascent;
         _cursorY = static_cast<int16_t>(baseY - cursorCap - CURSOR_PAD);
         _cursorH = static_cast<int16_t>(cursorCap + 2 * CURSOR_PAD);
     }
@@ -914,7 +914,7 @@ void MathCanvas::drawPower(lv_layer_t* layer, const NodePower* node,
 
     // ── Exponente (fuente reducida, elevado) ──
     FontMetrics fmSup = fm.superscript();
-    int32_t expShift = (static_cast<int32_t>(fm.ascent)
+    int32_t expShift = (static_cast<int32_t>(fm.capHeight)
                         * NodePower::EXP_RAISE_NUM) / NodePower::EXP_RAISE_DEN;
 
     // El baseline del exponente: el fondo del exp está a expShift sobre el baseline
@@ -993,24 +993,22 @@ void MathCanvas::drawParen(lv_layer_t* layer, const NodeParen* node,
                            int16_t x, int16_t yBaseline,
                            const FontMetrics& fm, const lv_font_t* font,
                            int depth) {
-    const auto& parenL   = node->layout();
-    const auto& contentL = node->content()->layout();
+    const auto& parenL = node->layout();
 
     int16_t yTop    = static_cast<int16_t>(yBaseline - parenL.ascent);
     int16_t yBottom = static_cast<int16_t>(yBaseline + parenL.descent);
-    int16_t pw = NodeParen::PAREN_W;
     lv_color_t parenColor = _highlightActive ? _highlightColor : lv_color_black();
 
-    // ── Rounded elastic parentheses ──
-    drawRoundedParenthesis(layer, x, yTop, yBottom, pw, true, parenColor);
+    // ── Left assembled delimiter ──
+    drawAssembledDelimiter(layer, x, yTop, yBottom, true, parenColor, font);
 
-    // ── Contenido ──
-    int16_t contentX = static_cast<int16_t>(x + pw + NodeParen::INNER_PAD);
+    // ── Content ──
+    int16_t contentX = static_cast<int16_t>(x + NodeParen::PAREN_W + NodeParen::INNER_PAD);
     drawNode(layer, node->content(), contentX, yBaseline, fm, font, depth + 1);
 
-    // ── Rounded right parenthesis ──
-    int16_t rpX = static_cast<int16_t>(x + parenL.width - pw);
-    drawRoundedParenthesis(layer, rpX, yTop, yBottom, pw, false, parenColor);
+    // ── Right assembled delimiter ──
+    int16_t rpX = static_cast<int16_t>(x + parenL.width - NodeParen::PAREN_W);
+    drawAssembledDelimiter(layer, rpX, yTop, yBottom, false, parenColor, font);
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1041,23 +1039,22 @@ void MathCanvas::drawFunction(lv_layer_t* layer, const NodeFunction* node,
     drawText(layer, x, yBaseline, node->label(), node->scriptLevel(),
              _highlightActive ? _highlightColor : lv_color_hex(0x1a1a1a));
 
-    // ── Paréntesis automáticos + argumento ──
+    // ── Automatic parentheses + argument ──
     int16_t parenX = static_cast<int16_t>(x + labelW + NodeFunction::LABEL_GAP);
     int16_t yTop    = static_cast<int16_t>(yBaseline - funcL.ascent);
     int16_t yBottom = static_cast<int16_t>(yBaseline + funcL.descent);
-    int16_t pw      = NodeFunction::PAREN_W;
     lv_color_t parenColor = _highlightActive ? _highlightColor : lv_color_black();
 
-    // Rounded left parenthesis
-    drawRoundedParenthesis(layer, parenX, yTop, yBottom, pw, true, parenColor);
+    // Left assembled delimiter
+    drawAssembledDelimiter(layer, parenX, yTop, yBottom, true, parenColor, font);
 
-    // Contenido (argumento)
-    int16_t contentX = static_cast<int16_t>(parenX + pw + NodeFunction::INNER_PAD);
+    // Content (argument)
+    int16_t contentX = static_cast<int16_t>(parenX + NodeFunction::PAREN_W + NodeFunction::INNER_PAD);
     drawNode(layer, node->argument(), contentX, yBaseline, fm, font, depth + 1);
 
-    // Rounded right parenthesis
-    int16_t rpX = static_cast<int16_t>(parenX + parenBlock - pw);
-    drawRoundedParenthesis(layer, rpX, yTop, yBottom, pw, false, parenColor);
+    // Right assembled delimiter
+    int16_t rpX = static_cast<int16_t>(parenX + parenBlock - NodeFunction::PAREN_W);
+    drawAssembledDelimiter(layer, rpX, yTop, yBottom, false, parenColor, font);
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1098,92 +1095,106 @@ void MathCanvas::drawLogBase(lv_layer_t* layer, const NodeLogBase* node,
     int16_t baseBaseline = static_cast<int16_t>(yBaseline + subDrop);
     drawNode(layer, node->base(), baseX, baseBaseline, fmSub, _fontSmall, depth + 1);
 
-    // ── Paréntesis automáticos + argumento ──
+    // ── Automatic parentheses + argument ──
     int16_t parenX = static_cast<int16_t>(x + labelW + baseL.width + NodeLogBase::LABEL_GAP);
     int16_t yTop    = static_cast<int16_t>(yBaseline - lbL.ascent);
     int16_t yBottom = static_cast<int16_t>(yBaseline + lbL.descent);
-    int16_t pw      = NodeLogBase::PAREN_W;
     lv_color_t parenColor = _highlightActive ? _highlightColor : lv_color_black();
 
-    // Rounded left parenthesis
-    drawRoundedParenthesis(layer, parenX, yTop, yBottom, pw, true, parenColor);
+    // Left assembled delimiter
+    drawAssembledDelimiter(layer, parenX, yTop, yBottom, true, parenColor, font);
 
-    // Contenido (argumento)
-    int16_t contentX = static_cast<int16_t>(parenX + pw + NodeLogBase::INNER_PAD);
+    // Content (argument)
+    int16_t contentX = static_cast<int16_t>(parenX + NodeLogBase::PAREN_W + NodeLogBase::INNER_PAD);
     drawNode(layer, node->argument(), contentX, yBaseline, fm, font, depth + 1);
 
-    // Rounded right parenthesis
-    int16_t rpX = static_cast<int16_t>(parenX + parenBlock - pw);
-    drawRoundedParenthesis(layer, rpX, yTop, yBottom, pw, false, parenColor);
+    // Right assembled delimiter
+    int16_t rpX = static_cast<int16_t>(parenX + parenBlock - NodeLogBase::PAREN_W);
+    drawAssembledDelimiter(layer, rpX, yTop, yBottom, false, parenColor, font);
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Rounded parenthesis helpers
+// drawAssembledDelimiter — OpenType Math Glyph Assembly for scalable parens
+//
+// Uses STIX Two Math's dedicated parenthesis assembly glyphs:
+//   Left:  U+239B (upper hook), U+239C (extension), U+239D (lower hook)
+//   Right: U+239E (upper hook), U+239F (extension), U+23A0 (lower hook)
+//
+// All assembly glyphs have ofs_y == 0 (top-aligned in LVGL coordinates).
+// Tier 1: short content → single standard paren glyph, vertically centred.
+// Tier 2: assembly — top hook at yTop, repeated extensions, bottom hook last.
 // ════════════════════════════════════════════════════════════════════════════
 
-void MathCanvas::drawQuadraticCurve(lv_layer_t* layer,
-                                    int16_t x0, int16_t y0,
-                                    int16_t cx, int16_t cy,
-                                    int16_t x1, int16_t y1,
-                                    int16_t segments,
-                                    int16_t stroke,
-                                    lv_color_t color) {
-    if (segments < 1) segments = 1;
-
-    auto qx = [&](float t) -> float {
-        const float u = 1.0f - t;
-        return u * u * static_cast<float>(x0)
-             + 2.0f * u * t * static_cast<float>(cx)
-             + t * t * static_cast<float>(x1);
-    };
-    auto qy = [&](float t) -> float {
-        const float u = 1.0f - t;
-        return u * u * static_cast<float>(y0)
-             + 2.0f * u * t * static_cast<float>(cy)
-             + t * t * static_cast<float>(y1);
-    };
-
-    for (int16_t i = 0; i < segments; ++i) {
-        const float t0 = static_cast<float>(i) / static_cast<float>(segments);
-        const float t1 = static_cast<float>(i + 1) / static_cast<float>(segments);
-
-        int16_t sx = static_cast<int16_t>(std::lround(qx(t0)));
-        int16_t sy = static_cast<int16_t>(std::lround(qy(t0)));
-        int16_t ex = static_cast<int16_t>(std::lround(qx(t1)));
-        int16_t ey = static_cast<int16_t>(std::lround(qy(t1)));
-
-        drawLine(layer, sx, sy, ex, ey, stroke, color);
-    }
-}
-
-void MathCanvas::drawRoundedParenthesis(lv_layer_t* layer,
+void MathCanvas::drawAssembledDelimiter(lv_layer_t* layer,
                                         int16_t x, int16_t yTop, int16_t yBottom,
-                                        int16_t width, bool left, lv_color_t color) {
+                                        bool left, lv_color_t color,
+                                        const lv_font_t* font) {
     if (yBottom <= yTop) return;
+    const int16_t totalH = static_cast<int16_t>(yBottom - yTop);
 
-    const int16_t height = static_cast<int16_t>(yBottom - yTop);
-    int16_t yMid = static_cast<int16_t>((yTop + yBottom) / 2);
+    // ── Select codepoints ──────────────────────────────────────────────
+    const uint32_t topCp    = left ? 0x239B : 0x239E;
+    const uint32_t extCp    = left ? 0x239C : 0x239F;
+    const uint32_t botCp    = left ? 0x239D : 0x23A0;
+    const uint32_t singleCp = left ? 0x0028 : 0x0029;
 
-    int16_t xOuter = left ? static_cast<int16_t>(x + width - 1) : x;
-    int16_t xInner = left ? x : static_cast<int16_t>(x + width - 1);
+    // ── Fetch glyph descriptors once ────────────────────────────────────
+    lv_font_glyph_dsc_t topG, extG, botG, singleG;
+    const bool topOk    = lv_font_get_glyph_dsc(font, &topG,    topCp,    0);
+    const bool extOk    = lv_font_get_glyph_dsc(font, &extG,    extCp,    0);
+    const bool botOk    = lv_font_get_glyph_dsc(font, &botG,    botCp,    0);
+    const bool singleOk = lv_font_get_glyph_dsc(font, &singleG, singleCp, 0);
 
-    // Slight inner pull improves smoothness on low-resolution displays.
-    int16_t xCtrl = left
-        ? static_cast<int16_t>(xInner + std::max<int16_t>(1, width / 4))
-        : static_cast<int16_t>(xInner - std::max<int16_t>(1, width / 4));
+    // ── Helper: draw one assembly glyph at absolute top-Y ───────────────
+    auto drawPiece = [&](uint32_t cp, int16_t gy) {
+        lv_draw_letter_dsc_t dsc;
+        lv_draw_letter_dsc_init(&dsc);
+        dsc.font    = font;
+        dsc.color   = color;
+        dsc.opa     = LV_OPA_COVER;
+        dsc.unicode = cp;
+        lv_point_t pos;
+        pos.x = static_cast<int32_t>(x);
+        pos.y = static_cast<int32_t>(gy);
+        lv_draw_letter(layer, &dsc, &pos);
+    };
 
-    // Adaptive sampling: more segments for tall parens, with minimum for short content.
-    const int16_t segs = static_cast<int16_t>(
-        std::max<int>(kParenMinSegments, height / kParenSegmentHeightDivisor));
-    // Adaptive stroke to avoid thin/pixelated look on larger elastic parentheses.
-    const int16_t stroke = static_cast<int16_t>(
-        std::max<int16_t>(1, width / kParenStrokeWidthDivisor));
+    // ── Tier 1: Single standard paren (short content) ───────────────────
+    const int16_t singleH = singleOk ? static_cast<int16_t>(singleG.box_h) : 0;
+    if (singleOk && totalH <= singleH) {
+        // Standard paren has ofs_y < 0 (baseline-relative in LVGL).
+        // Compute a synthetic baseline that centres the glyph vertically
+        // within [yTop, yBottom].
+        const int16_t pseudoBaseline =
+            static_cast<int16_t>(yTop + (totalH - singleH) / 2 - singleG.ofs_y);
+        drawPiece(singleCp, pseudoBaseline);
+        return;
+    }
 
-    drawQuadraticCurve(layer,
-                       xOuter, yTop,
-                       xCtrl, yMid,
-                       xOuter, yBottom,
-                       segs, stroke, color);
+    // ── Tiers 2+3: Glyph assembly ──────────────────────────────────────
+    if (!topOk || !botOk) return;  // font missing assembly glyphs
+
+    const int16_t topH = static_cast<int16_t>(topG.box_h);
+    const int16_t extH = extOk ? static_cast<int16_t>(extG.box_h) : 0;
+    const int16_t botH = static_cast<int16_t>(botG.box_h);
+
+    // Top hook at yTop
+    drawPiece(topCp, yTop);
+
+    // Extension pieces fill the gap between top hook bottom and
+    // bottom hook top.  Ceiling division ensures full coverage.
+    const int16_t gapH = static_cast<int16_t>(yBottom - botH - (yTop + topH));
+    const int16_t extN = (gapH > 0 && extH > 0)
+                            ? static_cast<int16_t>((gapH + extH - 1) / extH)
+                            : static_cast<int16_t>(0);
+    int16_t extY = static_cast<int16_t>(yTop + topH);
+    for (int16_t i = 0; i < extN; ++i) {
+        drawPiece(extCp, extY);
+        extY = static_cast<int16_t>(extY + extH);
+    }
+
+    // Bottom hook drawn last — overwrites any extension overlap cleanly
+    drawPiece(botCp, static_cast<int16_t>(yBottom - botH));
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1508,9 +1519,6 @@ void MathCanvas::drawText(lv_layer_t* layer, int16_t x, int16_t yBaseline,
     const char* renderText = normalized.empty() ? text : normalized.c_str();
 
     const lv_font_t* font = (scriptLevel > 0) ? _fontSmall : _fontNormal;
-    const int16_t scriptAdjust = (scriptLevel > 0)
-        ? static_cast<int16_t>(font->base_line - _fontNormal->base_line)
-        : 0;
 
     auto decodeUtf8 = [](const uint8_t* s, uint32_t* outCp) -> uint8_t {
         if (!s || !s[0]) {
@@ -1575,7 +1583,7 @@ void MathCanvas::drawText(lv_layer_t* layer, int16_t x, int16_t yBaseline,
 
             lv_point_t letterPos;
             letterPos.x = static_cast<int32_t>(penX);
-            letterPos.y = static_cast<int32_t>(yBaseline) + STIX_Y_OFFSET + scriptAdjust;
+            letterPos.y = static_cast<int32_t>(yBaseline);
 
             lv_draw_letter(layer, &dsc, &letterPos);
             penX += glyph.adv_w;

@@ -148,6 +148,10 @@ private:
     void evaluateExpression();
     void showResult();
     void clearResult();
+
+    /// Dynamically repositions the separator and result canvas after
+    /// trimming the expression canvas to its actual content height.
+    void applyResultLayout();
     void toggleSD();
     void navigateHistory(int direction);  ///< -1 = arriba (atrás), +1 = abajo (reciente)
     void loadHistoryEntry(int index);     ///< Carga una entrada del historial en el canvas

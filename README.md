@@ -23,6 +23,7 @@
 [![Flash](https://img.shields.io/badge/Flash-23.2%25%20%E2%80%94%201.52%20MB-informational)](#build-stats)
 [![GitHub Stars](https://img.shields.io/github/stars/El-EnderJ/NeoCalculator?style=social)](https://github.com/El-EnderJ/NeoCalculator)
 [![GitHub Forks](https://img.shields.io/github/forks/El-EnderJ/NeoCalculator?style=social)](https://github.com/El-EnderJ/NeoCalculator)
+[![Discussions](https://img.shields.io/badge/GitHub-Discussions-green?logo=github&logoColor=white)](https://github.com/El-EnderJ/NeoCalculator/discussions)
 [![Support via Ko-fi](https://img.shields.io/badge/Support-Ko--fi-F16061?logo=ko-fi&logoColor=white)](https://ko-fi.com/enderdesigns)
 
 **[🚀 Join the Hardware Waitlist here](https://neocalculator.tech)** to get notified when PCB beta units drop.
@@ -58,6 +59,8 @@
 ## What is NumOS?
 
 **NumOS** is an open-source scientific and graphing calculator operating system built on the **ESP32-S3 N16R8** microcontroller (16 MB Flash QIO + 8 MB PSRAM OPI). The project aims to become the best open-source calculator in the world, rivalling the Casio fx-991EX ClassWiz, the NumWorks, the TI-84 Plus CE, and the HP Prime G2.
+
+*Delivering a high-end CAS experience for a ~€20 BOM, disrupting the educational hardware monopoly.*
 
 **NumOS delivers:**
 
@@ -271,6 +274,8 @@ build_src_filter = +<*> +<../tests/CASTest.cpp>
 | **Keyboard** | 5×10 matrix (Phase 7) — Rows OUTPUT: GPIO 1,2,41,42,40 · Cols INPUT_PULLUP: GPIO 6,7,8… |
 | **Storage** | LittleFS on dedicated partition — persistent A–Z variables |
 | **USB** | Native USB-CDC on S3 — 115 200 baud |
+
+**Next physical milestone:** transition to the ESP32-P4 ("No-Radio") as the hardware path to Exam Mode compliance, meeting school regulations without locking down the software.
 
 ### Full Pinout
 
@@ -622,13 +627,13 @@ NumOS is an open-source project that aspires to grow with a community. Contribut
 
 | Module | Description |
 |:-------|:------------|
+| **Custom PCB** | KiCad schematic with integrated ESP32-S3 + TP4056 charger |
 | **Sequences App** | Arithmetic and geometric sequences, Nth term, partial sums |
 | **Settings App** | ~~Angle mode DEG/RAD/GRA, brightness, factory reset~~ ✅ Done, remaining: brightness PWM, factory reset |
 | **Advanced CAS** | ~~Symbolic derivatives and integrals~~ ✅ Done, remaining: definite integrals, series |
 | **Better UI/UX** | General improvement on UI and UX for real product release |
 | **Matrices** | Matrix editor, determinant, inverse, multiplication |
 | **Physical keyboard** | ✅ GPIO 4/5 conflict resolved — `Keyboard` driver 5×10 implemented (Phase 7) |
-| **Custom PCB** | KiCad schematic with integrated ESP32-S3 + TP4056 charger |
 
 ---
 
