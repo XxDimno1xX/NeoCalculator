@@ -35,6 +35,7 @@
 #include <algorithm>
 
 #include "../ui/MathSymbols.h"
+#include "font/MathGlyphAssembly.h"
 
 #ifdef ARDUINO
   #include <esp_heap_caps.h>
@@ -84,10 +85,18 @@ static inline void applyScriptLevel(MathNode* node, const FontMetrics& fm) {
 // ════════════════════════════════════════════════════════════════════════════
 NodeRow::NodeRow() : MathNode(NodeType::Row) {}
 
+MathClass NodeRow::mathClass() const {
+    // Propagate from the first non-empty child (TeXbook convention)
+    for (auto& child : _children) {
+        if (child->type() != NodeType::Empty)
+            return child->mathClass();
+    }
+    return MathClass::ORD;
+}
+
 void NodeRow::calculateLayout(const FontMetrics& fm) {
     applyScriptLevel(this, fm);
     if (_children.empty()) {
-        // Fila vacía: tamaño cero pero conserva baseline coherente
         _layout.width   = 0;
         _layout.ascent  = fm.ascent;
         _layout.descent = fm.descent;
@@ -98,14 +107,37 @@ void NodeRow::calculateLayout(const FontMetrics& fm) {
     int16_t maxAscent  = 0;
     int16_t maxDescent = 0;
 
+    MathClass prevClass = MathClass::ORD;
+    bool      hasPrev   = false;
+
     for (size_t i = 0; i < _children.size(); ++i) {
         _children[i]->calculateLayout(fm);
         const auto& cl = _children[i]->layout();
+        MathClass currClass = _children[i]->mathClass();
 
-        if (i > 0) totalW += CHILD_GAP;
+        // ── TeX Inter-Atom Spacing (Spec §3.2) ──
+        if (hasPrev) {
+            int8_t spc = getInterAtomSpace(prevClass, currClass);
+
+            if (spc > 0 && spc <= 3) {
+                // Positive code: map to mu, then convert to pixels
+                totalW += MathConstantsProvider::muToPx(spacingCodeToMu(spc), fm.emSize);
+            } else if (spc < 0) {
+                // Negative code: absolute spacing in display/text only,
+                // zero in script/scriptscript
+                if (isDisplayOrText(fm.style)) {
+                    totalW += MathConstantsProvider::muToPx(spacingCodeToMu(spc), fm.emSize);
+                }
+            }
+            // spc == 0: no space
+            // spc == 9: impossible — no space (defensive)
+        }
+
         totalW     += cl.width;
         maxAscent   = std::max(maxAscent,  cl.ascent);
         maxDescent  = std::max(maxDescent, cl.descent);
+        prevClass   = currClass;
+        hasPrev     = true;
     }
 
     _layout.width   = totalW;
@@ -265,6 +297,8 @@ NodeFraction::NodeFraction(NodePtr numerator, NodePtr denominator)
 
 void NodeFraction::calculateLayout(const FontMetrics& fm) {
     applyScriptLevel(this, fm);
+    bool display = fm.isDisplayStyle();
+
     // 1. Calcular layout de hijos
     _numerator->calculateLayout(fm);
     _denominator->calculateLayout(fm);
@@ -272,39 +306,49 @@ void NodeFraction::calculateLayout(const FontMetrics& fm) {
     const auto& numL = _numerator->layout();
     const auto& denL = _denominator->layout();
 
-    // 2. Ancho: el mayor de los dos hijos + padding horizontal
+    // 2. MATH table-driven layout constants (Spec §7.3)
+    using MCP = MathConstantsProvider;
+
+    int16_t rulePx = MCP::duToPxMin(MCP::fractionRuleThickness(), fm.emSize, 1);
+
+    int16_t numShiftUp = MCP::duToPx(
+        MCP::fractionNumeratorShiftUp(display), fm.emSize);
+    int16_t denShiftDown = MCP::duToPx(
+        MCP::fractionDenominatorShiftDown(display), fm.emSize);
+    int16_t numGapMin = MCP::duToPx(
+        MCP::fractionNumeratorGapMin(display), fm.emSize);
+    int16_t denGapMin = MCP::duToPx(
+        MCP::fractionDenominatorGapMin(display), fm.emSize);
+
+    // 3. Effective shifts: max of default shift and gap constraint
+    //    numShift ensures numerator baseline is at least gapMin above bar
+    //    denShift ensures denominator baseline is at least gapMin below bar
+    int16_t numShift = std::max(numShiftUp,
+                                static_cast<int16_t>(numGapMin + numL.descent));
+    int16_t denShift = std::max(denShiftDown,
+                                static_cast<int16_t>(denGapMin + denL.ascent));
+
+    // 4. Width: widest child + rule overhang (1 mu each side)
+    int16_t ruleOverhang = MCP::muToPx(1, fm.emSize);
+    if (ruleOverhang < 1) ruleOverhang = 1;
     int16_t contentW = std::max(numL.width, denL.width);
-    _layout.width = contentW + BAR_H_PAD * 2;
+    _layout.width = contentW + 2 * ruleOverhang;
 
-    // 3. Posición vertical relativa al eje matemático
-    //
-    //    La barra de fracción se dibuja en el eje matemático
-    //    (axis = ascent/2 sobre el baseline).
-    //
-    //         ┌── numH ──┐
-    //         │numerador  │    ↑ aboveAxis
-    //    ─────┼──barra────┼─── eje (axis sobre baseline)
-    //         │denominador│    ↓ belowAxis
-    //         └── denH ──┘
-    //
+    // 5. Vertical layout (baseline-relative)
+    //    Fraction baseline = math axis.
+    //    Ascent  = distance from axis to numerator TOP.
+    //    Descent = distance from axis to denominator BOTTOM.
+    int16_t barHalfUp   = (rulePx + 1) / 2;
+    int16_t barHalfDown = rulePx / 2;
+
     int16_t axis = fm.axisHeight();
+    int16_t aboveAxis = barHalfUp + numShift + numL.ascent;
+    int16_t belowAxis = barHalfDown + denShift + denL.descent;
 
-    // Mitad superior de la barra (redondeo hacia arriba)
-    int16_t barHalfUp   = (BAR_THICK + 1) / 2;   // 1 para grosor 1
-    // Mitad inferior de la barra (redondeo hacia abajo)
-    int16_t barHalfDown = BAR_THICK / 2;           // 0 para grosor 1
-
-    int16_t numH = numL.height();
-    int16_t denH = denL.height();
-
-    int16_t aboveAxis = barHalfUp   + BAR_V_GAP + numH;
-    int16_t belowAxis = barHalfDown + BAR_V_GAP + denH;
-
-    // Convertir de eje-relativo a baseline-relativo
     _layout.ascent  = axis + aboveAxis;
     _layout.descent = belowAxis - axis;
 
-    // Seguridad: descent nunca negativo
+    // Safety: descent must be non-negative
     if (_layout.descent < 0) {
         _layout.ascent += -_layout.descent;
         _layout.descent = 0;
@@ -355,20 +399,24 @@ void NodePower::calculateLayout(const FontMetrics& fm) {
     _exponent->calculateLayout(fmSup);
     const auto& expL = _exponent->layout();
 
-    // 3. Ancho: base + exponente (pegados, sin gap)
+    // 3. MATH table-driven superscript shift
+    using MCP = MathConstantsProvider;
+    int16_t supShiftUp = MCP::duToPx(MCP::superscriptShiftUp(), fm.emSize);
+    int16_t supBottomMin = MCP::duToPx(MCP::superscriptBottomMin(), fm.emSize);
+
+    // The exponent baseline must be at least supShiftUp above the main baseline.
+    // Additionally, the bottom of the exponent must clear supBottomMin.
+    int16_t expShift = std::max(supShiftUp,
+                                static_cast<int16_t>(supBottomMin + expL.descent));
+    if (expShift < 1) expShift = 1;
+
+    // 4. Ancho: base + exponente (pegados, sin gap)
     _layout.width = baseL.width + expL.width;
 
-    // 4. Elevación del exponente:
-    //    El baseline del exponente se sitúa a EXP_RAISE_NUM/EXP_RAISE_DEN
-    //    (50%) del capHeight de la base sobre el baseline principal.
-    //
-    //    expShift = distancia del baseline principal al baseline del exponente
-    int16_t expShift = static_cast<int16_t>((fm.capHeight * EXP_RAISE_NUM) / EXP_RAISE_DEN);
-
-    // El tope del exponente está a expShift + expL.ascent sobre el baseline
+    // 5. Ascent: the exponent top might extend above the base top
     _layout.ascent  = std::max(baseL.ascent,
                                static_cast<int16_t>(expShift + expL.ascent));
-    // El exponente no extiende hacia abajo
+    // Descent: the exponent never extends below the baseline
     _layout.descent = baseL.descent;
 }
 
@@ -485,18 +533,44 @@ void NodeParen::calculateLayout(const FontMetrics& fm) {
     _content->calculateLayout(fm);
     const auto& cl = _content->layout();
 
-    // Ancho: paréntesis izquierdo + pad + contenido + pad + paréntesis derecho
-    _layout.width = PAREN_W * 2 + INNER_PAD * 2 + cl.width;
-
-    // Symmetric paren height around the math axis.
-    // The delimiter extends equally far above and below the axis.
+    // ── Symmetric delimiter sizing around the math axis ──
     const int16_t axis      = fm.axisHeight();
     const int16_t aboveAxis = (cl.ascent > axis) ? static_cast<int16_t>(cl.ascent - axis)
                                                   : static_cast<int16_t>(axis - cl.ascent);
     const int16_t belowAxis = static_cast<int16_t>(cl.descent + axis);
-    const int16_t maxHalf   = static_cast<int16_t>(std::max(aboveAxis, belowAxis) + VERT_PAD);
-    _layout.ascent  = static_cast<int16_t>(axis + maxHalf);
-    _layout.descent = static_cast<int16_t>(maxHalf - axis);
+
+    using MCP = MathConstantsProvider;
+    const int16_t vertPad = MCP::duToPx(MCP::get(MathConstant::DelimitedSubFormulaMinHeight),
+                                        fm.emSize);
+    // Use a fraction of DelimitedSubFormulaMinHeight as padding (the constant is a minimum
+    // sub-formula height, not padding; we use 2px minimum for optical breathing room).
+    const int16_t padPx = std::max<int16_t>(1, duToPx(68 /* ~StretchStackGapAboveMin */, fm.emSize));
+    const int16_t maxHalf   = static_cast<int16_t>(std::max(aboveAxis, belowAxis) + padPx);
+    const int16_t symAscent  = static_cast<int16_t>(axis + maxHalf);
+    const int16_t symDescent = static_cast<int16_t>(maxHalf - axis);
+
+    const int16_t targetHeight = static_cast<int16_t>(symAscent + symDescent);
+
+    // ── Query DelimiterAssembler for dynamic paren width ──
+    auto leftResult = DelimiterAssembler::assemble(
+        targetHeight, 0x0028, kLeftParenVariantTable, fm.emSize);
+
+    _parenWidth = leftResult.valid ? leftResult.widthPx : PAREN_W;
+
+    // Ensure minimum paren width at small script sizes
+    if (_parenWidth < 2) _parenWidth = 2;
+
+    // ── Layout: [leftParen] + pad + content + pad + [rightParen] ──
+    const int16_t innerPad = std::max<int16_t>(1, _parenWidth / 3);
+    _layout.width = static_cast<int16_t>(_parenWidth * 2 + innerPad * 2 + cl.width);
+    _layout.ascent  = symAscent;
+    _layout.descent = symDescent;
+
+    // Safety: descent must be non-negative
+    if (_layout.descent < 0) {
+        _layout.ascent  = static_cast<int16_t>(_layout.ascent - _layout.descent);
+        _layout.descent = 0;
+    }
 }
 
 MathNode* NodeParen::child(int index) const {
@@ -620,11 +694,9 @@ void NodeLogBase::calculateLayout(const FontMetrics& fm) {
     _layout.width = _labelWidth + baseL.width + LABEL_GAP
                   + PAREN_W + INNER_PAD + argL.width + INNER_PAD + PAREN_W;
 
-    // 5. Descenso del subíndice:
-    //    El tope del subíndice queda a SUB_DROP_NUM/SUB_DROP_DEN del descent
-    //    bajo el baseline. Similar inverso a NodePower.
-    int16_t subDrop = (fm.descent * SUB_DROP_NUM) / SUB_DROP_DEN;
-    // Si descent es cero o muy pequeño, usar un mínimo
+    // 5. Descenso del subíndice: use MATH table subscriptShiftDown.
+    using MCP = MathConstantsProvider;
+    int16_t subDrop = MCP::duToPx(MCP::subscriptShiftDown(), fm.emSize);
     if (subDrop < 2) subDrop = 2;
 
     // El fondo del subíndice está a subDrop + baseL.descent bajo el baseline
@@ -872,33 +944,70 @@ void NodeDefIntegral::setVariable(NodePtr node) {
 
 void NodeDefIntegral::calculateLayout(const FontMetrics& fm) {
     applyScriptLevel(this, fm);
-    FontMetrics fmLimit = fm.superscript();
 
-    _lower->calculateLayout(fmLimit);
-    _upper->calculateLayout(fmLimit);
     _body->calculateLayout(fm);
     _variable->calculateLayout(fm);
 
-    const auto& lowerL = _lower->layout();
-    const auto& upperL = _upper->layout();
     const auto& bodyL  = _body->layout();
     const auto& varL   = _variable->layout();
 
-    // Symbol column width = max(SYMBOL_W, lowerL.width, upperL.width)
-    int16_t symColW = std::max({SYMBOL_W, lowerL.width, upperL.width});
+    // ── Integral symbol width from variant table (Spec §4.5) ──
+    int16_t symW = DelimiterAssembler::glyphWidthPx(0x222B, fm.emSize);
+    if (symW < 6) symW = SYMBOL_W;  // fallback to legacy constant
 
-    // "d" text width ≈ 1 char + variable
-    int16_t dVarW = static_cast<int16_t>(fm.charWidth + D_GAP + varL.width);
+    using MCP = MathConstantsProvider;
+    const int16_t limitGapPx = MCP::duToPx(MCP::upperLimitGapMin(), fm.emSize);
+    const int16_t bodyGapPx  = MCP::muToPx(3, fm.emSize);  // 3 mu = thin space
 
-    // Total width
-    _layout.width = symColW + BODY_GAP + bodyL.width + D_GAP + dVarW;
+    if (fm.isDisplayStyle()) {
+        // ── DISPLAY style: limits above/below the integral sign ──
+        FontMetrics fmLimit = fm.superscript();
 
-    // Vertical: upper limit + gap + symbol/body + gap + lower limit
-    int16_t bodyAscent  = std::max(bodyL.ascent, fm.ascent);
-    int16_t bodyDescent = std::max(bodyL.descent, fm.descent);
+        _lower->calculateLayout(fmLimit);
+        _upper->calculateLayout(fmLimit);
 
-    _layout.ascent  = bodyAscent + SYMBOL_H_PAD + LIMIT_GAP + upperL.height();
-    _layout.descent = bodyDescent + SYMBOL_H_PAD + LIMIT_GAP + lowerL.height();
+        const auto& lowerL = _lower->layout();
+        const auto& upperL = _upper->layout();
+
+        // Symbol column width = max(symW, lowerL.width, upperL.width)
+        int16_t symColW = std::max({symW, lowerL.width, upperL.width});
+
+        // "d" + variable
+        int16_t dVarW = static_cast<int16_t>(fm.charWidth + D_GAP + varL.width);
+
+        _layout.width = symColW + bodyGapPx + bodyL.width + D_GAP + dVarW;
+
+        int16_t bodyAscent  = std::max(bodyL.ascent, fm.ascent);
+        int16_t bodyDescent = std::max(bodyL.descent, fm.descent);
+
+        _layout.ascent  = bodyAscent + SYMBOL_H_PAD + limitGapPx + upperL.height();
+        _layout.descent = bodyDescent + SYMBOL_H_PAD + limitGapPx + lowerL.height();
+    } else {
+        // ── TEXT / SCRIPT style: limits as sub/superscript to the right ──
+        FontMetrics fmLimit = fm.superscript();
+
+        _lower->calculateLayout(fmLimit);
+        _upper->calculateLayout(fmLimit);
+
+        const auto& lowerL = _lower->layout();
+        const auto& upperL = _upper->layout();
+
+        // Symbol + superscript + subscript to the right
+        int16_t limitsW = std::max(upperL.width, lowerL.width);
+        int16_t limitsH = upperL.height() + lowerL.height();
+
+        int16_t dVarW = static_cast<int16_t>(fm.charWidth + D_GAP + varL.width);
+
+        _layout.width = symW + limitsW + bodyGapPx + bodyL.width + D_GAP + dVarW;
+
+        int16_t bodyAscent  = std::max({bodyL.ascent, fm.ascent,
+                                        static_cast<int16_t>(upperL.height())});
+        int16_t bodyDescent = std::max({bodyL.descent, fm.descent,
+                                        static_cast<int16_t>(lowerL.height())});
+
+        _layout.ascent  = bodyAscent;
+        _layout.descent = bodyDescent;
+    }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -967,29 +1076,207 @@ void NodeSummation::setVariable(NodePtr node) {
 
 void NodeSummation::calculateLayout(const FontMetrics& fm) {
     applyScriptLevel(this, fm);
-    FontMetrics fmLimit = fm.superscript();
 
-    _lower->calculateLayout(fmLimit);
-    _upper->calculateLayout(fmLimit);
     _body->calculateLayout(fm);
     _variable->calculateLayout(fm);
 
-    const auto& lowerL = _lower->layout();
-    const auto& upperL = _upper->layout();
     const auto& bodyL  = _body->layout();
 
-    // Symbol column width = max(SYMBOL_W, lowerL.width, upperL.width)
-    int16_t symColW = std::max({SYMBOL_W, lowerL.width, upperL.width});
+    // ── Summation symbol width from variant table ──
+    int16_t symW = DelimiterAssembler::glyphWidthPx(0x2211, fm.emSize);
+    if (symW < 6) symW = SYMBOL_W;
 
-    // Total width
-    _layout.width = symColW + BODY_GAP + bodyL.width;
+    using MCP = MathConstantsProvider;
+    const int16_t limitGapPx = MCP::duToPx(MCP::upperLimitGapMin(), fm.emSize);
+    const int16_t bodyGapPx  = MCP::muToPx(3, fm.emSize);
 
-    // Vertical: upper limit + gap + symbol/body + gap + lower limit
-    int16_t bodyAscent  = std::max(bodyL.ascent, fm.ascent);
-    int16_t bodyDescent = std::max(bodyL.descent, fm.descent);
+    FontMetrics fmLimit = fm.superscript();
 
-    _layout.ascent  = bodyAscent + SYMBOL_H_PAD + LIMIT_GAP + upperL.height();
-    _layout.descent = bodyDescent + SYMBOL_H_PAD + LIMIT_GAP + lowerL.height();
+    if (fm.isDisplayStyle()) {
+        // ── DISPLAY style: limits centered above/below the operator ──
+        _lower->calculateLayout(fmLimit);
+        _upper->calculateLayout(fmLimit);
+
+        const auto& lowerL = _lower->layout();
+        const auto& upperL = _upper->layout();
+
+        // Symbol column width = max(symW, lowerL.width, upperL.width)
+        int16_t symColW = std::max({symW, lowerL.width, upperL.width});
+
+        _layout.width = symColW + bodyGapPx + bodyL.width;
+
+        int16_t bodyAscent  = std::max(bodyL.ascent, fm.ascent);
+        int16_t bodyDescent = std::max(bodyL.descent, fm.descent);
+
+        _layout.ascent  = bodyAscent + SYMBOL_H_PAD + limitGapPx + upperL.height();
+        _layout.descent = bodyDescent + SYMBOL_H_PAD + limitGapPx + lowerL.height();
+    } else {
+        // ── TEXT / SCRIPT style: limits as sub/superscript to the right ──
+        _lower->calculateLayout(fmLimit);
+        _upper->calculateLayout(fmLimit);
+
+        const auto& lowerL = _lower->layout();
+        const auto& upperL = _upper->layout();
+
+        int16_t limitsW = std::max(upperL.width, lowerL.width);
+
+        _layout.width = symW + limitsW + bodyGapPx + bodyL.width;
+
+        // Vertical: body height + max of superscript/subscript
+        int16_t supTop = upperL.height();   // superscript above baseline
+        int16_t subBot = lowerL.height();   // subscript below baseline
+
+        _layout.ascent  = std::max({bodyL.ascent, fm.ascent, supTop});
+        _layout.descent = std::max({bodyL.descent, fm.descent, subBot});
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  N o d e B i g O p
+// ════════════════════════════════════════════════════════════════════════════
+NodeBigOp::NodeBigOp()
+    : MathNode(NodeType::BigOp)
+    , _kind(BigOpKind::Product)
+    , _operatorCp(0x220F)
+    , _lower(makeEmptyRow())
+    , _upper(makeEmptyRow())
+    , _body(makeEmptyRow())
+    , _useDisplayLimits(false)
+{
+    _lower->setParent(this);
+    _upper->setParent(this);
+    _body->setParent(this);
+}
+
+NodeBigOp::NodeBigOp(BigOpKind kind, NodePtr lower, NodePtr upper, NodePtr body)
+    : MathNode(NodeType::BigOp)
+    , _kind(kind)
+    , _operatorCp(0x220F)
+    , _lower(lower ? std::move(lower) : makeEmptyRow())
+    , _upper(upper ? std::move(upper) : makeEmptyRow())
+    , _body(body ? std::move(body) : makeEmptyRow())
+    , _useDisplayLimits(false)
+{
+    _lower->setParent(this);
+    _upper->setParent(this);
+    _body->setParent(this);
+
+    // Resolve codepoint from kind
+    switch (_kind) {
+        case BigOpKind::Product:      _operatorCp = 0x220F; break;  // ∏
+        case BigOpKind::CoProduct:    _operatorCp = 0x2210; break;  // ∐
+        case BigOpKind::Intersection: _operatorCp = 0x22C2; break;  // ⋂
+        case BigOpKind::Union:        _operatorCp = 0x22C3; break;  // ⋃
+        case BigOpKind::LogicalAnd:   _operatorCp = 0x22C0; break;  // ⋀
+        case BigOpKind::LogicalOr:    _operatorCp = 0x22C1; break;  // ⋁
+    }
+}
+
+uint32_t NodeBigOp::operatorCodepoint() const {
+    return _operatorCp;
+}
+
+const char* NodeBigOp::operatorUtf8() const {
+    switch (_kind) {
+        case BigOpKind::Product:      return "\xE2\x88\x8F";  // ∏
+        case BigOpKind::CoProduct:    return "\xE2\x88\x90";  // ∐
+        case BigOpKind::Intersection: return "\xE2\x8B\x82";  // ⋂
+        case BigOpKind::Union:        return "\xE2\x8B\x83";  // ⋃
+        case BigOpKind::LogicalAnd:   return "\xE2\x8B\x80";  // ⋀
+        case BigOpKind::LogicalOr:    return "\xE2\x8B\x81";  // ⋁
+    }
+    return "?";
+}
+
+MathNode* NodeBigOp::child(int index) const {
+    switch (index) {
+        case 0: return _lower.get();
+        case 1: return _upper.get();
+        case 2: return _body.get();
+        default: return nullptr;
+    }
+}
+
+void NodeBigOp::setLower(NodePtr node) {
+    if (!node) node = makeEmptyRow();
+    _lower = std::move(node);
+    _lower->setParent(this);
+}
+
+void NodeBigOp::setUpper(NodePtr node) {
+    if (!node) node = makeEmptyRow();
+    _upper = std::move(node);
+    _upper->setParent(this);
+}
+
+void NodeBigOp::setBody(NodePtr node) {
+    if (!node) node = makeEmptyRow();
+    _body = std::move(node);
+    _body->setParent(this);
+}
+
+void NodeBigOp::calculateLayout(const FontMetrics& fm) {
+    applyScriptLevel(this, fm);
+
+    using MCP = MathConstantsProvider;
+
+    // ── Operator glyph dimensions from variant table ──
+    int16_t opW = DelimiterAssembler::glyphWidthPx(_operatorCp, fm.emSize);
+    if (opW < 6) opW = 14;  // fallback: reasonable for large operators
+
+    // ── Determine if we use display limits (Spec §4.5) ──
+    // In display style, use limits above/below the operator.
+    // In text/script style, use limits as sub/superscript to the right.
+    _useDisplayLimits = fm.isDisplayStyle();
+
+    FontMetrics fmLimit = fm.superscript();
+    _body->calculateLayout(fm);
+    const auto& bodyL = _body->layout();
+
+    const int16_t limitGapPx = MCP::duToPx(MCP::upperLimitGapMin(), fm.emSize);
+    const int16_t bodyGapPx  = MCP::muToPx(3, fm.emSize);
+
+    if (_useDisplayLimits) {
+        // ── DISPLAY: limits above/below operator ──
+        _lower->calculateLayout(fmLimit);
+        _upper->calculateLayout(fmLimit);
+
+        const auto& lowerL = _lower->layout();
+        const auto& upperL = _upper->layout();
+
+        // Symbol column width
+        int16_t symColW = std::max({opW, lowerL.width, upperL.width});
+
+        _layout.width = symColW + bodyGapPx + bodyL.width;
+
+        // Vertical stack: upper limit + gap + operator + gap + lower limit + body
+        int16_t opHeight = fm.ascent;  // Approximate operator height from font metrics
+        int16_t aboveOp = limitGapPx + upperL.height();
+        int16_t belowOp = limitGapPx + lowerL.height();
+
+        int16_t bodyAscent  = std::max(bodyL.ascent, fm.ascent);
+        int16_t bodyDescent = std::max(bodyL.descent, fm.descent);
+
+        _layout.ascent  = aboveOp + opHeight + bodyAscent;
+        _layout.descent = belowOp + bodyDescent;
+    } else {
+        // ── TEXT / SCRIPT: limits as sub/superscript to the right ──
+        _lower->calculateLayout(fmLimit);
+        _upper->calculateLayout(fmLimit);
+
+        const auto& lowerL = _lower->layout();
+        const auto& upperL = _upper->layout();
+
+        int16_t limitsW = std::max(upperL.width, lowerL.width);
+
+        _layout.width = opW + limitsW + bodyGapPx + bodyL.width;
+
+        // Vertical: max of operator body, superscript top, subscript bottom
+        _layout.ascent  = std::max({bodyL.ascent, fm.ascent,
+                                    static_cast<int16_t>(upperL.height())});
+        _layout.descent = std::max({bodyL.descent, fm.descent,
+                                    static_cast<int16_t>(lowerL.height())});
+    }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1023,10 +1310,9 @@ void NodeSubscript::calculateLayout(const FontMetrics& fm) {
     // 3. Ancho: base + subíndice (pegados, sin gap)
     _layout.width = baseL.width + subL.width;
 
-    // 4. Descenso del subíndice:
-    //    El tope del subíndice queda a SUB_DROP_NUM/SUB_DROP_DEN del descent
-    //    bajo el baseline. (Mirrors NodeLogBase layout)
-    int16_t subDrop = (fm.descent * SUB_DROP_NUM) / SUB_DROP_DEN;
+    // 4. Descenso del subíndice: use MATH table subscriptShiftDown.
+    using MCP = MathConstantsProvider;
+    int16_t subDrop = MCP::duToPx(MCP::subscriptShiftDown(), fm.emSize);
     if (subDrop < 2) subDrop = 2;  // mínimo sensato
 
     // Reservar todo el alto del subíndice una vez bajado, no solo su descent.
@@ -1147,6 +1433,14 @@ NodePtr makeSummation(NodePtr lower, NodePtr upper,
                                                std::move(body), std::move(variable));
     }
     return std::make_unique<NodeSummation>();
+}
+
+NodePtr makeBigOp(BigOpKind kind, NodePtr lower, NodePtr upper, NodePtr body) {
+    if (lower || upper || body) {
+        return std::make_unique<NodeBigOp>(kind, std::move(lower),
+                                           std::move(upper), std::move(body));
+    }
+    return std::make_unique<NodeBigOp>();  // default = Product (∏)
 }
 
 NodePtr makeSubscript(NodePtr base, NodePtr subscript) {
@@ -1317,6 +1611,20 @@ std::string dumpTree(const MathNode* node, int indent) {
             out += dumpTree(node->child(1), indent + 2);
             break;
         }
+        case NodeType::BigOp: {
+            auto* bo = static_cast<const NodeBigOp*>(node);
+            out += std::string("BigOp ") + bo->operatorUtf8() + metrics() + "\n";
+            appendIndent(out, indent + 1);
+            out += "lower:\n";
+            out += dumpTree(node->child(0), indent + 2);
+            appendIndent(out, indent + 1);
+            out += "upper:\n";
+            out += dumpTree(node->child(1), indent + 2);
+            appendIndent(out, indent + 1);
+            out += "body:\n";
+            out += dumpTree(node->child(2), indent + 2);
+            break;
+        }
     }
 
     return out;
@@ -1404,6 +1712,13 @@ NodePtr cloneNode(const MathNode* node) {
             auto* sub = static_cast<const NodeSubscript*>(node);
             return makeSubscript(cloneNode(sub->base()),
                                  cloneNode(sub->subscript()));
+        }
+        case NodeType::BigOp: {
+            auto* bo = static_cast<const NodeBigOp*>(node);
+            return makeBigOp(bo->bigOpKind(),
+                             cloneNode(bo->lower()),
+                             cloneNode(bo->upper()),
+                             cloneNode(bo->body()));
         }
     }
     return nullptr;  // unreachable

@@ -281,6 +281,11 @@ private:
                        const FontMetrics& fm, const lv_font_t* font,
                        int depth = 0);
 
+    void drawBigOp(lv_layer_t* layer, const NodeBigOp* node,
+                   int16_t x, int16_t yBaseline,
+                   const FontMetrics& fm, const lv_font_t* font,
+                   int depth = 0);
+
     // ── Vectorial symbol primitives ──────────────────────────────────────
 
     /**

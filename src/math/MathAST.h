@@ -54,6 +54,8 @@
 #include <vector>
 #include <string>
 
+#include "MathTypography.h"
+
 namespace vpam {
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -82,6 +84,7 @@ enum class NodeType : uint8_t {
     DefIntegral,      // Definite integral: ∫[lower,upper] expr d(var)
     Summation,        // Summation series: ∑[lower,upper] expr (var=n)
     Subscript,        // Generic subscript: base_subscript (e.g. x₁, x₂)
+    BigOp,            // Generic large operator: ∏, ⋂, ⋃ (style-dependent limits)
 };
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -109,6 +112,18 @@ enum class FuncKind : uint8_t {
 };
 
 // ════════════════════════════════════════════════════════════════════════════
+// BigOpKind — Tipo de operador grande (n-ary operator)
+// ════════════════════════════════════════════════════════════════════════════
+enum class BigOpKind : uint8_t {
+    Product,       // ∏
+    CoProduct,     // ∐
+    Intersection,  // ⋂
+    Union,         // ⋃
+    LogicalAnd,    // ⋀
+    LogicalOr,     // ⋁
+};
+
+// ════════════════════════════════════════════════════════════════════════════
 // ConstKind — Tipo de constante algebraica
 // ════════════════════════════════════════════════════════════════════════════
 enum class ConstKind : uint8_t {
@@ -130,6 +145,8 @@ struct FontMetrics {
     int16_t capHeight;   ///< Píxeles del baseline al tope de las mayúsculas (Cap Height)
     uint8_t scriptLevel = 0;             ///< 0 = base, 1 = script
     const FontMetrics* script = nullptr; ///< Métricas del nivel de script (Level 1)
+    int16_t emSize = 18;                 ///< Font size in pixels (for duToPx / muToPx conversion)
+    MathStyle style = MathStyle::DISPLAY_STYLE; ///< Current math typesetting context
 
     /// Altura total de línea
     int16_t height() const { return ascent + descent; }
@@ -138,31 +155,57 @@ struct FontMetrics {
     /// ≈ mitad del ascent (centro vertical del dígito).
     int16_t axisHeight() const { return ascent / 2; }
 
-    /// Métricas reducidas para superíndices/subíndices (≈70%, mínimo seguro).
+    /// True if this is a display or text (non-script) style.
+    bool isDisplayStyle() const {
+        return style == MathStyle::DISPLAY_STYLE;
+    }
+
+    /// Métricas reducidas para superíndices/subíndices.
+    ///
+    /// Level 1 (script): scales by scriptPercentScaleDown (70% for STIX Two Math).
+    /// Level 2 (scriptscript): scales by scriptScriptPercentScaleDown (55%).
+    ///
+    /// When a pre-computed script FontMetrics is already attached (e.g. from
+    /// metricsFromFont for the 12pt font), it is returned directly for level 1;
+    /// level 2 falls through to the MathConstantsProvider-based scaling.
     FontMetrics superscript() const {
-        if (script) {
+        using MCP = MathConstantsProvider;
+
+        if (scriptLevel == 0 && script) {
+            // Level 0→1: use the pre-computed script font metrics
             FontMetrics out = *script;
-            out.script = script;
+            out.scriptLevel = 1;
+            out.style = MathStyle::SCRIPT;
+            out.script = nullptr;  // prevent infinite recursion
             return out;
         }
-        auto clamp = [](int16_t v, int16_t mn) -> int16_t {
-            int16_t r = static_cast<int16_t>((v * 7) / 10);
+
+        // Level 1→2 or fallback: scale by the appropriate MATH constant
+        int16_t scalePercent = (scriptLevel >= 1)
+            ? MCP::scriptScriptPercentScaleDown()   // 55% for scriptscript
+            : MCP::scriptPercentScaleDown();         // 70% for script
+
+        auto scale = [scalePercent](int16_t v, int16_t mn) -> int16_t {
+            int16_t r = static_cast<int16_t>((static_cast<int32_t>(v) * scalePercent) / 100);
             return r < mn ? mn : r;
         };
+
         FontMetrics out;
-        out.charWidth = clamp(charWidth, 6);
-        out.ascent   = clamp(ascent, 8);
-        out.descent  = clamp(descent, 1);
-        out.capHeight = clamp(capHeight, 8);
-        out.scriptLevel = 1;
-        out.script = nullptr;
+        out.charWidth  = scale(charWidth, 6);
+        out.ascent     = scale(ascent, 8);
+        out.descent    = scale(descent, 1);
+        out.capHeight  = scale(capHeight, 8);
+        out.scriptLevel = static_cast<uint8_t>(scriptLevel + 1);
+        out.emSize     = scale(emSize, 12);
+        out.style      = (scriptLevel >= 1) ? MathStyle::SCRIPTSCRIPT : MathStyle::SCRIPT;
+        out.script     = nullptr;
         return out;
     }
 };
 
 /// Métricas por defecto razonables (≈ STIX Two Math 18 a ~10 px de ancho).
 inline FontMetrics defaultFontMetrics() {
-    return { 10, 14, 3, 10, 0, nullptr };
+    return { 10, 14, 3, 10, 0, nullptr, 18, MathStyle::DISPLAY_STYLE };
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -193,6 +236,11 @@ public:
 
     // ── Identidad ──
     NodeType type() const { return _type; }
+
+    // ── TeX Math Class (for inter-atom spacing) ──
+    /// Returns the TeX atom class of this node.
+    /// Default is ORD (ordinary). Override in nodes that need different spacing.
+    virtual MathClass mathClass() const { return MathClass::ORD; }
 
     // ── Script level ──
     uint8_t scriptLevel() const { return _scriptLevel; }
@@ -237,6 +285,7 @@ public:
     NodeRow();
 
     void calculateLayout(const FontMetrics& fm) override;
+    MathClass mathClass() const override;  // Propagates from first non-empty child
 
     // ── Hijos ──
     int       childCount()        const override;
@@ -293,11 +342,13 @@ public:
     explicit NodeOperator(OpKind op);
 
     void calculateLayout(const FontMetrics& fm) override;
+    MathClass mathClass() const override { return MathClass::BINARY; }  // All ops are binary
 
     OpKind      op()     const { return _op; }
     const char* symbol() const;
 
-    /// Padding horizontal a cada lado del símbolo del operador (px)
+    /// @deprecated Padding horizontal a cada lado del símbolo del operador (px).
+    /// Use MathConstantsProvider::muToPx() with kSpacingTable for TeX spacing.
     static constexpr int16_t OP_PAD = 2;
 
 private:
@@ -340,6 +391,7 @@ public:
     NodeFraction(NodePtr numerator, NodePtr denominator);
 
     void calculateLayout(const FontMetrics& fm) override;
+    MathClass mathClass() const override { return MathClass::INNER; }
 
     int       childCount()     const override { return 2; }
     MathNode* child(int index) const override;
@@ -351,10 +403,11 @@ public:
     void setNumerator(NodePtr node);
     void setDenominator(NodePtr node);
 
-    // ── Constantes de estilo ──
-    static constexpr int16_t BAR_THICK = 1;   ///< Grosor de la barra (px)
-    static constexpr int16_t BAR_H_PAD = 2;   ///< Padding horizontal barra↔borde
-    static constexpr int16_t BAR_V_GAP = 1;   ///< Espacio vertical barra↔contenido (tight)
+    // ── @deprecated Geometry constants — use MathConstantsProvider instead ──
+    // These remain for MathRenderer backward-compatibility (Phase 4 will remove them).
+    static constexpr int16_t BAR_THICK = 1;   ///< @deprecated Grosor de la barra (px)
+    static constexpr int16_t BAR_H_PAD = 2;   ///< @deprecated Padding horizontal barra↔borde
+    static constexpr int16_t BAR_V_GAP = 1;   ///< @deprecated Espacio vertical barra↔contenido
 
 private:
     NodePtr _numerator;
@@ -381,6 +434,7 @@ public:
     NodePower(NodePtr base, NodePtr exponent);
 
     void calculateLayout(const FontMetrics& fm) override;
+    MathClass mathClass() const override { return MathClass::INNER; }
 
     int       childCount()     const override { return 2; }
     MathNode* child(int index) const override;
@@ -391,7 +445,7 @@ public:
     void setBase(NodePtr node);
     void setExponent(NodePtr node);
 
-    /// Fracción del capHeight de la base donde arranca el baseline del exponente
+    /// @deprecated — use MathConstantsProvider::superscriptShiftUp() instead.
     static constexpr int16_t EXP_RAISE_NUM = 1;   // numerador
     static constexpr int16_t EXP_RAISE_DEN = 2;   // denominador → 1/2 = 50% de capHeight
 
@@ -420,6 +474,7 @@ public:
     explicit NodeRoot(NodePtr radicand, NodePtr degree = nullptr);
 
     void calculateLayout(const FontMetrics& fm) override;
+    MathClass mathClass() const override { return MathClass::INNER; }
 
     int       childCount()     const override;
     MathNode* child(int index) const override;
@@ -431,11 +486,11 @@ public:
     void setRadicand(NodePtr node);
     void setDegree(NodePtr node);
 
-    // ── Geometría del símbolo √ ──
+    // ── @deprecated Geometría del símbolo √ — use MathConstantsProvider ──
     static constexpr int16_t HOOK_W       = 3;   ///< Ancho del gancho pequeño
     static constexpr int16_t SLOPE_W      = 6;   ///< Ancho de la línea ascendente
-    static constexpr int16_t OVERLINE_GAP = 2;   ///< Espacio overline↔contenido
-    static constexpr int16_t OVERLINE_T   = 1;   ///< Grosor de la overline
+    static constexpr int16_t OVERLINE_GAP = 2;   ///< @deprecated spacing
+    static constexpr int16_t OVERLINE_T   = 1;   ///< @deprecated — use provider
     static constexpr int16_t RIGHT_PAD    = 2;   ///< Padding derecho tras contenido
 
 private:
@@ -457,6 +512,7 @@ public:
     explicit NodeParen(NodePtr content);
 
     void calculateLayout(const FontMetrics& fm) override;
+    MathClass mathClass() const override { return MathClass::INNER; }  // TeXbook Rule 15: parenthesized subformula is INNER
 
     int       childCount()     const override { return 1; }
     MathNode* child(int index) const override;
@@ -464,12 +520,19 @@ public:
     MathNode* content() const { return _content.get(); }
     void setContent(NodePtr node);
 
-    static constexpr int16_t PAREN_W    = 5;   ///< Ancho de cada paréntesis
-    static constexpr int16_t INNER_PAD  = 1;   ///< Padding horizontal interior
-    static constexpr int16_t VERT_PAD   = 1;   ///< Extensión vertical sobre contenido
+    /// Dynamic paren width computed during layout (px).
+    /// Replaces the legacy PAREN_W constant. Valid after calculateLayout().
+    int16_t parenWidth() const { return _parenWidth; }
+
+    /// @deprecated — use parenWidth() instead for layout-accurate width.
+    /// Kept for backward-compatibility during Phase 4 migration.
+    static constexpr int16_t PAREN_W    = 5;
+    static constexpr int16_t INNER_PAD  = 1;
+    static constexpr int16_t VERT_PAD   = 1;
 
 private:
     NodePtr _content;
+    int16_t _parenWidth = PAREN_W;  ///< Dynamic delimiter width (replaces PAREN_W)
 };
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -683,6 +746,7 @@ public:
     NodeDefIntegral(NodePtr lower, NodePtr upper, NodePtr body, NodePtr variable);
 
     void calculateLayout(const FontMetrics& fm) override;
+    MathClass mathClass() const override { return MathClass::OP; }  // Large operator
 
     int       childCount()     const override { return 4; }
     MathNode* child(int index) const override;
@@ -697,7 +761,7 @@ public:
     void setBody(NodePtr node);
     void setVariable(NodePtr node);
 
-    // ── Geometry constants ──
+    // ── @deprecated Geometry constants ──
     static constexpr int16_t SYMBOL_W      = 12;  ///< Width of the ∫ symbol
     static constexpr int16_t SYMBOL_H_PAD  = 4;   ///< Extra height above/below body
     static constexpr int16_t LIMIT_GAP     = 2;   ///< Gap between symbol and limits
@@ -734,6 +798,7 @@ public:
     NodeSummation(NodePtr lower, NodePtr upper, NodePtr body, NodePtr variable);
 
     void calculateLayout(const FontMetrics& fm) override;
+    MathClass mathClass() const override { return MathClass::OP; }  // Large operator
 
     int       childCount()     const override { return 4; }
     MathNode* child(int index) const override;
@@ -748,7 +813,7 @@ public:
     void setBody(NodePtr node);
     void setVariable(NodePtr node);
 
-    // ── Geometry constants ──
+    // ── @deprecated Geometry constants ──
     static constexpr int16_t SYMBOL_W      = 14;  ///< Width of the ∑ symbol
     static constexpr int16_t SYMBOL_H_PAD  = 4;   ///< Extra height above/below body
     static constexpr int16_t LIMIT_GAP     = 2;   ///< Gap between symbol and limits
@@ -801,6 +866,64 @@ private:
 };
 
 // ════════════════════════════════════════════════════════════════════════════
+// NodeBigOp — Generic large n-ary operator: ∏, ⋂, ⋃, ⋀, ⋁
+//
+// 3 hijos, todos NodeRow:
+//   lower    → Límite inferior (ej. "i=1")
+//   upper    → Límite superior (ej. "n")
+//   body     → Expresión (ej. "x_i")
+//
+// Style-dependent limit positioning (OpenType Spec §4.5, TeXbook Rule 13):
+//   MathStyle::DISPLAY:
+//     Limits centered above/below the operator.
+//     Uses a larger size variant if glyph advance ≥ DisplayOperatorMinHeight.
+//     Layout:
+//       ┌ upper ┐
+//       │  ∏    │ body
+//       └ lower ┘
+//
+//   MathStyle::TEXT / SCRIPT / SCRIPTSCRIPT:
+//     Limits as sub/superscript to the RIGHT of the operator (inline form).
+//     Layout:
+//       ∏_{lower}^{upper} body
+//     (lower=subscript, upper=superscript, both to the right)
+// ════════════════════════════════════════════════════════════════════════════
+class NodeBigOp : public MathNode {
+public:
+    NodeBigOp();
+    NodeBigOp(BigOpKind kind, NodePtr lower, NodePtr upper, NodePtr body);
+
+    void calculateLayout(const FontMetrics& fm) override;
+    MathClass mathClass() const override { return MathClass::OP; }
+
+    int       childCount()     const override { return 3; }
+    MathNode* child(int index) const override;
+
+    BigOpKind bigOpKind() const { return _kind; }
+    uint32_t  operatorCodepoint() const;  ///< Unicode codepoint for the operator glyph
+    const char* operatorUtf8() const;     ///< UTF-8 string for the operator glyph
+
+    MathNode* lower()   const { return _lower.get(); }
+    MathNode* upper()   const { return _upper.get(); }
+    MathNode* body()    const { return _body.get(); }
+
+    void setLower(NodePtr node);
+    void setUpper(NodePtr node);
+    void setBody(NodePtr node);
+
+    /// True if the operator glyph is tall enough for display-style limits (Spec §4.5).
+    bool useDisplayLimits() const { return _useDisplayLimits; }
+
+private:
+    BigOpKind _kind;
+    uint32_t  _operatorCp;        ///< Unicode codepoint for rendering
+    NodePtr   _lower;
+    NodePtr   _upper;
+    NodePtr   _body;
+    bool      _useDisplayLimits;  ///< Computed during layout
+};
+
+// ════════════════════════════════════════════════════════════════════════════
 // Factory helpers — Creación rápida de nodos
 // ════════════════════════════════════════════════════════════════════════════
 NodePtr makeRow();
@@ -848,6 +971,10 @@ NodePtr makeSubscript(NodePtr base = nullptr, NodePtr subscript = nullptr);
 /// Sumatorio con límites, cuerpo y variable opcionales
 NodePtr makeSummation(NodePtr lower = nullptr, NodePtr upper = nullptr,
                       NodePtr body = nullptr, NodePtr variable = nullptr);
+
+/// Large n-ary operator (∏, ⋂, ⋃, etc.) with style-dependent limits
+NodePtr makeBigOp(BigOpKind kind, NodePtr lower = nullptr,
+                  NodePtr upper = nullptr, NodePtr body = nullptr);
 
 // ════════════════════════════════════════════════════════════════════════════
 // Debug — Volcado legible del árbol

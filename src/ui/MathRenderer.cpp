@@ -33,6 +33,8 @@
 
 #include "MathSymbols.h"
 #include "MathTypography.h"
+#include "../math/font/stix_math_variants.h"
+#include "../math/font/MathGlyphAssembly.h"
 
 namespace vpam {
 
@@ -148,6 +150,7 @@ FontMetrics MathCanvas::metricsFromFont(const lv_font_t* font) {
     FontMetrics fm;
     fm.scriptLevel = 0;
     fm.script   = nullptr;
+    fm.emSize   = static_cast<int16_t>(font->line_height);  // Font size in px for duToPx/muToPx
 
     // ── Canonical ascent / descent from LVGL font header ────────────────
     // These are the TRUE font metrics. The math axis (ascent/2) depends on
@@ -393,41 +396,69 @@ void MathCanvas::computeCursorPosition(int16_t baseX, int16_t baseY) {
                     result = { true, x, yBaseline, fm };
                     return;
                 }
-                // Buscar dentro de los hijos del row
+                // Buscar dentro de los hijos del row (match drawRow spacing)
                 int16_t cx = x;
+                MathClass prevClass = MathClass::ORD;
+                bool hasPrev = false;
                 for (int i = 0; i < row->childCount(); ++i) {
-                    if (i > 0) cx += NodeRow::CHILD_GAP;
-                    search(row->child(i), cx, yBaseline, fm, fmSmall);
+                    MathNode* child = row->child(i);
+                    MathClass currClass = child->mathClass();
+                    if (hasPrev) {
+                        int8_t spc = getInterAtomSpace(prevClass, currClass);
+                        if (spc > 0 && spc <= 3) {
+                            cx += MathConstantsProvider::muToPx(spacingCodeToMu(spc), fm.emSize);
+                        } else if (spc < 0) {
+                            if (isDisplayOrText(fm.style)) {
+                                cx += MathConstantsProvider::muToPx(spacingCodeToMu(spc), fm.emSize);
+                            }
+                        }
+                    }
+                    search(child, cx, yBaseline, fm, fmSmall);
                     if (result.found) return;
-                    cx += row->child(i)->layout().width;
+                    cx += child->layout().width;
+                    prevClass = currClass;
+                    hasPrev = true;
                 }
             }
             else if (node->type() == NodeType::Fraction) {
                 auto* frac = static_cast<const NodeFraction*>(node);
-                const auto& fl = frac->layout();
+                const auto& fracL = frac->layout();
                 const auto& numL = frac->numerator()->layout();
                 const auto& denL = frac->denominator()->layout();
 
-                int16_t axis = fm.axisHeight();
-                int16_t barHalfUp = (NodeFraction::BAR_THICK + 1) / 2;
-                int16_t barHalfDown = NodeFraction::BAR_THICK / 2;
-                int16_t contentW = std::max(numL.width, denL.width);
+                using MCP = MathConstantsProvider;
+                bool display = fm.isDisplayStyle();
+                int16_t rulePx = MCP::duToPxMin(MCP::fractionRuleThickness(), fm.emSize, 1);
+                int16_t barHalfUp   = (rulePx + 1) / 2;
+                int16_t barHalfDown = rulePx / 2;
 
+                int16_t numShiftUp = MCP::duToPx(MCP::fractionNumeratorShiftUp(display), fm.emSize);
+                int16_t denShiftDown = MCP::duToPx(MCP::fractionDenominatorShiftDown(display), fm.emSize);
+                int16_t numGapMin = MCP::duToPx(MCP::fractionNumeratorGapMin(display), fm.emSize);
+                int16_t denGapMin = MCP::duToPx(MCP::fractionDenominatorGapMin(display), fm.emSize);
+
+                int16_t numShift = std::max(numShiftUp,
+                                            static_cast<int16_t>(numGapMin + numL.descent));
+                int16_t denShift = std::max(denShiftDown,
+                                            static_cast<int16_t>(denGapMin + denL.ascent));
+
+                int16_t ruleOverhang = MCP::muToPx(spacingCodeToMu(1), fm.emSize);
+                if (ruleOverhang < 1) ruleOverhang = 1;
+
+                int16_t axis = fm.axisHeight();
                 int16_t yAxis = static_cast<int16_t>(yBaseline - axis);
 
-                // Numerador
-                int16_t numX = static_cast<int16_t>(x + NodeFraction::BAR_H_PAD +
-                               (contentW - numL.width) / 2);
-                int16_t numY = static_cast<int16_t>(yAxis - barHalfUp -
-                               NodeFraction::BAR_V_GAP - numL.descent);
+                // Numerador: baseline = yAxis - barHalfUp - numShift
+                int16_t numX = static_cast<int16_t>(x + ruleOverhang +
+                               (fracL.width - 2 * ruleOverhang - numL.width) / 2);
+                int16_t numY = static_cast<int16_t>(yAxis - barHalfUp - numShift);
                 search(frac->numerator(), numX, numY, fm, fmSmall);
                 if (result.found) return;
 
-                // Denominador
-                int16_t denX = static_cast<int16_t>(x + NodeFraction::BAR_H_PAD +
-                               (contentW - denL.width) / 2);
-                int16_t denY = static_cast<int16_t>(yAxis + barHalfDown +
-                               NodeFraction::BAR_V_GAP + denL.ascent);
+                // Denominador: baseline = yAxis + barHalfDown + denShift
+                int16_t denX = static_cast<int16_t>(x + ruleOverhang +
+                               (fracL.width - 2 * ruleOverhang - denL.width) / 2);
+                int16_t denY = static_cast<int16_t>(yAxis + barHalfDown + denShift);
                 search(frac->denominator(), denX, denY, fm, fmSmall);
             }
             else if (node->type() == NodeType::Power) {
@@ -440,8 +471,13 @@ void MathCanvas::computeCursorPosition(int16_t baseX, int16_t baseY) {
 
                 // Exponente (fuente reducida)
                 FontMetrics fmSup = fm.superscript();
-                int32_t expShift = (static_cast<int32_t>(fm.capHeight)
-                                    * NodePower::EXP_RAISE_NUM) / NodePower::EXP_RAISE_DEN;
+                using MCP = MathConstantsProvider;
+                const auto& expL = pow->exponent()->layout();
+                int16_t supShiftUp = MCP::duToPx(MCP::superscriptShiftUp(), fm.emSize);
+                int16_t supBottomMin = MCP::duToPx(MCP::superscriptBottomMin(), fm.emSize);
+                int16_t expShift = std::max(supShiftUp,
+                                            static_cast<int16_t>(supBottomMin + expL.descent));
+                if (expShift < 1) expShift = 1;
                 int16_t expX = static_cast<int16_t>(x + baseL.width);
                 int16_t expBaseline = static_cast<int16_t>(yBaseline - expShift);
 
@@ -470,8 +506,9 @@ void MathCanvas::computeCursorPosition(int16_t baseX, int16_t baseY) {
             }
             else if (node->type() == NodeType::Paren) {
                 auto* paren = static_cast<const NodeParen*>(node);
-                int16_t contentX = static_cast<int16_t>(x + NodeParen::PAREN_W +
-                                   NodeParen::INNER_PAD);
+                int16_t pw = paren->parenWidth();
+                int16_t innerPad = std::max<int16_t>(1, pw / 3);
+                int16_t contentX = static_cast<int16_t>(x + pw + innerPad);
                 search(paren->content(), contentX, yBaseline, fm, fmSmall);
             }
             else if (node->type() == NodeType::Function) {
@@ -507,8 +544,9 @@ void MathCanvas::computeCursorPosition(int16_t baseX, int16_t baseY) {
 
                 // Base (subíndice) → fuente reducida, bajada
                 FontMetrics fmSub = fm.superscript();
-                int16_t subDrop = static_cast<int16_t>(
-                    std::max(static_cast<int>(fm.descent * NodeLogBase::SUB_DROP_NUM / NodeLogBase::SUB_DROP_DEN), 2));
+                using MCP = MathConstantsProvider;
+                int16_t subDrop = MCP::duToPx(MCP::subscriptShiftDown(), fm.emSize);
+                if (subDrop < 2) subDrop = 2;
                 int16_t baseX = static_cast<int16_t>(x + labelW);
                 int16_t baseBaseline = static_cast<int16_t>(yBaseline + subDrop);
                 search(lb->base(), baseX, baseBaseline, fmSub, fmSub.superscript());
@@ -606,11 +644,69 @@ void MathCanvas::computeCursorPosition(int16_t baseX, int16_t baseY) {
 
                 // Subscript (fuente reducida, bajada)
                 FontMetrics fmSub = fm.superscript();
-                int16_t subDrop = static_cast<int16_t>(
-                    std::max(static_cast<int>(fm.descent * NodeSubscript::SUB_DROP_NUM / NodeSubscript::SUB_DROP_DEN), 2));
+                using MCP = MathConstantsProvider;
+                int16_t subDrop = MCP::duToPx(MCP::subscriptShiftDown(), fm.emSize);
+                if (subDrop < 2) subDrop = 2;
                 int16_t subX = static_cast<int16_t>(x + baseL.width);
                 int16_t subBaseline = static_cast<int16_t>(yBaseline + subDrop);
                 search(sub->subscript(), subX, subBaseline, fmSub, fmSub.superscript());
+            }
+            else if (node->type() == NodeType::BigOp) {
+                auto* bo = static_cast<const NodeBigOp*>(node);
+                const auto& boL = bo->layout();
+                const auto& lowerL = bo->lower()->layout();
+                const auto& upperL = bo->upper()->layout();
+                const auto& bodyL  = bo->body()->layout();
+
+                FontMetrics fmLim = fm.superscript();
+                int16_t opW = DelimiterAssembler::glyphWidthPx(bo->operatorCodepoint(), fm.emSize);
+                if (opW < 6) opW = 14;
+
+                using MCP2 = MathConstantsProvider;
+                int16_t limitGapPx = MCP2::duToPx(MCP2::upperLimitGapMin(), fm.emSize);
+                int16_t bodyGapX = MCP2::muToPx(3, fm.emSize);
+                if (bodyGapX < 1) bodyGapX = 1;
+
+                if (bo->useDisplayLimits()) {
+                    // DISPLAY: limits above/below
+                    int16_t symColW = std::max({opW, lowerL.width, upperL.width});
+
+                    int16_t upperX = static_cast<int16_t>(x + (symColW - upperL.width) / 2);
+                    int16_t upperBaseline = static_cast<int16_t>(yBaseline - fm.ascent - limitGapPx - upperL.descent);
+                    search(bo->upper(), upperX, upperBaseline, fmLim, fmLim.superscript());
+                    if (result.found) return;
+
+                    int16_t lowerX = static_cast<int16_t>(x + (symColW - lowerL.width) / 2);
+                    int16_t lowerBaseline = static_cast<int16_t>(yBaseline + fm.descent + limitGapPx + lowerL.ascent);
+                    search(bo->lower(), lowerX, lowerBaseline, fmLim, fmLim.superscript());
+                    if (result.found) return;
+
+                    int16_t bodyX = static_cast<int16_t>(x + symColW + bodyGapX);
+                    search(bo->body(), bodyX, yBaseline, fm, fmSmall);
+                } else {
+                    // TEXT/SCRIPT: limits as sub/superscript to the right
+                    using MCP3 = MathConstantsProvider;
+                    int16_t supShift = MCP3::duToPx(MCP3::superscriptShiftUp(), fm.emSize);
+                    int16_t subDrop  = MCP3::duToPx(MCP3::subscriptShiftDown(), fm.emSize);
+                    if (subDrop < 2) subDrop = 2;
+                    if (supShift < 1) supShift = 1;
+
+                    int16_t limitsX = static_cast<int16_t>(x + opW);
+                    int16_t upperY = static_cast<int16_t>(yBaseline - supShift);
+                    int16_t lowerY = static_cast<int16_t>(yBaseline + subDrop);
+
+                    int16_t limitsW = std::max(upperL.width, lowerL.width);
+                    int16_t upperLimitX = static_cast<int16_t>(limitsX + (limitsW - upperL.width) / 2);
+                    int16_t lowerLimitX = static_cast<int16_t>(limitsX + (limitsW - lowerL.width) / 2);
+
+                    search(bo->upper(), upperLimitX, upperY, fmLim, fmLim.superscript());
+                    if (result.found) return;
+                    search(bo->lower(), lowerLimitX, lowerY, fmLim, fmLim.superscript());
+                    if (result.found) return;
+
+                    int16_t bodyX = static_cast<int16_t>(limitsX + limitsW + bodyGapX);
+                    search(bo->body(), bodyX, yBaseline, fm, fmSmall);
+                }
             }
         }
     };
@@ -639,13 +735,36 @@ int16_t MathCanvas::childXOffset(const NodeRow* row, int index,
                                   const FontMetrics& fm) const {
     int16_t offset = 0;
     int count = std::min(index, row->childCount());
+    MathClass prevClass = MathClass::ORD;
+    bool hasPrev = false;
     for (int i = 0; i < count; ++i) {
-        if (i > 0) offset += NodeRow::CHILD_GAP;
-        offset += row->child(i)->layout().width;
+        MathNode* child = row->child(i);
+        MathClass currClass = child->mathClass();
+        if (hasPrev) {
+            int8_t spc = getInterAtomSpace(prevClass, currClass);
+            if (spc > 0 && spc <= 3) {
+                offset += MathConstantsProvider::muToPx(spacingCodeToMu(spc), fm.emSize);
+            } else if (spc < 0) {
+                if (isDisplayOrText(fm.style)) {
+                    offset += MathConstantsProvider::muToPx(spacingCodeToMu(spc), fm.emSize);
+                }
+            }
+        }
+        offset += child->layout().width;
+        prevClass = currClass;
+        hasPrev = true;
     }
     // Añadir gap antes del cursor si no está al inicio y hay más nodos
     if (count > 0 && count < row->childCount()) {
-        offset += NodeRow::CHILD_GAP;
+        MathNode* nextChild = row->child(count);
+        int8_t spc = getInterAtomSpace(prevClass, nextChild->mathClass());
+        if (spc > 0 && spc <= 3) {
+            offset += MathConstantsProvider::muToPx(spacingCodeToMu(spc), fm.emSize);
+        } else if (spc < 0) {
+            if (isDisplayOrText(fm.style)) {
+                offset += MathConstantsProvider::muToPx(spacingCodeToMu(spc), fm.emSize);
+            }
+        }
     }
     return offset;
 }
@@ -737,6 +856,10 @@ void MathCanvas::drawNode(lv_layer_t* layer, const MathNode* node,
             drawSubscript(layer, static_cast<const NodeSubscript*>(node),
                           x, yBaseline, fm, font, depth);
             break;
+        case NodeType::BigOp:
+            drawBigOp(layer, static_cast<const NodeBigOp*>(node),
+                      x, yBaseline, fm, font, depth);
+            break;
     }
 
     // ── Smart Highlighter: restore state after drawing the sub-tree ──
@@ -756,10 +879,29 @@ void MathCanvas::drawRow(lv_layer_t* layer, const NodeRow* row,
     if (_highlightNode && row == _highlightNode) _highlightActive = true;
 
     int16_t cx = x;
+    MathClass prevClass = MathClass::ORD;
+    bool hasPrev = false;
+
     for (int i = 0; i < row->childCount(); ++i) {
-        if (i > 0) cx += NodeRow::CHILD_GAP;
-        drawNode(layer, row->child(i), cx, yBaseline, fm, font, depth + 1);
-        cx += row->child(i)->layout().width;
+        MathNode* child = row->child(i);
+        MathClass currClass = child->mathClass();
+
+        // ── TeX Inter-Atom Spacing (match layout in NodeRow::calculateLayout) ──
+        if (hasPrev) {
+            int8_t spc = getInterAtomSpace(prevClass, currClass);
+            if (spc > 0 && spc <= 3) {
+                cx += MathConstantsProvider::muToPx(spacingCodeToMu(spc), fm.emSize);
+            } else if (spc < 0) {
+                if (isDisplayOrText(fm.style)) {
+                    cx += MathConstantsProvider::muToPx(spacingCodeToMu(spc), fm.emSize);
+                }
+            }
+        }
+
+        drawNode(layer, child, cx, yBaseline, fm, font, depth + 1);
+        cx += child->layout().width;
+        prevClass = currClass;
+        hasPrev = true;
     }
 
     // ── Smart Highlighter: restore state ──
@@ -866,32 +1008,45 @@ void MathCanvas::drawFraction(lv_layer_t* layer, const NodeFraction* node,
     const auto& numL  = node->numerator()->layout();
     const auto& denL  = node->denominator()->layout();
 
-    int16_t axis       = fm.axisHeight();
-    int16_t barHalfUp  = (NodeFraction::BAR_THICK + 1) / 2;
-    int16_t barHalfDown = NodeFraction::BAR_THICK / 2;
-    int16_t contentW   = std::max(numL.width, denL.width);
+    using MCP = MathConstantsProvider;
+    bool display = fm.isDisplayStyle();
 
+    int16_t rulePx = MCP::duToPxMin(MCP::fractionRuleThickness(), fm.emSize, 1);
+    int16_t barHalfUp   = (rulePx + 1) / 2;
+    int16_t barHalfDown = rulePx / 2;
+
+    int16_t numShiftUp = MCP::duToPx(MCP::fractionNumeratorShiftUp(display), fm.emSize);
+    int16_t denShiftDown = MCP::duToPx(MCP::fractionDenominatorShiftDown(display), fm.emSize);
+    int16_t numGapMin = MCP::duToPx(MCP::fractionNumeratorGapMin(display), fm.emSize);
+    int16_t denGapMin = MCP::duToPx(MCP::fractionDenominatorGapMin(display), fm.emSize);
+
+    int16_t numShift = std::max(numShiftUp,
+                                static_cast<int16_t>(numGapMin + numL.descent));
+    int16_t denShift = std::max(denShiftDown,
+                                static_cast<int16_t>(denGapMin + denL.ascent));
+
+    int16_t ruleOverhang = MCP::muToPx(spacingCodeToMu(1), fm.emSize);
+    if (ruleOverhang < 1) ruleOverhang = 1;
+
+    int16_t axis  = fm.axisHeight();
     int16_t yAxis = static_cast<int16_t>(yBaseline - axis);
 
     // ── Barra de fracción ──
-    int16_t barX1 = x;
-    int16_t barX2 = static_cast<int16_t>(x + fracL.width - 1);
-    drawLine(layer, barX1, yAxis, barX2, yAxis,
-             NodeFraction::BAR_THICK,
+    int16_t barX1 = static_cast<int16_t>(x + ruleOverhang);
+    int16_t barX2 = static_cast<int16_t>(x + fracL.width - ruleOverhang - 1);
+    drawLine(layer, barX1, yAxis, barX2, yAxis, rulePx,
              _highlightActive ? _highlightColor : lv_color_black());
 
-    // ── Numerador (centrado sobre la barra) ──
-    int16_t numX = static_cast<int16_t>(x + NodeFraction::BAR_H_PAD +
-                   (contentW - numL.width) / 2);
-    int16_t numBaseline = static_cast<int16_t>(yAxis - barHalfUp -
-                          NodeFraction::BAR_V_GAP - numL.descent);
+    // ── Numerador: baseline = yAxis - barHalfUp - numShift ──
+    int16_t numX = static_cast<int16_t>(x + ruleOverhang +
+                   (fracL.width - 2 * ruleOverhang - numL.width) / 2);
+    int16_t numBaseline = static_cast<int16_t>(yAxis - barHalfUp - numShift);
     drawNode(layer, node->numerator(), numX, numBaseline, fm, font, depth + 1);
 
-    // ── Denominador (centrado bajo la barra) ──
-    int16_t denX = static_cast<int16_t>(x + NodeFraction::BAR_H_PAD +
-                   (contentW - denL.width) / 2);
-    int16_t denBaseline = static_cast<int16_t>(yAxis + barHalfDown +
-                          NodeFraction::BAR_V_GAP + denL.ascent);
+    // ── Denominador: baseline = yAxis + barHalfDown + denShift ──
+    int16_t denX = static_cast<int16_t>(x + ruleOverhang +
+                   (fracL.width - 2 * ruleOverhang - denL.width) / 2);
+    int16_t denBaseline = static_cast<int16_t>(yAxis + barHalfDown + denShift);
     drawNode(layer, node->denominator(), denX, denBaseline, fm, font, depth + 1);
 }
 
@@ -914,10 +1069,15 @@ void MathCanvas::drawPower(lv_layer_t* layer, const NodePower* node,
 
     // ── Exponente (fuente reducida, elevado) ──
     FontMetrics fmSup = fm.superscript();
-    int32_t expShift = (static_cast<int32_t>(fm.capHeight)
-                        * NodePower::EXP_RAISE_NUM) / NodePower::EXP_RAISE_DEN;
+    using MCP = MathConstantsProvider;
+    int16_t supShiftUp = MCP::duToPx(MCP::superscriptShiftUp(), fm.emSize);
+    int16_t supBottomMin = MCP::duToPx(MCP::superscriptBottomMin(), fm.emSize);
+    const auto& expL = node->exponent()->layout();
+    int16_t expShift = std::max(supShiftUp,
+                                static_cast<int16_t>(supBottomMin + expL.descent));
+    if (expShift < 1) expShift = 1;
 
-    // El baseline del exponente: el fondo del exp está a expShift sobre el baseline
+    // El baseline del exponente está a expShift sobre el baseline de la base
     int16_t expBaseline = static_cast<int16_t>(yBaseline - expShift);
 
     int16_t expX = static_cast<int16_t>(x + baseL.width);
@@ -994,6 +1154,9 @@ void MathCanvas::drawParen(lv_layer_t* layer, const NodeParen* node,
                            const FontMetrics& fm, const lv_font_t* font,
                            int depth) {
     const auto& parenL = node->layout();
+    int16_t pw = node->parenWidth();
+    // Inner padding: optical breathing room proportional to paren width
+    int16_t innerPad = std::max<int16_t>(1, pw / 3);
 
     int16_t yTop    = static_cast<int16_t>(yBaseline - parenL.ascent);
     int16_t yBottom = static_cast<int16_t>(yBaseline + parenL.descent);
@@ -1003,11 +1166,11 @@ void MathCanvas::drawParen(lv_layer_t* layer, const NodeParen* node,
     drawAssembledDelimiter(layer, x, yTop, yBottom, true, parenColor, font);
 
     // ── Content ──
-    int16_t contentX = static_cast<int16_t>(x + NodeParen::PAREN_W + NodeParen::INNER_PAD);
+    int16_t contentX = static_cast<int16_t>(x + pw + innerPad);
     drawNode(layer, node->content(), contentX, yBaseline, fm, font, depth + 1);
 
     // ── Right assembled delimiter ──
-    int16_t rpX = static_cast<int16_t>(x + parenL.width - NodeParen::PAREN_W);
+    int16_t rpX = static_cast<int16_t>(x + parenL.width - pw);
     drawAssembledDelimiter(layer, rpX, yTop, yBottom, false, parenColor, font);
 }
 
@@ -1089,8 +1252,9 @@ void MathCanvas::drawLogBase(lv_layer_t* layer, const NodeLogBase* node,
 
     // ── Base / subíndice (fuente reducida, bajada) ──
     FontMetrics fmSub = fm.superscript();
-    int16_t subDrop = static_cast<int16_t>(
-        std::max(static_cast<int>(fm.descent * NodeLogBase::SUB_DROP_NUM / NodeLogBase::SUB_DROP_DEN), 2));
+    using MCP = MathConstantsProvider;
+    int16_t subDrop = MCP::duToPx(MCP::subscriptShiftDown(), fm.emSize);
+    if (subDrop < 2) subDrop = 2;
     int16_t baseX = static_cast<int16_t>(x + labelW);
     int16_t baseBaseline = static_cast<int16_t>(yBaseline + subDrop);
     drawNode(layer, node->base(), baseX, baseBaseline, fmSub, _fontSmall, depth + 1);
@@ -1297,38 +1461,90 @@ void MathCanvas::drawDefIntegral(lv_layer_t* layer, const NodeDefIntegral* node,
     const auto& varL   = node->variable()->layout();
 
     FontMetrics fmLimit = fm.superscript();
-    int16_t symColW = std::max({NodeDefIntegral::SYMBOL_W, lowerL.width, upperL.width});
 
-    int16_t bodyAscent  = std::max(bodyL.ascent, fm.ascent);
-    int16_t bodyDescent = std::max(bodyL.descent, fm.descent);
+    // ── Integral symbol width from variant table ──
+    int16_t symW = DelimiterAssembler::glyphWidthPx(0x222B, fm.emSize);
+    if (symW < 6) symW = NodeDefIntegral::SYMBOL_W;
 
-    // ── Draw ∫ symbol using the vectorial helper ──
-    int16_t symCenterX = static_cast<int16_t>(x + symColW / 2);
-    int16_t symTop     = static_cast<int16_t>(yBaseline - bodyAscent - NodeDefIntegral::SYMBOL_H_PAD);
-    int16_t symBot     = static_cast<int16_t>(yBaseline + bodyDescent + NodeDefIntegral::SYMBOL_H_PAD);
-    int16_t halfW      = static_cast<int16_t>(NodeDefIntegral::SYMBOL_W / 3);
+    using MCP = MathConstantsProvider;
+    int16_t limitGapPx = MCP::duToPx(MCP::upperLimitGapMin(), fm.emSize);
+    int16_t bodyGapX = MCP::muToPx(3, fm.emSize);
+    if (bodyGapX < 1) bodyGapX = 1;
 
-    drawIntegralSymbol(layer, symCenterX, symTop, symBot, halfW, lv_color_black());
+    if (fm.isDisplayStyle()) {
+        // ── DISPLAY: limits above/below the integral sign ──
+        int16_t symColW = std::max({symW, lowerL.width, upperL.width});
+        int16_t symCenterX = static_cast<int16_t>(x + symColW / 2);
+        int16_t bodyAscent  = std::max(bodyL.ascent, fm.ascent);
+        int16_t bodyDescent = std::max(bodyL.descent, fm.descent);
+        int16_t symTop = static_cast<int16_t>(yBaseline - bodyAscent - NodeDefIntegral::SYMBOL_H_PAD);
+        int16_t symBot = static_cast<int16_t>(yBaseline + bodyDescent + NodeDefIntegral::SYMBOL_H_PAD);
+        int16_t halfW = static_cast<int16_t>(NodeDefIntegral::SYMBOL_W / 3);
 
-    // ── Upper limit (centered above symbol) ──
-    int16_t upperX = static_cast<int16_t>(x + (symColW - upperL.width) / 2);
-    int16_t upperY = static_cast<int16_t>(symTop - NodeDefIntegral::LIMIT_GAP - upperL.descent);
-    drawNode(layer, node->upper(), upperX, upperY, fmLimit, _fontSmall, depth + 1);
+        drawIntegralSymbol(layer, symCenterX, symTop, symBot, halfW,
+                           _highlightActive ? _highlightColor : lv_color_black());
 
-    // ── Lower limit (centered below symbol) ──
-    int16_t lowerX = static_cast<int16_t>(x + (symColW - lowerL.width) / 2);
-    int16_t lowerY = static_cast<int16_t>(symBot + NodeDefIntegral::LIMIT_GAP + lowerL.ascent);
-    drawNode(layer, node->lower(), lowerX, lowerY, fmLimit, _fontSmall, depth + 1);
+        // Upper limit (centered above symbol)
+        int16_t upperX = static_cast<int16_t>(x + (symColW - upperL.width) / 2);
+        int16_t upperY = static_cast<int16_t>(symTop - limitGapPx - upperL.descent);
+        drawNode(layer, node->upper(), upperX, upperY, fmLimit, _fontSmall, depth + 1);
 
-    // ── Body expression (right of symbol) ──
-    int16_t bodyX = static_cast<int16_t>(x + symColW + NodeDefIntegral::BODY_GAP);
-    drawNode(layer, node->body(), bodyX, yBaseline, fm, font, depth + 1);
+        // Lower limit (centered below symbol)
+        int16_t lowerX = static_cast<int16_t>(x + (symColW - lowerL.width) / 2);
+        int16_t lowerY = static_cast<int16_t>(symBot + limitGapPx + lowerL.ascent);
+        drawNode(layer, node->lower(), lowerX, lowerY, fmLimit, _fontSmall, depth + 1);
 
-    // ── "d" + variable (e.g. "dx") ──
-    int16_t dX = static_cast<int16_t>(bodyX + bodyL.width + NodeDefIntegral::D_GAP);
-    drawText(layer, dX, yBaseline, "d", node->scriptLevel(), lv_color_hex(0x333333));
-    int16_t varX = static_cast<int16_t>(dX + fm.charWidth + NodeDefIntegral::D_GAP);
-    drawNode(layer, node->variable(), varX, yBaseline, fm, font, depth + 1);
+        // Body
+        int16_t bodyX = static_cast<int16_t>(x + symColW + bodyGapX);
+        drawNode(layer, node->body(), bodyX, yBaseline, fm, font, depth + 1);
+
+        // "d" + variable
+        int16_t dX = static_cast<int16_t>(bodyX + bodyL.width + NodeDefIntegral::D_GAP);
+        drawText(layer, dX, yBaseline, "d", node->scriptLevel(), lv_color_hex(0x333333));
+        int16_t varX = static_cast<int16_t>(dX + fm.charWidth + NodeDefIntegral::D_GAP);
+        drawNode(layer, node->variable(), varX, yBaseline, fm, font, depth + 1);
+    } else {
+        // ── TEXT / SCRIPT: limits as sub/superscript to the right ──
+        // Draw integral symbol
+        int16_t symCenterX = static_cast<int16_t>(x + symW / 2);
+        int16_t symTop = static_cast<int16_t>(yBaseline - fm.ascent);
+        int16_t symBot = static_cast<int16_t>(yBaseline + fm.descent);
+        int16_t halfW = static_cast<int16_t>(symW / 3);
+
+        drawIntegralSymbol(layer, symCenterX, symTop, symBot, halfW,
+                           _highlightActive ? _highlightColor : lv_color_black());
+
+        // Limits as sub/superscript to the right of the symbol
+        using MCP2 = MathConstantsProvider;
+        int16_t supShift = MCP2::duToPx(MCP2::superscriptShiftUp(), fm.emSize);
+        int16_t subDrop  = MCP2::duToPx(MCP2::subscriptShiftDown(), fm.emSize);
+        if (subDrop < 2) subDrop = 2;
+        if (supShift < 1) supShift = 1;
+
+        int16_t limitsX = static_cast<int16_t>(x + symW);
+        // Upper limit as superscript (above baseline)
+        int16_t upperY = static_cast<int16_t>(yBaseline - supShift);
+        // Lower limit as subscript (below baseline)
+        int16_t lowerY = static_cast<int16_t>(yBaseline + subDrop);
+
+        // Draw both limits at the same x offset, upper above, lower below
+        int16_t limitsW = std::max(upperL.width, lowerL.width);
+        int16_t upperLimitX = static_cast<int16_t>(limitsX + (limitsW - upperL.width) / 2);
+        int16_t lowerLimitX = static_cast<int16_t>(limitsX + (limitsW - lowerL.width) / 2);
+
+        drawNode(layer, node->upper(), upperLimitX, upperY, fmLimit, _fontSmall, depth + 1);
+        drawNode(layer, node->lower(), lowerLimitX, lowerY, fmLimit, _fontSmall, depth + 1);
+
+        // Body expression
+        int16_t bodyX = static_cast<int16_t>(limitsX + limitsW + bodyGapX);
+        drawNode(layer, node->body(), bodyX, yBaseline, fm, font, depth + 1);
+
+        // "d" + variable
+        int16_t dX = static_cast<int16_t>(bodyX + bodyL.width + NodeDefIntegral::D_GAP);
+        drawText(layer, dX, yBaseline, "d", node->scriptLevel(), lv_color_hex(0x333333));
+        int16_t varX = static_cast<int16_t>(dX + fm.charWidth + NodeDefIntegral::D_GAP);
+        drawNode(layer, node->variable(), varX, yBaseline, fm, font, depth + 1);
+    }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1352,32 +1568,161 @@ void MathCanvas::drawSummation(lv_layer_t* layer, const NodeSummation* node,
     const auto& bodyL  = node->body()->layout();
 
     FontMetrics fmLimit = fm.superscript();
-    int16_t symColW = std::max({NodeSummation::SYMBOL_W, lowerL.width, upperL.width});
 
-    int16_t bodyAscent  = std::max(bodyL.ascent, fm.ascent);
-    int16_t bodyDescent = std::max(bodyL.descent, fm.descent);
+    // ── Summation symbol width from variant table ──
+    int16_t symW = DelimiterAssembler::glyphWidthPx(0x2211, fm.emSize);
+    if (symW < 6) symW = NodeSummation::SYMBOL_W;
 
-    // ── Draw ∑ symbol using the vectorial helper ──
-    int16_t symLeft  = static_cast<int16_t>(x + (symColW - NodeSummation::SYMBOL_W) / 2);
-    int16_t symRight = static_cast<int16_t>(symLeft + NodeSummation::SYMBOL_W);
-    int16_t symTop   = static_cast<int16_t>(yBaseline - bodyAscent - NodeSummation::SYMBOL_H_PAD);
-    int16_t symBot   = static_cast<int16_t>(yBaseline + bodyDescent + NodeSummation::SYMBOL_H_PAD);
+    using MCP = MathConstantsProvider;
+    int16_t limitGapPx = MCP::duToPx(MCP::upperLimitGapMin(), fm.emSize);
+    int16_t bodyGapX = MCP::muToPx(3, fm.emSize);
+    if (bodyGapX < 1) bodyGapX = 1;
 
-    drawSummationSymbol(layer, symLeft, symRight, symTop, symBot, lv_color_black());
+    if (fm.isDisplayStyle()) {
+        // ── DISPLAY: limits centered above/below the ∑ symbol ──
+        int16_t symColW = std::max({symW, lowerL.width, upperL.width});
+        int16_t bodyAscent  = std::max(bodyL.ascent, fm.ascent);
+        int16_t bodyDescent = std::max(bodyL.descent, fm.descent);
 
-    // ── Upper limit (centered above symbol) ──
-    int16_t upperX = static_cast<int16_t>(x + (symColW - upperL.width) / 2);
-    int16_t upperY = static_cast<int16_t>(symTop - NodeSummation::LIMIT_GAP - upperL.descent);
-    drawNode(layer, node->upper(), upperX, upperY, fmLimit, _fontSmall, depth + 1);
+        int16_t symLeft  = static_cast<int16_t>(x + (symColW - symW) / 2);
+        int16_t symRight = static_cast<int16_t>(symLeft + symW);
+        int16_t symTop   = static_cast<int16_t>(yBaseline - bodyAscent - NodeSummation::SYMBOL_H_PAD);
+        int16_t symBot   = static_cast<int16_t>(yBaseline + bodyDescent + NodeSummation::SYMBOL_H_PAD);
 
-    // ── Lower limit (centered below symbol) ──
-    int16_t lowerX = static_cast<int16_t>(x + (symColW - lowerL.width) / 2);
-    int16_t lowerY = static_cast<int16_t>(symBot + NodeSummation::LIMIT_GAP + lowerL.ascent);
-    drawNode(layer, node->lower(), lowerX, lowerY, fmLimit, _fontSmall, depth + 1);
+        drawSummationSymbol(layer, symLeft, symRight, symTop, symBot,
+                            _highlightActive ? _highlightColor : lv_color_black());
 
-    // ── Body expression (right of symbol) ──
-    int16_t bodyX = static_cast<int16_t>(x + symColW + NodeSummation::BODY_GAP);
-    drawNode(layer, node->body(), bodyX, yBaseline, fm, font, depth + 1);
+        // Upper limit
+        int16_t upperX = static_cast<int16_t>(x + (symColW - upperL.width) / 2);
+        int16_t upperY = static_cast<int16_t>(symTop - limitGapPx - upperL.descent);
+        drawNode(layer, node->upper(), upperX, upperY, fmLimit, _fontSmall, depth + 1);
+
+        // Lower limit
+        int16_t lowerX = static_cast<int16_t>(x + (symColW - lowerL.width) / 2);
+        int16_t lowerY = static_cast<int16_t>(symBot + limitGapPx + lowerL.ascent);
+        drawNode(layer, node->lower(), lowerX, lowerY, fmLimit, _fontSmall, depth + 1);
+
+        // Body
+        int16_t bodyX = static_cast<int16_t>(x + symColW + bodyGapX);
+        drawNode(layer, node->body(), bodyX, yBaseline, fm, font, depth + 1);
+    } else {
+        // ── TEXT / SCRIPT: limits as sub/superscript to the right ──
+        // Draw ∑ symbol at its natural position
+        int16_t symLeft  = x;
+        int16_t symRight = static_cast<int16_t>(x + symW);
+        int16_t symTop = static_cast<int16_t>(yBaseline - fm.ascent);
+        int16_t symBot = static_cast<int16_t>(yBaseline + fm.descent);
+
+        drawSummationSymbol(layer, symLeft, symRight, symTop, symBot,
+                            _highlightActive ? _highlightColor : lv_color_black());
+
+        // Limits as sub/superscript to the right
+        using MCP2 = MathConstantsProvider;
+        int16_t supShift = MCP2::duToPx(MCP2::superscriptShiftUp(), fm.emSize);
+        int16_t subDrop  = MCP2::duToPx(MCP2::subscriptShiftDown(), fm.emSize);
+        if (subDrop < 2) subDrop = 2;
+        if (supShift < 1) supShift = 1;
+
+        int16_t limitsX = static_cast<int16_t>(x + symW);
+        int16_t upperY = static_cast<int16_t>(yBaseline - supShift);
+        int16_t lowerY = static_cast<int16_t>(yBaseline + subDrop);
+
+        int16_t limitsW = std::max(upperL.width, lowerL.width);
+        int16_t upperLimitX = static_cast<int16_t>(limitsX + (limitsW - upperL.width) / 2);
+        int16_t lowerLimitX = static_cast<int16_t>(limitsX + (limitsW - lowerL.width) / 2);
+
+        drawNode(layer, node->upper(), upperLimitX, upperY, fmLimit, _fontSmall, depth + 1);
+        drawNode(layer, node->lower(), lowerLimitX, lowerY, fmLimit, _fontSmall, depth + 1);
+
+        // Body
+        int16_t bodyX = static_cast<int16_t>(limitsX + limitsW + bodyGapX);
+        drawNode(layer, node->body(), bodyX, yBaseline, fm, font, depth + 1);
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// drawBigOp — Generic large n-ary operator: ∏, ⋂, ⋃, ⋀, ⋁
+//
+// Style-dependent rendering:
+//   DISPLAY: operator centered, limits above/below, body to the right
+//   TEXT:    operator at normal size, limits as sub/superscript to the right
+// ════════════════════════════════════════════════════════════════════════════
+
+void MathCanvas::drawBigOp(lv_layer_t* layer, const NodeBigOp* node,
+                           int16_t x, int16_t yBaseline,
+                           const FontMetrics& fm, const lv_font_t* font,
+                           int depth) {
+    const auto& boL    = node->layout();
+    const auto& lowerL = node->lower()->layout();
+    const auto& upperL = node->upper()->layout();
+    const auto& bodyL  = node->body()->layout();
+
+    FontMetrics fmLimit = fm.superscript();
+
+    // ── Operator width from variant table ──
+    int16_t opW = DelimiterAssembler::glyphWidthPx(node->operatorCodepoint(), fm.emSize);
+    if (opW < 6) opW = 14;
+
+    using MCP = MathConstantsProvider;
+    int16_t limitGapPx = MCP::duToPx(MCP::upperLimitGapMin(), fm.emSize);
+    int16_t bodyGapX = MCP::muToPx(3, fm.emSize);
+    if (bodyGapX < 1) bodyGapX = 1;
+
+    lv_color_t opColor = _highlightActive ? _highlightColor : lv_color_black();
+
+    if (node->useDisplayLimits()) {
+        // ── DISPLAY: limits above/below operator ──
+        int16_t symColW = std::max({opW, lowerL.width, upperL.width});
+
+        // Operator glyph centered in its column, on the baseline
+        int16_t opCenterX = static_cast<int16_t>(x + symColW / 2);
+        int16_t opDrawX = static_cast<int16_t>(opCenterX - opW / 2);
+
+        // Draw operator as text at baseline
+        drawText(layer, opDrawX, yBaseline, node->operatorUtf8(),
+                 node->scriptLevel(), opColor);
+
+        // Upper limit centered above operator
+        int16_t upperX = static_cast<int16_t>(x + (symColW - upperL.width) / 2);
+        int16_t upperBaseline = static_cast<int16_t>(yBaseline - fm.ascent - limitGapPx - upperL.descent);
+        drawNode(layer, node->upper(), upperX, upperBaseline, fmLimit, _fontSmall, depth + 1);
+
+        // Lower limit centered below operator
+        int16_t lowerX = static_cast<int16_t>(x + (symColW - lowerL.width) / 2);
+        int16_t lowerBaseline = static_cast<int16_t>(yBaseline + fm.descent + limitGapPx + lowerL.ascent);
+        drawNode(layer, node->lower(), lowerX, lowerBaseline, fmLimit, _fontSmall, depth + 1);
+
+        // Body expression
+        int16_t bodyX = static_cast<int16_t>(x + symColW + bodyGapX);
+        drawNode(layer, node->body(), bodyX, yBaseline, fm, font, depth + 1);
+    } else {
+        // ── TEXT / SCRIPT: limits as sub/superscript to the right ──
+        // Draw operator glyph at baseline
+        drawText(layer, x, yBaseline, node->operatorUtf8(),
+                 node->scriptLevel(), opColor);
+
+        using MCP2 = MathConstantsProvider;
+        int16_t supShift = MCP2::duToPx(MCP2::superscriptShiftUp(), fm.emSize);
+        int16_t subDrop  = MCP2::duToPx(MCP2::subscriptShiftDown(), fm.emSize);
+        if (subDrop < 2) subDrop = 2;
+        if (supShift < 1) supShift = 1;
+
+        // Limits to the right of the operator
+        int16_t limitsX = static_cast<int16_t>(x + opW);
+        int16_t upperY = static_cast<int16_t>(yBaseline - supShift);
+        int16_t lowerY = static_cast<int16_t>(yBaseline + subDrop);
+
+        int16_t limitsW = std::max(upperL.width, lowerL.width);
+        int16_t upperLimitX = static_cast<int16_t>(limitsX + (limitsW - upperL.width) / 2);
+        int16_t lowerLimitX = static_cast<int16_t>(limitsX + (limitsW - lowerL.width) / 2);
+
+        drawNode(layer, node->upper(), upperLimitX, upperY, fmLimit, _fontSmall, depth + 1);
+        drawNode(layer, node->lower(), lowerLimitX, lowerY, fmLimit, _fontSmall, depth + 1);
+
+        // Body expression
+        int16_t bodyX = static_cast<int16_t>(limitsX + limitsW + bodyGapX);
+        drawNode(layer, node->body(), bodyX, yBaseline, fm, font, depth + 1);
+    }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1486,9 +1831,9 @@ void MathCanvas::drawSubscript(lv_layer_t* layer, const NodeSubscript* node,
 
     // ── Subíndice (fuente reducida, bajada) ──
     FontMetrics fmSub = fm.superscript();
-    int16_t subDrop = static_cast<int16_t>(
-        std::max(static_cast<int>(fm.descent * NodeSubscript::SUB_DROP_NUM
-                                  / NodeSubscript::SUB_DROP_DEN), 2));
+    using MCP = MathConstantsProvider;
+    int16_t subDrop = MCP::duToPx(MCP::subscriptShiftDown(), fm.emSize);
+    if (subDrop < 2) subDrop = 2;
     int16_t subX = static_cast<int16_t>(x + baseL.width);
     int16_t subBaseline = static_cast<int16_t>(yBaseline + subDrop);
     drawNode(layer, node->subscript(), subX, subBaseline, fmSub, _fontSmall, depth + 1);
