@@ -1,0 +1,145 @@
+name: Build Emulator (native)
+
+# Additive, non-release CI for the SDL2 desktop emulator.
+#
+# This is SEPARATE from compile-and-release.yml (firmware) on purpose:
+#   * it never creates a release / artifact spam;
+#   * it cannot affect the firmware build or release job;
+#   * a failure here is portability SIGNAL, not a firmware regression.
+#
+# It is also the mechanism that actually PROVES the Linux native build, which has
+# not yet been run on the author's (Windows-only) machine. See
+# docs/emulator-sdl2-quickstart.md.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'platformio.ini'
+      - 'scripts/sdl2_env.py'
+      - '.github/workflows/emulator-build.yml'
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'platformio.ini'
+      - 'scripts/sdl2_env.py'
+      - '.github/workflows/emulator-build.yml'
+  workflow_dispatch:
+
+jobs:
+  emulator-linux:
+    name: Linux emulator (Ubuntu + system SDL2)
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') && !contains(github.event.head_commit.message, '[no build]') }}
+    runs-on: ubuntu-latest
+
+    # Use the portable default build dir instead of the repo's Windows-only
+    # build_dir = C:/.piobuild/numOS. No sed hack required.
+    env:
+      PLATFORMIO_BUILD_DIR: .pio/build
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system SDL2
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev
+          pkg-config --modversion sdl2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install -U platformio
+
+      - name: Diagnose dependencies
+        run: python scripts/check-emulator-deps.py
+
+      - name: Build emulator (emulator_pc)
+        run: pio run -e emulator_pc
+
+      - name: Upload Linux emulator binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: numos-emulator-linux
+          path: .pio/build/emulator_pc/program
+          if-no-files-found: error
+
+      # ---------------------------------------------------------------------
+      # Headless launch smoke (Phase 3A).
+      #
+      # Proves the binary actually BOOTS — not just that it links. The emulator
+      # has an in-process auto-exit (--run-for-ms) so it terminates on its own;
+      # `timeout` is a belt-and-suspenders guard so a regression that hangs can
+      # never stall CI. SDL_VIDEODRIVER=dummy lets SDL open a window with no
+      # display (libSDL2 ships the dummy driver); the --headless flag also sets
+      # it in-process. We assert the boot reached the MainMenu, so an early
+      # crash or a frozen splash fails the job.
+      #
+      # Verified equivalent locally on Windows: `--headless --run-for-ms` prints
+      # `[MENU] Launcher cargado` then `[SIM] Bye!` and exits 0 under the
+      # software renderer. If the GitHub runner's dummy driver ever proves
+      # flaky, downgrade this step to `continue-on-error: true` (portability
+      # signal only) rather than removing it.
+      - name: Smoke-test emulator (headless, auto-exit)
+        run: |
+          set -euo pipefail
+          BIN=.pio/build/emulator_pc/program
+          echo "Launch: $BIN --headless --run-for-ms 5000 --quiet"
+          SDL_VIDEODRIVER=dummy timeout 30s "$BIN" \
+            --headless --run-for-ms 5000 --quiet | tee emu-smoke.log
+          echo "--- asserting boot reached the launcher ---"
+          grep -q "Launcher cargado" emu-smoke.log
+          echo "OK: emulator booted to MainMenu and exited cleanly."
+
+      - name: Upload smoke log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: numos-emulator-smoke-log
+          path: emu-smoke.log
+          if-no-files-found: ignore
+
+      # ---------------------------------------------------------------------
+      # Deterministic headless smoke + screenshot (Phase 3B).
+      #
+      # Additive to the Phase 3A wall-clock smoke above (kept as-is). Here we run
+      # a FIXED number of frames with the synthetic tick (--deterministic), so the
+      # visual state is a function of the frame index, not host timing. The run
+      # dumps the final 320x240 logical framebuffer to a PPM (P6) — a no-dependency
+      # format written straight from the CPU buffer, so it works under the dummy
+      # video driver. We assert: boot reached the launcher, the PPM exists and is
+      # non-empty, and its header declares 320x240. This is artifact GENERATION +
+      # stable launch only — no pixel-level correctness claim yet.
+      - name: Deterministic smoke + screenshot (headless)
+        run: |
+          set -euo pipefail
+          BIN=.pio/build/emulator_pc/program
+          echo "Launch: $BIN --headless --frames 600 --deterministic --screenshot smoke.ppm --quiet"
+          SDL_VIDEODRIVER=dummy timeout 30s "$BIN" \
+            --headless --frames 600 --deterministic --screenshot smoke.ppm --quiet \
+            2>&1 | tee emu-det-smoke.log
+          echo "--- asserting boot reached the launcher ---"
+          grep -q "Launcher cargado" emu-det-smoke.log
+          echo "--- asserting deterministic tick was used ---"
+          grep -q "tick = determinista" emu-det-smoke.log
+          echo "--- asserting screenshot exists, is non-empty and 320x240 ---"
+          test -s smoke.ppm
+          head -c 32 smoke.ppm | tr '\n' ' ' | grep -q "P6 320 240"
+          echo "OK: deterministic boot + 320x240 PPM screenshot generated."
+
+      - name: Upload deterministic smoke log + screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: numos-emulator-smoke
+          path: |
+            emu-det-smoke.log
+            smoke.ppm
+          if-no-files-found: ignore

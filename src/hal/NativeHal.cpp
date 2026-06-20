@@ -44,6 +44,7 @@
  *   ^ .            → POW DOT
  *   Tab            → ALPHA
  *   LShift/RShift  → SHIFT
+ *   Insert         → STO  (Store)
  *   Home / m       → MODE (volver al launcher)
  *   s              → SIN
  *   c              → COS
@@ -57,6 +58,11 @@
  *   y              → VAR_Y
  *   f / F5 / =     → FREE_EQ  (S⇔D)
  *   n              → NEGATE
+ *
+ * Notas Phase 3A (solo emulador, sin impacto en firmware):
+ *   · SDL_KEYDOWN → PRESS/REPEAT, SDL_KEYUP → RELEASE (antes solo KEYDOWN).
+ *   · Coordenadas logicas 320×240 + integer scale (ventana ×N nitida).
+ *   · Auto-salida CLI: --frames N | --run-for-ms N | --headless | --scale N.
  */
 
 #ifdef NATIVE_SIM
@@ -98,10 +104,55 @@ void DisplayDriver::lvglFlushCb(lv_display_t*, const lv_area_t*, uint8_t*) {}
 
 // ════════════════════════════════════════════════════════════════════════════
 // Constantes
+//
+// SCREEN_W/H son la resolucion LOGICA del dispositivo (ILI9341 320×240). NUNCA
+// cambian: la textura LVGL y el "logical size" del renderer se fijan a este
+// tamaño para que el emulador presente exactamente el mismo sistema de
+// coordenadas que el firmware. El escalado a la ventana del PC lo gestiona SDL
+// (logical size + integer scale), NO el codigo de dibujo de formulas.
 // ════════════════════════════════════════════════════════════════════════════
-static constexpr int SCREEN_W     = 320;
-static constexpr int SCREEN_H     = 240;
-static constexpr int WINDOW_SCALE = 2;     // ×2 para visibilidad en PC
+static constexpr int SCREEN_W             = 320;  // ancho logico (NO tocar)
+static constexpr int SCREEN_H             = 240;  // alto  logico (NO tocar)
+static constexpr int DEFAULT_WINDOW_SCALE = 2;    // factor por defecto (×2)
+
+// Politica de temporizacion del bucle nativo (ver bucle principal):
+//  · El reloj de LVGL es lv_tick_set_cb(SDL_GetTicks) → tiempo de pared real.
+//  · El bucle duerme FRAME_DELAY_MS por iteracion para ceder CPU (sin busy-spin).
+//  · Con renderer VSYNC, SDL_RenderPresent tambien limita el ritmo.
+static constexpr uint32_t FRAME_DELAY_MS = 5;     // ~200 fps techo
+
+// ════════════════════════════════════════════════════════════════════════════
+// Opciones de linea de comandos (modo auto-salida para smoke-tests / CI)
+//
+// SOLO afectan al emulador; no existen en el firmware. El uso interactivo
+// normal (sin argumentos) no cambia en absoluto: maxFrames/maxMs < 0 = sin
+// limite, por lo que el bucle corre hasta cerrar la ventana, igual que antes.
+// ════════════════════════════════════════════════════════════════════════════
+struct EmuOptions {
+    long maxFrames   = -1;                    // <0 = sin limite de frames
+    long maxMs       = -1;                    // <0 = sin limite de tiempo
+    int  windowScale = DEFAULT_WINDOW_SCALE;  // factor de escala de ventana
+    bool headless    = false;                 // SDL_VIDEODRIVER=dummy
+    bool quiet       = false;                 // silenciar logs por-tecla/iter
+    // ── Phase 3B (solo emulador) ────────────────────────────────────────────
+    bool deterministic       = false;         // tick sintetico de paso fijo
+    long stepMs              = 16;            // ms por frame en modo determinista
+    const char* screenshotPath = nullptr;     // volcar PPM al salir si != null
+};
+static EmuOptions g_opts;
+
+// ════════════════════════════════════════════════════════════════════════════
+// Reloj sintetico para el modo determinista (Phase 3B)
+//
+// En modo --deterministic, LVGL NO lee el reloj de pared (SDL_GetTicks): lee
+// este contador, que el bucle principal avanza un paso fijo (stepMs) por frame.
+// Asi el estado de animaciones/timers pasa a ser funcion del INDICE de frame,
+// reproducible entre ejecuciones y maquinas (sin jitter de SDL_Delay/VSYNC).
+// La firma uint32_t(void) coincide con lv_tick_get_cb_t, igual que SDL_GetTicks,
+// por lo que es un sustituto directo en lv_tick_set_cb. Inerte salvo --deterministic.
+// ════════════════════════════════════════════════════════════════════════════
+static uint32_t g_detTick = 0;                // ms virtuales acumulados
+static uint32_t detTickCb() { return g_detTick; }
 
 // ════════════════════════════════════════════════════════════════════════════
 // Modos de la aplicación
@@ -193,6 +244,7 @@ static KeyCode mapSdlToKeyCode(SDL_Keycode sym)
         case SDLK_LSHIFT:
         case SDLK_RSHIFT:       return KeyCode::SHIFT;
         case SDLK_TAB:          return KeyCode::ALPHA;
+        case SDLK_INSERT:       return KeyCode::STO;    // Store (Phase 3A)
 
         // Dígitos (fila superior del teclado)
         case SDLK_0:
@@ -278,24 +330,44 @@ static void processSdlEvents()
             return;
         }
 
-        // Solo procesar teclas (KEYDOWN)
-        if (ev.type != SDL_KEYDOWN) continue;
+        // Procesar pulsacion (KEYDOWN) Y liberacion (KEYUP). Antes solo KEYDOWN.
+        if (ev.type != SDL_KEYDOWN && ev.type != SDL_KEYUP) continue;
 
-        KeyCode kc = mapSdlToKeyCode(ev.key.keysym.sym);
-        if (kc == KeyCode::NONE) continue;
+        const bool        isDown   = (ev.type == SDL_KEYDOWN);
+        const bool        isRepeat = isDown && (ev.key.repeat != 0);
+        const SDL_Keycode sym      = ev.key.keysym.sym;
 
-        KeyAction action = (ev.key.repeat == 0) ? KeyAction::PRESS
-                                                 : KeyAction::REPEAT;
+        KeyCode kc = mapSdlToKeyCode(sym);
+        if (kc == KeyCode::NONE) {
+            // Log de teclas sin mapear (modo debug nativo, silenciable).
+            if (!g_opts.quiet) {
+                std::printf("[KEY] sin-mapear SDL=%s (%s)\n",
+                            SDL_GetKeyName(sym), isDown ? "down" : "up");
+            }
+            continue;
+        }
 
-        // ── Debug: mostrar cada tecla detectada ──
-        const char* modeStr = (g_mode == AppMode::SPLASH) ? "SPLASH"
-                            : (g_mode == AppMode::MENU)   ? "MENU"
-                                                          : "CALC";
-        std::printf("[KEY] SDL=%s code=%d action=%s mode=%s\n",
-                    SDL_GetKeyName(ev.key.keysym.sym),
-                    static_cast<int>(kc),
-                    (action == KeyAction::PRESS) ? "PRESS" : "REPEAT",
-                    modeStr);
+        // KeyAction fiel al firmware:
+        //   KEYDOWN nuevo     → PRESS
+        //   KEYDOWN repetido  → REPEAT  (auto-repeticion del SO; INTENCIONADO,
+        //                       igual que el driver Keyboard de hardware. No es
+        //                       un "doble PRESS": CalculationApp distingue ambos)
+        //   KEYUP             → RELEASE
+        const KeyAction action = !isDown  ? KeyAction::RELEASE
+                               : isRepeat ? KeyAction::REPEAT
+                                          : KeyAction::PRESS;
+
+        if (!g_opts.quiet) {
+            const char* modeStr = (g_mode == AppMode::SPLASH) ? "SPLASH"
+                                : (g_mode == AppMode::MENU)   ? "MENU"
+                                                              : "CALC";
+            const char* actStr  = (action == KeyAction::PRESS)  ? "PRESS"
+                                : (action == KeyAction::REPEAT) ? "REPEAT"
+                                                                : "RELEASE";
+            std::printf("[KEY] SDL=%s code=%d action=%s mode=%s\n",
+                        SDL_GetKeyName(sym), static_cast<int>(kc),
+                        actStr, modeStr);
+        }
 
         switch (g_mode) {
             case AppMode::SPLASH:
@@ -303,27 +375,37 @@ static void processSdlEvents()
                 break;
 
             case AppMode::MENU:
-                // Todas las teclas van a LvglKeypad para que LVGL gestione
-                // la navegación del grid (flechas + ENTER → click en tarjeta)
-                LvglKeypad::pushKey(kc, true);    // PRESS
-                LvglKeypad::pushKey(kc, false);   // RELEASE (dispara CLICKED)
+                // El indev LVGL (gridnav) necesita un par PRESS+RELEASE para
+                // disparar CLICKED; lo sintetizamos en el KEYDOWN. El KEYUP no
+                // añade nada aqui (por eso solo actuamos en isDown). Esta es la
+                // "otra pauta que la abstraccion de entrada exige" del objetivo.
+                if (isDown) {
+                    LvglKeypad::pushKey(kc, true);    // PRESS
+                    LvglKeypad::pushKey(kc, false);   // RELEASE (dispara CLICKED)
+                }
                 break;
 
             case AppMode::CALCULATION:
-                // MODE → volver al launcher
-                if (kc == KeyCode::MODE) {
+                // MODE → volver al launcher (solo en la pulsacion).
+                if (isDown && kc == KeyCode::MODE) {
                     returnToMenu();
                     break;
                 }
-                // Todas las demás teclas → CalculationApp directamente
+                // El resto de teclas → CalculationApp directamente, incluyendo
+                // RELEASE. handleKey() lo ignora igual que en el firmware
+                // (CalculationApp.cpp filtra todo lo que no sea PRESS/REPEAT),
+                // asi que enviarlo es fiel al hardware y sin riesgo de calculo.
                 {
                     KeyEvent ke;
                     ke.code   = kc;
                     ke.action = action;
                     ke.row    = -1;
                     ke.col    = -1;
-                    std::printf("[CALC] handleKey(code=%d)\n",
-                                static_cast<int>(kc));
+                    if (!g_opts.quiet) {
+                        std::printf("[CALC] handleKey(code=%d action=%d)\n",
+                                    static_cast<int>(kc),
+                                    static_cast<int>(action));
+                    }
                     g_calcApp->handleKey(ke);
                 }
                 break;
@@ -419,12 +501,110 @@ static void returnToMenu()
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+//   parseArgs / printUsage — opciones de auto-salida (smoke-tests / CI)
+// ════════════════════════════════════════════════════════════════════════════
+static void printUsage(const char* prog)
+{
+    std::printf(
+        "Uso: %s [opciones]\n"
+        "  --frames N       ejecuta N iteraciones del bucle y sale limpiamente\n"
+        "  --run-for-ms N   ejecuta ~N ms (reloj real) y sale limpiamente\n"
+        "  --scale N        escala de ventana entera 1..8 (def. %d)\n"
+        "  --headless       sin ventana (SDL_VIDEODRIVER=dummy), util en CI\n"
+        "  --quiet          silencia el log por-tecla/por-iteracion\n"
+        "  --deterministic  tick sintetico de paso fijo (reproducible); usar con --frames\n"
+        "  --step-ms N      ms virtuales por frame en --deterministic 1..1000 (def. %d)\n"
+        "  --screenshot P   vuelca el frame final 320x240 a un PPM (P6) en la ruta P\n"
+        "  --dump-frame P   alias de --screenshot\n"
+        "  --help, -h       muestra esta ayuda y sale\n",
+        prog, DEFAULT_WINDOW_SCALE, 16);
+}
+
+static bool parseArgs(int argc, char** argv, EmuOptions& opt)
+{
+    for (int i = 1; i < argc; ++i) {
+        const char* a = argv[i];
+        auto needVal = [&](long& dst) {
+            if (i + 1 < argc) dst = std::atol(argv[++i]);
+            else std::fprintf(stderr, "[ARGS] %s requiere un valor\n", a);
+        };
+        auto needStr = [&](const char*& dst) {
+            if (i + 1 < argc) dst = argv[++i];
+            else std::fprintf(stderr, "[ARGS] %s requiere un valor\n", a);
+        };
+        if      (std::strcmp(a, "--frames") == 0)     needVal(opt.maxFrames);
+        else if (std::strcmp(a, "--run-for-ms") == 0) needVal(opt.maxMs);
+        else if (std::strcmp(a, "--scale") == 0) {
+            long s = opt.windowScale; needVal(s);
+            if (s >= 1 && s <= 8) opt.windowScale = static_cast<int>(s);
+            else std::fprintf(stderr, "[ARGS] --scale fuera de rango (1..8)\n");
+        }
+        else if (std::strcmp(a, "--headless") == 0)   opt.headless = true;
+        else if (std::strcmp(a, "--quiet") == 0)      opt.quiet = true;
+        else if (std::strcmp(a, "--deterministic") == 0) opt.deterministic = true;
+        else if (std::strcmp(a, "--step-ms") == 0) {
+            long s = opt.stepMs; needVal(s);
+            if (s >= 1 && s <= 1000) opt.stepMs = s;
+            else std::fprintf(stderr, "[ARGS] --step-ms fuera de rango (1..1000)\n");
+        }
+        else if (std::strcmp(a, "--screenshot") == 0 ||
+                 std::strcmp(a, "--dump-frame") == 0) needStr(opt.screenshotPath);
+        else if (std::strcmp(a, "--help") == 0 ||
+                 std::strcmp(a, "-h") == 0) { printUsage(argv[0]); return false; }
+        else std::fprintf(stderr, "[ARGS] opcion desconocida: %s\n", a);
+    }
+    return true;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//   saveScreenshotPPM — vuelca el framebuffer logico (g_lvBuf) a PPM (P6)
+//
+// Fuente: g_lvBuf, el buffer CPU de pantalla completa que LVGL compone en modo
+// LV_DISPLAY_RENDER_MODE_FULL (siempre contiene el frame 320x240 actual). NO se
+// lee la textura ni el renderer, por lo que funciona identico en --headless y
+// con cualquier --scale (la captura es SIEMPRE la geometria logica 320x240, no
+// la ventana escalada). Formato PPM P6: sin dependencias (cabecera ASCII + RGB
+// crudo). Conversion RGB565 (little-endian host) -> RGB888 por pixel.
+// ════════════════════════════════════════════════════════════════════════════
+static bool saveScreenshotPPM(const char* path)
+{
+    std::FILE* f = std::fopen(path, "wb");
+    if (!f) {
+        std::fprintf(stderr, "[SHOT] no se pudo abrir '%s' para escribir\n", path);
+        return false;
+    }
+    std::fprintf(f, "P6\n%d %d\n255\n", SCREEN_W, SCREEN_H);
+    const uint16_t* px = reinterpret_cast<const uint16_t*>(g_lvBuf);
+    for (int i = 0; i < SCREEN_W * SCREEN_H; ++i) {
+        const uint16_t p = px[i];
+        uint8_t r = static_cast<uint8_t>((p >> 11) & 0x1F);  // 5 bits
+        uint8_t g = static_cast<uint8_t>((p >>  5) & 0x3F);  // 6 bits
+        uint8_t b = static_cast<uint8_t>( p        & 0x1F);  // 5 bits
+        // Expansion a 8 bits replicando los bits altos (no perder rango).
+        r = static_cast<uint8_t>((r << 3) | (r >> 2));
+        g = static_cast<uint8_t>((g << 2) | (g >> 4));
+        b = static_cast<uint8_t>((b << 3) | (b >> 2));
+        const uint8_t rgb[3] = { r, g, b };
+        std::fwrite(rgb, 1, 3, f);
+    }
+    std::fclose(f);
+    return true;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 //   main() — Punto de entrada para la simulación nativa en PC
 // ════════════════════════════════════════════════════════════════════════════
 int main(int argc, char** argv)
 {
-    (void)argc;
-    (void)argv;
+    if (!parseArgs(argc, argv, g_opts)) return 0;   // --help → salida limpia
+
+    // Headless: fijar el driver "dummy" ANTES de SDL_Init para que el video y
+    // la ventana funcionen sin display (CI/Linux sin X/Wayland). El usuario
+    // tambien puede exportar SDL_VIDEODRIVER=dummy; SDL lo respeta de serie.
+    if (g_opts.headless) {
+        SDL_setenv("SDL_VIDEODRIVER", "dummy", 1);
+        std::printf("[SIM] headless: SDL_VIDEODRIVER=dummy\n");
+    }
 
     std::printf("╔═══════════════════════════════════════╗\n");
     std::printf("║   NumOS Simulator  (PC / SDL2)        ║\n");
@@ -437,10 +617,13 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    // Calidad de escalado: 0 = nearest-neighbor (pixeles nitidos al escalar ×N).
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
+
     g_window = SDL_CreateWindow(
         "NumOS Simulator",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        SCREEN_W * WINDOW_SCALE, SCREEN_H * WINDOW_SCALE,
+        SCREEN_W * g_opts.windowScale, SCREEN_H * g_opts.windowScale,
         SDL_WINDOW_SHOWN
     );
     if (!g_window) {
@@ -477,17 +660,58 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    // ── Coordenadas logicas 320×240 + escalado entero nitido ────────────────
+    // logical size fija el sistema de coordenadas del renderer a 320×240
+    // (identico al firmware); SDL escala a la ventana. integer scale evita
+    // medias muestras → pixeles nitidos en ×2/×3/×4. Esto es puro escalado de
+    // SALIDA: la geometria del renderizador de formulas NO se toca.
+    SDL_RenderSetLogicalSize(g_renderer, SCREEN_W, SCREEN_H);
+    SDL_RenderSetIntegerScale(g_renderer, SDL_TRUE);
+
     std::printf("[SDL2] Ventana %dx%d (escala x%d) creada OK\n",
-                SCREEN_W, SCREEN_H, WINDOW_SCALE);
+                SCREEN_W, SCREEN_H, g_opts.windowScale);
+
+    // ── Log determinista de geometria / escala / backend (diagnostico) ──────
+    {
+        int   winW = 0, winH = 0, outW = 0, outH = 0, logW = 0, logH = 0;
+        float sx = 1.0f, sy = 1.0f;
+        SDL_GetWindowSize(g_window, &winW, &winH);
+        SDL_GetRendererOutputSize(g_renderer, &outW, &outH);
+        SDL_RenderGetLogicalSize(g_renderer, &logW, &logH);
+        SDL_RenderGetScale(g_renderer, &sx, &sy);
+        SDL_RendererInfo info;
+        const bool haveInfo = (SDL_GetRendererInfo(g_renderer, &info) == 0);
+        std::printf("[SCALE] logical=%dx%d window=%dx%d output=%dx%d "
+                    "scale=%.2fx%.2f integer=%s backend=%s(%s)\n",
+                    logW, logH, winW, winH, outW, outH, sx, sy,
+                    SDL_RenderGetIntegerScale(g_renderer) ? "on" : "off",
+                    haveInfo ? info.name : "?",
+                    (haveInfo && (info.flags & SDL_RENDERER_ACCELERATED))
+                        ? "accel" : "software");
+    }
 
     // ── 2. Inicializar LVGL ─────────────────────────────────────────────
     lv_init();
 
-    // Registrar SDL_GetTicks como fuente de reloj para LVGL.
-    // Esto es IMPRESCINDIBLE: sin tick, las animaciones y timers de LVGL
-    // no avanzan (la pantalla se congela).
-    lv_tick_set_cb(SDL_GetTicks);
-    std::printf("[LVGL] lv_init() OK — tick = SDL_GetTicks()\n");
+    // UNICA fuente de reloj de LVGL en el build nativo: SDL_GetTicks (ms de
+    // pared). En LVGL 9.x el tick se fija EXCLUSIVAMENTE por lv_tick_set_cb;
+    // el `LV_TICK_CUSTOM` de lv_conf.h es un mecanismo de LVGL 8.x y queda
+    // INERTE en 9.x (verificado: no aparece en el core lv_tick.c instalado),
+    // por lo que NO hay doble-tick. NO eliminar esta llamada: sin ella las
+    // animaciones/timers se congelan. (lv_conf.h es compartido con el firmware
+    // y no se toca; el macro muerto es inofensivo.)
+    // Phase 3B: en --deterministic el tick es un contador sintetico de paso fijo
+    // (detTickCb) que el bucle avanza por frame; por defecto sigue siendo el
+    // reloj de pared (SDL_GetTicks), de modo que el uso interactivo no cambia.
+    lv_tick_set_cb(g_opts.deterministic ? detTickCb : SDL_GetTicks);
+    std::printf("[LVGL] lv_init() OK — tick = %s\n",
+                g_opts.deterministic
+                    ? "determinista (paso fijo por frame)"
+                    : "SDL_GetTicks() (reloj de pared)");
+    if (g_opts.deterministic) {
+        std::printf("[LVGL] modo determinista: %ld ms virtuales por frame\n",
+                    g_opts.stepMs);
+    }
 
     // Crear el display LVGL con flush a SDL
     lv_display_t* disp = lv_display_create(SCREEN_W, SCREEN_H);
@@ -516,10 +740,16 @@ int main(int argc, char** argv)
     std::printf("\n[SIM] Simulador corriendo. Cierra la ventana o Ctrl+C para salir.\n");
     std::printf("[SIM] Teclado: 0-9, +-*/, Enter, ESC=AC, Backspace=DEL, Flechas\n");
     std::printf("[SIM]          s=SIN c=COS t=TAN l=LN g=LOG r=SQRT p=PI e=E\n");
-    std::printf("[SIM]          m/Home = volver al launcher\n\n");
+    std::printf("[SIM]          Tab=ALPHA  Shift=SHIFT  Insert=STO\n");
+    std::printf("[SIM]          m/Home = volver al launcher  ·  --help para flags\n\n");
 
     // ── 6. Bucle principal ──────────────────────────────────────────────
-    uint32_t loopCount = 0;
+    // Politica de temporizacion: UNA sola fuente de tick (SDL_GetTicks via
+    // lv_tick_set_cb), UN solo punto de sleep (FRAME_DELAY_MS) y presentacion
+    // diferida tras lv_timer_handler(). Sin busy-spin. El modo auto-salida
+    // (--frames/--run-for-ms) solo añade una comprobacion de fin al final.
+    uint32_t       loopCount  = 0;
+    const uint32_t startTicks = SDL_GetTicks();   // referencia para --run-for-ms
     while (!g_quit) {
         processSdlEvents();
 
@@ -527,6 +757,13 @@ int main(int argc, char** argv)
         if (g_splashDone && g_mode == AppMode::SPLASH) {
             g_splashDone = false;
             transitionToMenu();
+        }
+
+        // Phase 3B: en modo determinista avanzamos el reloj sintetico un paso
+        // fijo ANTES de lv_timer_handler(), de modo que animaciones/timers son
+        // funcion del indice de frame (reproducible). Inerte en modo normal.
+        if (g_opts.deterministic) {
+            g_detTick += static_cast<uint32_t>(g_opts.stepMs);
         }
 
         lv_timer_handler();
@@ -539,14 +776,42 @@ int main(int argc, char** argv)
             SDL_RenderPresent(g_renderer);
         }
 
-        SDL_Delay(5);   // ~200 fps máximo, suficiente para la UI
+        // En modo determinista NO dormimos: el tick es sintetico, así que el
+        // ritmo de pared es irrelevante y conviene terminar rapido (CI). En uso
+        // interactivo cedemos CPU como siempre (~200 fps techo).
+        if (!g_opts.deterministic) {
+            SDL_Delay(FRAME_DELAY_MS);   // cede CPU (ver politica de temporizacion)
+        }
 
-        // Debug: confirmar que el bucle sigue vivo
-        if (++loopCount % 200 == 0) {
+        ++loopCount;
+
+        // Heartbeat de depuracion (silenciable con --quiet).
+        if (!g_opts.quiet && loopCount % 200 == 0) {
             const char* modeStr = (g_mode == AppMode::SPLASH) ? "SPLASH"
                                 : (g_mode == AppMode::MENU)   ? "MENU"
                                                               : "CALC";
             std::printf("[LOOP] iter=%u mode=%s\n", loopCount, modeStr);
+        }
+
+        // ── Auto-salida (smoke-tests / CI) — inerte en uso interactivo ──────
+        if (g_opts.maxFrames >= 0 && static_cast<long>(loopCount) >= g_opts.maxFrames) {
+            std::printf("[SIM] auto-exit: %ld frames alcanzados\n", g_opts.maxFrames);
+            g_quit = true;
+        }
+        if (g_opts.maxMs >= 0 &&
+            static_cast<long>(SDL_GetTicks() - startTicks) >= g_opts.maxMs) {
+            std::printf("[SIM] auto-exit: %ld ms alcanzados\n", g_opts.maxMs);
+            g_quit = true;
+        }
+    }
+
+    // ── Screenshot opcional (Phase 3B) ──────────────────────────────────
+    // Tras el ultimo frame y ANTES del teardown: g_lvBuf aun contiene la imagen
+    // logica 320x240 final. Solo se activa con --screenshot/--dump-frame.
+    if (g_opts.screenshotPath) {
+        if (saveScreenshotPPM(g_opts.screenshotPath)) {
+            std::printf("[SHOT] PPM %dx%d escrito: %s\n",
+                        SCREEN_W, SCREEN_H, g_opts.screenshotPath);
         }
     }
 
@@ -555,6 +820,10 @@ int main(int argc, char** argv)
     if (g_calcApp) { g_calcApp->end(); delete g_calcApp; }
     delete g_menu;
     delete g_splash;
+
+    // Liberar LVGL por completo (objetos, displays, indev). Importante para
+    // ejecuciones headless repetidas (CI) y para no dejar fugas al salir.
+    lv_deinit();
 
     SDL_DestroyTexture(g_texture);
     SDL_DestroyRenderer(g_renderer);
