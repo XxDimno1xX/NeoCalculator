@@ -63,6 +63,12 @@
  *   · SDL_KEYDOWN → PRESS/REPEAT, SDL_KEYUP → RELEASE (antes solo KEYDOWN).
  *   · Coordenadas logicas 320×240 + integer scale (ventana ×N nitida).
  *   · Auto-salida CLI: --frames N | --run-for-ms N | --headless | --scale N.
+ *
+ * Notas Phase 4A (solo emulador, sin impacto en firmware):
+ *   · --script P reproduce un .numos: inyecta teclas por la MISMA ruta de
+ *     despacho que SDL (dispatchKey) y captura PPM por frame (scriptStepBegin/
+ *     scriptCaptureIfPending). Determinista: 1 comando por frame, usar con
+ *     --deterministic --frames N. Ver docs/emulator-sdl2-quickstart.md.
  */
 
 #ifdef NATIVE_SIM
@@ -72,6 +78,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cctype>
+#include <string>
+#include <vector>
+#include <fstream>
+#include <sstream>
 
 #include "../input/KeyCodes.h"
 #include "../input/LvglKeypad.h"
@@ -138,6 +149,8 @@ struct EmuOptions {
     bool deterministic       = false;         // tick sintetico de paso fijo
     long stepMs              = 16;            // ms por frame en modo determinista
     const char* screenshotPath = nullptr;     // volcar PPM al salir si != null
+    // ── Phase 4A (solo emulador) ────────────────────────────────────────────
+    const char* scriptPath     = nullptr;     // reproducir script .numos si != null
 };
 static EmuOptions g_opts;
 
@@ -319,6 +332,140 @@ static KeyCode mapSdlToKeyCode(SDL_Keycode sym)
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// scriptNameToKeyCode — Traduce un NOMBRE de tecla de script a KeyCode (Phase 4A)
+//
+// Vocabulario propio del replay de scripts. NO inventa KeyCodes: cada nombre se
+// asigna a un KeyCode existente (los mismos que produce mapSdlToKeyCode). Nombres
+// alfabeticos case-insensitive; los simbolos (+ - * / ^ . ( ) =) y los digitos se
+// comparan tal cual. Nota NumOS: la tecla de division ES la de fraccion
+// (KeyCode::DIV -> insertFraction, CalculationApp.cpp:344), por eso FRAC == "/".
+// Devuelve KeyCode::NONE si el nombre es desconocido.
+// ════════════════════════════════════════════════════════════════════════════
+static KeyCode scriptNameToKeyCode(const std::string& raw)
+{
+    // Simbolos directos.
+    if (raw == "+") return KeyCode::ADD;
+    if (raw == "-") return KeyCode::SUB;
+    if (raw == "*") return KeyCode::MUL;
+    if (raw == "/") return KeyCode::DIV;
+    if (raw == "^") return KeyCode::POW;
+    if (raw == ".") return KeyCode::DOT;
+    if (raw == "(") return KeyCode::LPAREN;
+    if (raw == ")") return KeyCode::RPAREN;
+    if (raw == "=") return KeyCode::FREE_EQ;
+
+    // Digitos sueltos. OJO: NUM_0..NUM_9 NO son contiguos en el enum
+    // (KeyCodes.h:68-77), asi que NO se puede hacer aritmetica de enum.
+    if (raw.size() == 1 && raw[0] >= '0' && raw[0] <= '9') {
+        switch (raw[0]) {
+            case '0': return KeyCode::NUM_0;
+            case '1': return KeyCode::NUM_1;
+            case '2': return KeyCode::NUM_2;
+            case '3': return KeyCode::NUM_3;
+            case '4': return KeyCode::NUM_4;
+            case '5': return KeyCode::NUM_5;
+            case '6': return KeyCode::NUM_6;
+            case '7': return KeyCode::NUM_7;
+            case '8': return KeyCode::NUM_8;
+            case '9': return KeyCode::NUM_9;
+        }
+    }
+
+    // Nombres alfabeticos (case-insensitive).
+    std::string n = raw;
+    for (char& c : n) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+    if (n == "enter")                         return KeyCode::ENTER;
+    if (n == "left")                          return KeyCode::LEFT;
+    if (n == "right")                         return KeyCode::RIGHT;
+    if (n == "up")                            return KeyCode::UP;
+    if (n == "down")                          return KeyCode::DOWN;
+    if (n == "backspace" || n == "del" ||
+        n == "delete")                        return KeyCode::DEL;
+    if (n == "ac" || n == "esc" ||
+        n == "escape")                        return KeyCode::AC;
+    if (n == "home" || n == "mode")           return KeyCode::MODE;
+    if (n == "x" || n == "varx")              return KeyCode::VAR_X;
+    if (n == "y" || n == "vary")              return KeyCode::VAR_Y;
+    if (n == "pow")                           return KeyCode::POW;
+    if (n == "frac" || n == "fraction" ||
+        n == "div")                           return KeyCode::DIV;   // DIV == fraccion
+    if (n == "dot")                           return KeyCode::DOT;
+    if (n == "add")                           return KeyCode::ADD;
+    if (n == "sub")                           return KeyCode::SUB;
+    if (n == "mul")                           return KeyCode::MUL;
+    if (n == "lparen")                        return KeyCode::LPAREN;
+    if (n == "rparen")                        return KeyCode::RPAREN;
+    if (n == "sqrt")                          return KeyCode::SQRT;
+    if (n == "sin")                           return KeyCode::SIN;
+    if (n == "cos")                           return KeyCode::COS;
+    if (n == "tan")                           return KeyCode::TAN;
+    if (n == "ln")                            return KeyCode::LN;
+    if (n == "log")                           return KeyCode::LOG;
+    if (n == "pi")                            return KeyCode::CONST_PI;
+    if (n == "e")                             return KeyCode::CONST_E;
+    if (n == "negate" || n == "neg")          return KeyCode::NEGATE;
+    if (n == "ans")                           return KeyCode::ANS;
+    if (n == "shift")                         return KeyCode::SHIFT;
+    if (n == "alpha")                         return KeyCode::ALPHA;
+    if (n == "sto")                           return KeyCode::STO;
+    if (n == "freeeq" || n == "sd")           return KeyCode::FREE_EQ;
+
+    return KeyCode::NONE;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// dispatchKey — Enruta UNA tecla (ya mapeada) segun el modo activo
+//
+// Extraido del switch(g_mode) de processSdlEvents para que TANTO la entrada SDL
+// en vivo COMO el replay de scripts (Phase 4A) usen exactamente la misma ruta de
+// despacho: MENU sintetiza PRESS+RELEASE para gridnav (solo en isDown), CALC
+// reenvia a CalculationApp::handleKey con el caso especial MODE -> returnToMenu.
+// ════════════════════════════════════════════════════════════════════════════
+static void dispatchKey(KeyCode kc, KeyAction action, bool isDown)
+{
+    switch (g_mode) {
+        case AppMode::SPLASH:
+            // Ignorar teclas durante la animación del splash
+            break;
+
+        case AppMode::MENU:
+            // El indev LVGL (gridnav) necesita un par PRESS+RELEASE para
+            // disparar CLICKED; lo sintetizamos en el down-edge. El up-edge no
+            // añade nada aqui (por eso solo actuamos en isDown).
+            if (isDown) {
+                LvglKeypad::pushKey(kc, true);    // PRESS
+                LvglKeypad::pushKey(kc, false);   // RELEASE (dispara CLICKED)
+            }
+            break;
+
+        case AppMode::CALCULATION:
+            // MODE → volver al launcher (solo en la pulsacion).
+            if (isDown && kc == KeyCode::MODE) {
+                returnToMenu();
+                break;
+            }
+            // El resto de teclas → CalculationApp directamente, incluyendo
+            // RELEASE. handleKey() lo ignora igual que en el firmware
+            // (CalculationApp.cpp filtra todo lo que no sea PRESS/REPEAT).
+            {
+                KeyEvent ke;
+                ke.code   = kc;
+                ke.action = action;
+                ke.row    = -1;
+                ke.col    = -1;
+                if (!g_opts.quiet) {
+                    std::printf("[CALC] handleKey(code=%d action=%d)\n",
+                                static_cast<int>(kc),
+                                static_cast<int>(action));
+                }
+                g_calcApp->handleKey(ke);
+            }
+            break;
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // processSdlEvents — Procesa eventos SDL y los enruta según el modo activo
 // ════════════════════════════════════════════════════════════════════════════
 static void processSdlEvents()
@@ -369,47 +516,8 @@ static void processSdlEvents()
                         actStr, modeStr);
         }
 
-        switch (g_mode) {
-            case AppMode::SPLASH:
-                // Ignorar teclas durante la animación del splash
-                break;
-
-            case AppMode::MENU:
-                // El indev LVGL (gridnav) necesita un par PRESS+RELEASE para
-                // disparar CLICKED; lo sintetizamos en el KEYDOWN. El KEYUP no
-                // añade nada aqui (por eso solo actuamos en isDown). Esta es la
-                // "otra pauta que la abstraccion de entrada exige" del objetivo.
-                if (isDown) {
-                    LvglKeypad::pushKey(kc, true);    // PRESS
-                    LvglKeypad::pushKey(kc, false);   // RELEASE (dispara CLICKED)
-                }
-                break;
-
-            case AppMode::CALCULATION:
-                // MODE → volver al launcher (solo en la pulsacion).
-                if (isDown && kc == KeyCode::MODE) {
-                    returnToMenu();
-                    break;
-                }
-                // El resto de teclas → CalculationApp directamente, incluyendo
-                // RELEASE. handleKey() lo ignora igual que en el firmware
-                // (CalculationApp.cpp filtra todo lo que no sea PRESS/REPEAT),
-                // asi que enviarlo es fiel al hardware y sin riesgo de calculo.
-                {
-                    KeyEvent ke;
-                    ke.code   = kc;
-                    ke.action = action;
-                    ke.row    = -1;
-                    ke.col    = -1;
-                    if (!g_opts.quiet) {
-                        std::printf("[CALC] handleKey(code=%d action=%d)\n",
-                                    static_cast<int>(kc),
-                                    static_cast<int>(action));
-                    }
-                    g_calcApp->handleKey(ke);
-                }
-                break;
-        }
+        // Despacho compartido con el replay de scripts (Phase 4A).
+        dispatchKey(kc, action, isDown);
     }
 }
 
@@ -516,6 +624,7 @@ static void printUsage(const char* prog)
         "  --step-ms N      ms virtuales por frame en --deterministic 1..1000 (def. %d)\n"
         "  --screenshot P   vuelca el frame final 320x240 a un PPM (P6) en la ruta P\n"
         "  --dump-frame P   alias de --screenshot\n"
+        "  --script P       reproduce un script de entrada determinista (.numos) desde P\n"
         "  --help, -h       muestra esta ayuda y sale\n",
         prog, DEFAULT_WINDOW_SCALE, 16);
 }
@@ -549,6 +658,7 @@ static bool parseArgs(int argc, char** argv, EmuOptions& opt)
         }
         else if (std::strcmp(a, "--screenshot") == 0 ||
                  std::strcmp(a, "--dump-frame") == 0) needStr(opt.screenshotPath);
+        else if (std::strcmp(a, "--script") == 0)     needStr(opt.scriptPath);
         else if (std::strcmp(a, "--help") == 0 ||
                  std::strcmp(a, "-h") == 0) { printUsage(argv[0]); return false; }
         else std::fprintf(stderr, "[ARGS] opcion desconocida: %s\n", a);
@@ -592,11 +702,202 @@ static bool saveScreenshotPPM(const char* path)
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+//   Replay de scripts de entrada determinista (Phase 4A) — SOLO emulador
+//
+// Formato linea-a-linea (.numos), trozeado por espacios. Comandos:
+//   # comentario        · lineas en blanco se ignoran
+//   wait N              · espera N frames del emulador (N >= 0)
+//   key NOMBRE          · inyecta PRESS+RELEASE por la MISMA ruta que SDL
+//   keydown NOMBRE      · solo PRESS
+//   keyup NOMBRE        · solo RELEASE
+//   screenshot RUTA     · vuelca un PPM tras el render de ESTE frame
+//   log "mensaje"       · imprime un mensaje a stdout
+//
+// Modelo de planificacion (determinista): UN comando por frame, ejecutado ANTES
+// de processSdlEvents() para que la tecla sea visible al avance de tick y a
+// lv_timer_handler() de ESE frame; `wait N` consume N frames; `screenshot`
+// marca una captura diferida que se realiza DESPUES del render (g_lvBuf ya
+// contiene el frame compuesto). El script se valida ENTERO al cargar (fail-fast,
+// exit != 0) para no ejecutar a medias y capturar un estado erroneo.
+// ════════════════════════════════════════════════════════════════════════════
+enum class ScriptCmdType : uint8_t { Wait, Key, KeyDown, KeyUp, Screenshot, Log };
+
+struct ScriptCmd {
+    ScriptCmdType type;
+    KeyCode       key   = KeyCode::NONE;  // Key/KeyDown/KeyUp
+    long          waitN = 0;              // Wait
+    std::string   strArg;                 // Screenshot (ruta) / Log (mensaje)
+    int           line  = 0;              // linea de origen (diagnostico)
+};
+
+static std::vector<ScriptCmd> g_script;
+static size_t      g_scriptPC      = 0;
+static long        g_scriptWait    = 0;      // frames restantes de espera
+static bool        g_scriptActive  = false;
+static bool        g_scriptDone    = false;
+static bool        g_pendingShot   = false;  // hay screenshot diferido este frame
+static std::string g_pendingShotPath;
+static int         g_exitCode      = 0;      // codigo de salida del proceso
+
+static bool scriptErr(const char* path, int line, const char* msg)
+{
+    std::fprintf(stderr, "[SCRIPT] %s:%d: %s\n", path, line, msg);
+    return false;
+}
+
+// Acepta solo enteros decimales >= 0 (rechaza '-', vacio y no-digitos).
+static bool parseNonNegLong(const std::string& s, long& out)
+{
+    if (s.empty()) return false;
+    for (char c : s) if (c < '0' || c > '9') return false;
+    out = std::strtol(s.c_str(), nullptr, 10);
+    return out >= 0;
+}
+
+// Carga y VALIDA el script entero. Devuelve false (sin ejecutar nada) ante el
+// primer error, para que main() salga con codigo != 0.
+static bool loadScript(const char* path)
+{
+    std::ifstream in(path);
+    if (!in) {
+        std::fprintf(stderr, "[SCRIPT] no se pudo abrir el script '%s'\n", path);
+        return false;
+    }
+
+    std::string line;
+    int lineNo = 0;
+    while (std::getline(in, line)) {
+        ++lineNo;
+        // CRLF (scripts de Windows en runners Linux): quitar el CR final.
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+
+        std::istringstream iss(line);
+        std::string cmd;
+        if (!(iss >> cmd))      continue;   // linea en blanco
+        if (cmd[0] == '#')      continue;   // comentario
+
+        std::string lc = cmd;
+        for (char& c : lc) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+        ScriptCmd sc;
+        sc.line = lineNo;
+
+        if (lc == "wait") {
+            std::string arg, extra;
+            if (!(iss >> arg))  return scriptErr(path, lineNo, "wait requiere un numero de frames");
+            if (iss >> extra)   return scriptErr(path, lineNo, "wait: demasiados argumentos");
+            long n;
+            if (!parseNonNegLong(arg, n)) return scriptErr(path, lineNo, "wait espera un entero >= 0");
+            sc.type  = ScriptCmdType::Wait;
+            sc.waitN = n;
+        }
+        else if (lc == "key" || lc == "keydown" || lc == "keyup") {
+            std::string name, extra;
+            if (!(iss >> name)) return scriptErr(path, lineNo, "key/keydown/keyup requieren un NOMBRE de tecla");
+            if (iss >> extra)   return scriptErr(path, lineNo, "demasiados argumentos para una tecla");
+            KeyCode kc = scriptNameToKeyCode(name);
+            if (kc == KeyCode::NONE) return scriptErr(path, lineNo, "nombre de tecla desconocido");
+            sc.type = (lc == "key")     ? ScriptCmdType::Key
+                    : (lc == "keydown") ? ScriptCmdType::KeyDown
+                                        : ScriptCmdType::KeyUp;
+            sc.key  = kc;
+        }
+        else if (lc == "screenshot") {
+            std::string p, extra;
+            if (!(iss >> p))    return scriptErr(path, lineNo, "screenshot requiere una ruta");
+            if (iss >> extra)   return scriptErr(path, lineNo, "screenshot: la ruta no puede contener espacios");
+            sc.type   = ScriptCmdType::Screenshot;
+            sc.strArg = p;
+        }
+        else if (lc == "log") {
+            // Resto de la linea, recortando espacios y comillas envolventes.
+            std::string rest;
+            std::getline(iss, rest);
+            size_t b = rest.find_first_not_of(" \t");
+            rest = (b == std::string::npos) ? std::string() : rest.substr(b);
+            if (rest.size() >= 2 && rest.front() == '"' && rest.back() == '"')
+                rest = rest.substr(1, rest.size() - 2);
+            sc.type   = ScriptCmdType::Log;
+            sc.strArg = rest;
+        }
+        else {
+            return scriptErr(path, lineNo, "comando desconocido");
+        }
+
+        g_script.push_back(std::move(sc));
+    }
+
+    g_scriptActive = !g_script.empty();
+    std::printf("[SCRIPT] cargado '%s': %zu comandos\n", path, g_script.size());
+    return true;
+}
+
+// Procesa el comando de script de ESTE frame. Se llama AL INICIO del bucle,
+// antes de processSdlEvents(), avance de tick y lv_timer_handler().
+static void scriptStepBegin()
+{
+    if (!g_scriptActive || g_scriptDone)   return;
+    if (g_scriptWait > 0) { --g_scriptWait; return; }
+    if (g_scriptPC >= g_script.size()) { g_scriptDone = true; return; }
+
+    const ScriptCmd& sc = g_script[g_scriptPC++];
+    switch (sc.type) {
+        case ScriptCmdType::Wait:
+            g_scriptWait = sc.waitN;     // 0 => el siguiente comando corre el proximo frame
+            break;
+        case ScriptCmdType::Key:
+            dispatchKey(sc.key, KeyAction::PRESS,   true);
+            dispatchKey(sc.key, KeyAction::RELEASE, false);
+            break;
+        case ScriptCmdType::KeyDown:
+            dispatchKey(sc.key, KeyAction::PRESS, true);
+            break;
+        case ScriptCmdType::KeyUp:
+            dispatchKey(sc.key, KeyAction::RELEASE, false);
+            break;
+        case ScriptCmdType::Screenshot:
+            g_pendingShot     = true;
+            g_pendingShotPath = sc.strArg;   // captura tras el render de este frame
+            break;
+        case ScriptCmdType::Log:
+            std::printf("[SCRIPT] %s\n", sc.strArg.c_str());
+            break;
+    }
+}
+
+// Realiza la captura diferida por `screenshot`. Se llama DESPUES del render.
+// Un fallo de escritura es fatal (exit != 0): un screenshot perdido invalida
+// el proposito del replay determinista.
+static void scriptCaptureIfPending()
+{
+    if (!g_pendingShot) return;
+    g_pendingShot = false;
+
+    if (!saveScreenshotPPM(g_pendingShotPath.c_str())) {
+        std::fprintf(stderr, "[SCRIPT] fallo al escribir screenshot '%s'\n",
+                     g_pendingShotPath.c_str());
+        g_exitCode = 3;
+        g_quit     = true;
+        return;
+    }
+    if (!g_opts.quiet) {
+        std::printf("[SHOT] PPM %dx%d escrito (script): %s\n",
+                    SCREEN_W, SCREEN_H, g_pendingShotPath.c_str());
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 //   main() — Punto de entrada para la simulación nativa en PC
 // ════════════════════════════════════════════════════════════════════════════
 int main(int argc, char** argv)
 {
     if (!parseArgs(argc, argv, g_opts)) return 0;   // --help → salida limpia
+
+    // Phase 4A: cargar y validar el script de entrada ANTES de inicializar SDL.
+    // Un script malformado falla rapido (exit 2) sin tocar SDL/LVGL.
+    if (g_opts.scriptPath) {
+        if (!loadScript(g_opts.scriptPath)) return 2;
+    }
 
     // Headless: fijar el driver "dummy" ANTES de SDL_Init para que el video y
     // la ventana funcionen sin display (CI/Linux sin X/Wayland). El usuario
@@ -751,6 +1052,11 @@ int main(int argc, char** argv)
     uint32_t       loopCount  = 0;
     const uint32_t startTicks = SDL_GetTicks();   // referencia para --run-for-ms
     while (!g_quit) {
+        // Phase 4A: inyecta el comando de script de este frame ANTES de la
+        // entrada SDL, para que la tecla sea visible al tick y a
+        // lv_timer_handler() de ESTE mismo frame. Inerte sin --script.
+        scriptStepBegin();
+
         processSdlEvents();
 
         // Transición diferida Splash → Menú (fuera del contexto LVGL)
@@ -775,6 +1081,10 @@ int main(int argc, char** argv)
             SDL_RenderCopy(g_renderer, g_texture, nullptr, nullptr);
             SDL_RenderPresent(g_renderer);
         }
+
+        // Phase 4A: captura diferida pedida por el script, DESPUES del render
+        // (g_lvBuf ya contiene el frame compuesto por lv_timer_handler).
+        scriptCaptureIfPending();
 
         // En modo determinista NO dormimos: el tick es sintetico, así que el
         // ritmo de pared es irrelevante y conviene terminar rapido (CI). En uso
@@ -831,7 +1141,7 @@ int main(int argc, char** argv)
     SDL_Quit();
 
     std::printf("[SIM] Bye!\n");
-    return 0;
+    return g_exitCode;
 }
 
 // ── Helper para FileSystem init (llamado arriba) ────────────────────────────

@@ -1,0 +1,37 @@
+# calc_1_plus_2.numos — Phase 4A scripted-replay: type "1+2" and evaluate.
+#
+# Demonstrates driving CalculationApp through the SAME dispatch path as live SDL
+# input: open the (centered, default-focused) Calculation card, type 1 + 2, press
+# ENTER, let the result render, then screenshot.
+#
+# This phase proves SCRIPTED INPUT works deterministically. It does NOT assert the
+# pixels say "3" (no OCR / golden compare yet — that is Phase 4B).
+#
+# Timing notes (deterministic, step-ms 16):
+#   * 200 frames  -> splash (~frame 125) is safely done; we are in the launcher.
+#   * 60 frames   -> Calculation screen load + fade settles after ENTER.
+#   * 120 frames  -> evaluation result is composed and rendered.
+# Each `key` consumes exactly one frame, so total << the --frames budget below.
+#
+# Run:
+#   program --headless --deterministic --script tests/emulator/scripts/calc_1_plus_2.numos \
+#           --frames 1400 --screenshot out/calc_1_plus_2.ppm --quiet
+
+log "calc_1_plus_2: waiting for launcher"
+wait 200
+
+# Open Calculation (appId 0 — always dead-center-visible on power-on).
+key ENTER
+wait 60
+
+# Type the expression 1 + 2.
+key 1
+key +
+key 2
+
+# Evaluate and let the result render.
+key ENTER
+wait 120
+
+screenshot out/calc_1_plus_2.ppm
+log "calc_1_plus_2: screenshot captured"

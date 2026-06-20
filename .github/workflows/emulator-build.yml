@@ -16,12 +16,14 @@ on:
     branches: [ main ]
     paths:
       - 'src/**'
+      - 'tests/emulator/**'
       - 'platformio.ini'
       - 'scripts/sdl2_env.py'
       - '.github/workflows/emulator-build.yml'
   pull_request:
     paths:
       - 'src/**'
+      - 'tests/emulator/**'
       - 'platformio.ini'
       - 'scripts/sdl2_env.py'
       - '.github/workflows/emulator-build.yml'
@@ -142,4 +144,66 @@ jobs:
           path: |
             emu-det-smoke.log
             smoke.ppm
+          if-no-files-found: ignore
+
+      # ---------------------------------------------------------------------
+      # Scripted deterministic replay smoke + screenshot (Phase 4A).
+      #
+      # Additive to the Phase 3A/3B smokes above (kept as-is). This drives the
+      # emulator with a .numos script via the new --script flag: key events are
+      # injected through the SAME dispatch path as live SDL input, one command
+      # per deterministic frame. We run two fixtures (launcher + 1+2), assert the
+      # script flag was honored (not silently ignored), the launcher was reached,
+      # and the PPMs are 320x240. We also run calc_1_plus_2 TWICE and compare
+      # SHA-256 to prove the headline Phase 4A claim: scripted replay is
+      # byte-reproducible. This is artifact GENERATION + deterministic input —
+      # NO pixel-level "1+2=3" correctness claim yet (that is Phase 4B).
+      - name: Scripted deterministic replay smoke (headless, Phase 4A)
+        run: |
+          set -euo pipefail
+          BIN=.pio/build/emulator_pc/program
+          mkdir -p out
+          test -f tests/emulator/scripts/launcher_smoke.numos
+          test -f tests/emulator/scripts/calc_1_plus_2.numos
+
+          echo "=== launcher_smoke ==="
+          SDL_VIDEODRIVER=dummy timeout 60s "$BIN" \
+            --headless --deterministic --script tests/emulator/scripts/launcher_smoke.numos \
+            --frames 800 --screenshot out/launcher.ppm --quiet 2>&1 | tee out/launcher.log
+          # The --script flag must be HONORED, not dropped as an unknown option.
+          ! grep -q "opcion desconocida: --script" out/launcher.log
+          grep -q "Launcher cargado" out/launcher.log
+          grep -q "cargado 'tests/emulator/scripts/launcher_smoke.numos'" out/launcher.log
+          test -s out/launcher.ppm
+          head -c 32 out/launcher.ppm | tr '\n' ' ' | grep -q "P6 320 240"
+
+          echo "=== calc_1_plus_2 (run 1) ==="
+          SDL_VIDEODRIVER=dummy timeout 60s "$BIN" \
+            --headless --deterministic --script tests/emulator/scripts/calc_1_plus_2.numos \
+            --frames 1400 --screenshot out/calc_1_plus_2.ppm --quiet 2>&1 | tee out/calc_1_plus_2.log
+          grep -q "CalculationApp activa" out/calc_1_plus_2.log
+          test -s out/calc_1_plus_2.ppm
+          head -c 32 out/calc_1_plus_2.ppm | tr '\n' ' ' | grep -q "P6 320 240"
+
+          echo "=== calc_1_plus_2 (run 2, determinism) ==="
+          SDL_VIDEODRIVER=dummy timeout 60s "$BIN" \
+            --headless --deterministic --script tests/emulator/scripts/calc_1_plus_2.numos \
+            --frames 1400 --screenshot out/calc_1_plus_2_b.ppm --quiet >/dev/null 2>&1
+          A=$(sha256sum out/calc_1_plus_2.ppm   | cut -d' ' -f1)
+          B=$(sha256sum out/calc_1_plus_2_b.ppm | cut -d' ' -f1)
+          echo "run1=$A"
+          echo "run2=$B"
+          test "$A" = "$B"
+          echo "OK: scripted deterministic replay is byte-reproducible (320x240 PPM)."
+
+      - name: Upload Phase 4A scripted replay artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: numos-emulator-scripted-smoke
+          path: |
+            out/launcher.log
+            out/launcher.ppm
+            out/calc_1_plus_2.log
+            out/calc_1_plus_2.ppm
           if-no-files-found: ignore

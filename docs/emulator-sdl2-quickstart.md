@@ -4,15 +4,16 @@ How to build and run the **native desktop emulator** (`pio run -e emulator_pc`) 
 Windows and Linux. This is a desktop *port* of NumOS (the real LVGL/UI/math code
 compiled against an SDL2 desktop HAL) — **not** a cycle-accurate ESP32 emulator.
 
-For the full design, see
-[emulator-sdl2-implementation-spec.md](emulator-sdl2-implementation-spec.md).
 This quickstart covers **Phase 2** (reproducible, portable build & run with no
 machine-specific SDL2 paths), **Phase 3A** (stable 320×240 logical scaling,
 key press/release, and a headless auto-exit mode for CI — see
-[Run modes](#run-modes-phase-3a) and [Keyboard map](#keyboard-map-phase-3a)), and
+[Run modes](#run-modes-phase-3a) and [Keyboard map](#keyboard-map-phase-3a)),
 **Phase 3B** (a deterministic fixed-step tick and a dependency-free PPM screenshot
 dump for reproducible CI artifacts — see
-[Deterministic mode & screenshots](#deterministic-mode--screenshots-phase-3b)).
+[Deterministic mode & screenshots](#deterministic-mode--screenshots-phase-3b)), and
+**Phase 4A** (deterministic scripted input replay — `.numos` scripts that inject
+keys through the existing dispatch path and capture screenshots, see
+[Scripted input replay](#scripted-input-replay-phase-4a)).
 
 > The firmware build is completely separate and unchanged:
 > `pio run -e esp32s3_n16r8`. Nothing here affects it.
@@ -148,6 +149,7 @@ unaffected** — mainly so CI (or you) can launch it briefly without a human:
 | `--deterministic` | **(Phase 3B)** Drive LVGL from a synthetic fixed-step clock instead of the wall clock. Animation/timer state becomes a function of the *frame index*, so a given `--frames N` is reproducible across runs and machines. Pair it with `--frames N`. See [Deterministic mode & screenshots](#deterministic-mode--screenshots-phase-3b). |
 | `--step-ms N` | **(Phase 3B)** Virtual milliseconds advanced per frame in `--deterministic` mode, 1..1000 (default 16 ≈ 60 fps). No effect without `--deterministic`. |
 | `--screenshot P` / `--dump-frame P` | **(Phase 3B)** After the final frame (before shutdown), dump the **320×240 logical** framebuffer to PPM (P6) at path `P`. Dependency-free; works under `--headless` and at any `--scale`. |
+| `--script P` | **(Phase 4A)** Replay a deterministic input script (`.numos`) from path `P`: inject key events through the same dispatch path as live SDL input and capture in-script screenshots. Pair with `--deterministic --frames N`. See [Scripted input replay](#scripted-input-replay-phase-4a). |
 | `--help` | Print usage and exit. |
 
 The run scripts forward all flags, e.g.:
@@ -220,9 +222,95 @@ a later phase).
 
 **Limitations.** Determinism covers LVGL's tick-driven animation/timer state; it
 does not freeze any wall-clock reads elsewhere (there are none on the render path
-today). The screenshot is the logical framebuffer, not the scaled host window. This
-is single-shot capture at exit — no per-frame capture and no scripted input yet
-(**next: Phase 4, scripted input replay** — see [Known limitations](#known-limitations-phase-3a)).
+today). The screenshot is the logical framebuffer, not the scaled host window. The
+`--screenshot` flag captures once at exit; the **Phase 4A** `screenshot` script
+command (below) adds per-frame capture during a scripted run.
+
+### Scripted input replay (Phase 4A)
+
+Phase 4A adds `--script PATH`: a deterministic, line-oriented **`.numos`** script
+that injects key events and captures screenshots. Replayed keys go through the
+**exact same dispatch path** as live SDL input (`dispatchKey` in
+[`NativeHal.cpp`](../src/hal/NativeHal.cpp)) — MENU navigation and CalculationApp
+typing behave identically to a human at the keyboard. Like Phase 3B this is
+**emulator-only** and **opt-in**; without `--script` the runtime is unchanged.
+
+```bash
+# Type "1+2", evaluate, screenshot — headless, deterministic, reproducible.
+SDL_VIDEODRIVER=dummy ./scripts/run-emulator-linux.sh \
+  --headless --deterministic --script tests/emulator/scripts/calc_1_plus_2.numos \
+  --frames 1400 --screenshot out/calc_1_plus_2.ppm --quiet                    # Linux
+./scripts/run-emulator-windows.ps1 `
+  --headless --deterministic --script tests/emulator/scripts/calc_1_plus_2.numos `
+  --frames 1400 --screenshot out/calc_1_plus_2.ppm --quiet                    # Windows
+```
+
+**Script syntax.** One command per line; tokens are whitespace-separated;
+commands and key names are case-insensitive; paths are case-preserved and may not
+contain spaces.
+
+| Line | Meaning |
+|:--|:--|
+| `# ...` | Comment (whole line ignored). Blank lines ignored too. |
+| `wait N` | Idle `N` emulator frames (`N ≥ 0`). At `--step-ms 16`, `N` frames ≈ `16·N` ms of virtual time. |
+| `key NAME` | Inject a PRESS+RELEASE pulse of `NAME` (the normal "tap a key"). |
+| `keydown NAME` / `keyup NAME` | Inject only the press / only the release. |
+| `screenshot PATH` | Dump a 320×240 PPM at `PATH`, captured *after* this frame's render. |
+| `log "message"` | Print `message` to stdout (handy for CI log markers). |
+
+**Key names** map onto existing calculator `KeyCode`s (no parallel key system):
+
+- digits `0`–`9`; operators `+` `-` `*` `/`; `^` (= `POW`); `.` (= `DOT`); `(` `)`.
+- `ENTER`, `LEFT`, `RIGHT`, `UP`, `DOWN`.
+- `BACKSPACE` (alias `DEL`), `AC` (alias `ESC`), `HOME` (alias `MODE`).
+- `X`/`Y` (variables), `SQRT`, `SIN`/`COS`/`TAN`, `LN`/`LOG`, `PI`, `E`, `NEGATE`.
+- `FRAC` — **alias for `/`**: in NumOS the division key *is* the fraction key
+  (`KeyCode::DIV` → `insertFraction`), so `key /` and `key FRAC` are equivalent and
+  both open a fraction template in VPAM mode.
+
+**Scheduling model.** In deterministic mode the replay executes **one command per
+frame**, *before* SDL polling, so the injected key is visible to that same frame's
+tick advance and `lv_timer_handler()`. `wait N` consumes `N` frames; `screenshot`
+is captured *after* the frame's render (so it reflects everything injected so far).
+The whole script is parsed and validated **up front** — a malformed script aborts
+before any frame runs.
+
+**Example script** (`tests/emulator/scripts/calc_1_plus_2.numos`):
+
+```text
+# wait for splash -> launcher (~frame 125 @ step-ms 16; 200 for margin)
+wait 200
+key ENTER          # open Calculation (centered, default-focused card)
+wait 60
+key 1
+key +
+key 2
+key ENTER          # evaluate
+wait 120
+screenshot out/calc_1_plus_2.ppm
+```
+
+**Where screenshots go.** Wherever the `screenshot PATH` (or `--screenshot PATH`)
+argument points; the bundled scripts write under `out/` (git-ignored). PPM P6,
+320×240, same dependency-free format as Phase 3B.
+
+**Error handling (fail-fast, non-zero exit).** A bad script never runs partway:
+
+| Condition | Exit |
+|:--|:--|
+| Unknown command, invalid key name, missing argument, negative `wait`, unreadable script file | `2` |
+| `screenshot` write failure at run time (bad path / disk full) | `3` |
+
+Each prints `[SCRIPT] <file>:<line>: <reason>` to stderr, so CI fails loudly.
+
+**Determinism.** Two runs of the same scripted command produce **byte-identical**
+PPMs (verified locally via SHA-256, and re-checked in CI by running
+`calc_1_plus_2.numos` twice and comparing hashes).
+
+**What Phase 4A does *not* do.** It proves scripted input is *deterministic and
+reproducible*; it does **not** yet assert the pixels are *correct* (no OCR, no
+golden-image diff). Confirming "`1+2` renders `3`" or "`1/2+1/3` renders `5/6`" is
+**Phase 4B** (assertions / golden-image comparison).
 
 ## Keyboard map (Phase 3A)
 
@@ -296,13 +384,15 @@ PlatformIO paths can hit the Windows path-length limit). Consequences:
   in the launcher.
 - **Only CalculationApp is wired** in the emulator; other apps print
   "no implementada" ([NativeHal.cpp](../src/hal/NativeHal.cpp)).
-- **Deterministic screenshots exist; scripted input does not yet.** Phase 3A adds
-  `--frames` / `--run-for-ms` / `--headless` for unattended boot smokes, and Phase
-  3B adds `--deterministic` + `--screenshot` for a reproducible 320×240 PPM artifact
-  (see [Deterministic mode & screenshots](#deterministic-mode--screenshots-phase-3b)).
-  Still future (**Phase 4**): scripted-input replay and value assertions like
-  `1+2 → 3`. The interactive window still runs until you close it; capture is
-  single-shot at exit, and no pixel-level correctness is asserted yet.
+- **Scripted input replay exists (Phase 4A); value assertions do not yet.** Phase
+  3A adds `--frames` / `--run-for-ms` / `--headless` for unattended boot smokes,
+  Phase 3B adds `--deterministic` + `--screenshot` for a reproducible 320×240 PPM
+  artifact, and Phase 4A adds `--script` for deterministic `.numos` input replay
+  (see [Scripted input replay](#scripted-input-replay-phase-4a)). Still future
+  (**Phase 4B**): pixel-level **value assertions** / golden-image comparison like
+  `1+2 → 3`. Phase 4A proves replay is deterministic and reproducible, but asserts
+  no pixel correctness; the interactive window (no `--script`/`--frames`) still runs
+  until you close it.
 
 ---
 
