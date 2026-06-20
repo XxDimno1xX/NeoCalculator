@@ -43,6 +43,7 @@ NeoCalculator_Case_v0_3
 .aider*
 mimo_config.yaml
 venv
+graphify-out
 
 # IA
 emulator-sdl2-audit-evidence.md

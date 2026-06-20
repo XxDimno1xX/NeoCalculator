@@ -312,6 +312,113 @@ reproducible*; it does **not** yet assert the pixels are *correct* (no OCR, no
 golden-image diff). Confirming "`1+2` renders `3`" or "`1/2+1/3` renders `5/6`" is
 **Phase 4B** (assertions / golden-image comparison).
 
+### Candidate screenshots & golden comparison (Phase 4B-A)
+
+Phase 4B-A adds the *machinery* for visual assertions: a way to generate
+**candidate** screenshots, a dependency-free way to **compare** a candidate to an
+accepted **golden**, and additive CI that uploads candidates and gates only when a
+human-reviewed golden exists. It is tooling only — **no renderer, CAS, firmware,
+or math-geometry change** — and it still makes **no semantic correctness claim** on
+its own (that is a human decision at promotion time; automated result extraction is
+Phase 4B-B).
+
+**Generate candidates** (stdlib Python, Windows + Linux):
+
+```bash
+pio run -e emulator_pc
+python scripts/generate-emulator-candidates.py
+# -> out/emulator-candidates/launcher_smoke.ppm
+#    out/emulator-candidates/calc_1_plus_2.ppm
+#    out/emulator-candidates/calc_fraction_sum.ppm   (each 320x240, 230415 bytes)
+```
+
+It drives each bundled `.numos` script with `--headless --deterministic --script
+--frames --screenshot`, writing one PPM per script into `out/emulator-candidates/`
+(under git-ignored `out/`). `--bin` and `--out-dir` override the defaults.
+
+**Compare** a candidate against an expected/golden PPM, byte-for-byte:
+
+```bash
+python scripts/compare-ppm.py EXPECTED.ppm ACTUAL.ppm [--write-diff diff.ppm]
+```
+
+It validates both are P6 320×240 maxval-255 with a full 230415-byte payload,
+prints each file's dimensions / size / SHA-256, and on difference reports the
+mismatching byte count, pixel count, and bounding box. `--write-diff` emits a PPM
+that paints differing pixels magenta. Exit codes: **0** identical, **1** valid but
+different, **2** invalid input. (Run it with the same file twice to validate a
+single PPM's format — exit 0.)
+
+**Masked comparison (Phase 4B-B).** Some screens are not byte-stable across
+launches: the CalculationApp input cursor blinks (an `lv_timer` toggling every
+500 ms), and the deterministic tick only pins the blink *phase within a single
+run*, so spaced-apart launches differ inside a tiny band around the cursor.
+`launcher_smoke` has no cursor and stays byte-stable; `calc_1_plus_2` /
+`calc_fraction_sum` differ only inside `x[10..34] y[8..16]`. To compare them
+anyway, ignore that region:
+
+```bash
+# Ad-hoc rectangle(s) (top-left origin, X,Y,W,H; repeatable):
+python scripts/compare-ppm.py golden.ppm candidate.ppm --ignore-rect 8,6,30,13
+
+# Or a committed mask file (one 'x,y,w,h' per line; '#' comments, blank lines ok):
+python scripts/compare-ppm.py golden.ppm candidate.ppm \
+  --mask-file tests/emulator/masks/calc_1_plus_2.mask --write-diff diff.ppm
+```
+
+Pixels inside an ignore-rect are excluded from the mismatch count, the bounding
+box, and the equality decision (the diff image paints them **teal**). If the only
+differences fall inside masks, the result is `IDENTICAL (after masking …)` → exit
+0; differences *outside* a mask still exit 1. Rects with `x<0`, `y<0`, `w<=0` or
+`h<=0` are an error (exit 2); rects past the frame edge are clipped.
+
+**When is a mask acceptable?** Only for genuinely nondeterministic UI regions (the
+blinking cursor). Keep it tight — never mask the expression or result pixels, and
+never use a mask to hide a rendering bug (the renderer/cursor is frozen, so the
+blink is masked in the comparator, not fixed in `src/`). A mask is **not** a
+substitute for a semantic assertion that the result is correct — that is still a
+human judgement at promotion time (automated result extraction is Phase 4B-C). See
+[`tests/emulator/masks/README.md`](../tests/emulator/masks/README.md).
+
+**Promote a candidate to a golden** by visually confirming it is correct, then
+copying + committing it (with its mask, if it needs one):
+
+```bash
+cp out/emulator-candidates/calc_1_plus_2.ppm tests/emulator/golden/calc_1_plus_2.ppm
+git add tests/emulator/golden/calc_1_plus_2.ppm tests/emulator/masks/calc_1_plus_2.mask
+git commit -m "Accept golden+mask: calc_1_plus_2 renders 3 (cursor region masked)"
+```
+
+No tool ever writes into `tests/emulator/golden/` or `tests/emulator/masks/`.
+
+**Accepted goldens & the review gate.** Accepted, human-reviewed goldens live in
+[`tests/emulator/golden/`](../tests/emulator/golden/) (committed; same stem as the
+script). A candidate becomes a golden only by a human visually confirming it is
+correct and then copying + committing it:
+
+```bash
+cp out/emulator-candidates/calc_1_plus_2.ppm tests/emulator/golden/calc_1_plus_2.ppm
+git add tests/emulator/golden/calc_1_plus_2.ppm && git commit -m "Accept golden: 1+2 = 3"
+```
+
+No tool ever writes into `tests/emulator/golden/`. See
+[`tests/emulator/golden/README.md`](../tests/emulator/golden/README.md) for the full
+policy.
+
+**CI behavior.** The emulator workflow
+([`.github/workflows/emulator-build.yml`](../.github/workflows/emulator-build.yml))
+generates candidates, uploads them under the **`numos-emulator-candidates`**
+artifact, and then for each candidate:
+
+- golden **and** mask present → **masked** compare (`--mask-file`), fails on
+  mismatch outside the mask;
+- golden present, no mask → **exact** byte compare, fails on mismatch;
+- golden absent → prints a `::warning::` and continues.
+
+So an unreviewed image can never silently become a passing gate, missing goldens
+never fail CI (they just produce a downloadable candidate to review), and adding a
+mask never weakens a screen that already compares exactly.
+
 ## Keyboard map (Phase 3A)
 
 PC keys map directly to calculator `KeyCode`s in
@@ -384,15 +491,23 @@ PlatformIO paths can hit the Windows path-length limit). Consequences:
   in the launcher.
 - **Only CalculationApp is wired** in the emulator; other apps print
   "no implementada" ([NativeHal.cpp](../src/hal/NativeHal.cpp)).
-- **Scripted input replay exists (Phase 4A); value assertions do not yet.** Phase
-  3A adds `--frames` / `--run-for-ms` / `--headless` for unattended boot smokes,
-  Phase 3B adds `--deterministic` + `--screenshot` for a reproducible 320×240 PPM
-  artifact, and Phase 4A adds `--script` for deterministic `.numos` input replay
-  (see [Scripted input replay](#scripted-input-replay-phase-4a)). Still future
-  (**Phase 4B**): pixel-level **value assertions** / golden-image comparison like
-  `1+2 → 3`. Phase 4A proves replay is deterministic and reproducible, but asserts
-  no pixel correctness; the interactive window (no `--script`/`--frames`) still runs
-  until you close it.
+- **Scripted input replay + golden tooling exist; semantic value assertions do
+  not yet.** Phase 3A adds `--frames` / `--run-for-ms` / `--headless` for
+  unattended boot smokes, Phase 3B adds `--deterministic` + `--screenshot` for a
+  reproducible 320×240 PPM artifact, Phase 4A adds `--script` for deterministic
+  `.numos` input replay (see
+  [Scripted input replay](#scripted-input-replay-phase-4a)), **Phase 4B-A**
+  adds candidate-screenshot generation + a dependency-free PPM comparator + a
+  human-gated golden directory, and **Phase 4B-B** adds cursor-safe masking
+  (`--ignore-rect` / `--mask-file`) so calc screenshots compare despite cursor
+  blink (see
+  [Candidate screenshots & golden comparison](#candidate-screenshots--golden-comparison-phase-4b-a)).
+  Still future (**Phase 4B-C**): *semantic* value assertions like "the pixels
+  actually read `3`" without a hand-reviewed golden (e.g. OCR / result
+  extraction). Byte-comparison against a golden (even masked) only proves a
+  candidate equals a human-accepted image; it does not by itself prove
+  correctness. The interactive window (no `--script`/`--frames`) still runs until
+  you close it.
 
 ---
 

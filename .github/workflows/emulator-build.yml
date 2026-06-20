@@ -207,3 +207,71 @@ jobs:
             out/calc_1_plus_2.log
             out/calc_1_plus_2.ppm
           if-no-files-found: ignore
+
+      # ---------------------------------------------------------------------
+      # Candidate screenshot generation + golden comparison (Phase 4B-A).
+      #
+      # Additive to the Phase 3A/3B/4A smokes above (kept as-is). This generates
+      # CANDIDATE screenshots (launcher + 1+2 + fraction sum) into
+      # out/emulator-candidates/ via the same deterministic headless path, then:
+      #   * uploads them as an artifact for HUMAN review, and
+      #   * compares each candidate to its accepted golden under
+      #     tests/emulator/golden/ IFF that golden exists. (Phase 4B-B) If a
+      #     matching ignore-rect mask exists under tests/emulator/masks/, the
+      #     compare ignores those volatile regions (the blinking cursor); with no
+      #     mask the compare is byte-exact, exactly as before.
+      # A missing golden is a WARNING, not a failure — so an unreviewed image can
+      # never silently become a passing gate. A present golden that mismatches
+      # (outside any mask) FAILS the job. See tests/emulator/golden/README.md and
+      # tests/emulator/masks/README.md. This still makes NO semantic "1+2=3"
+      # claim; that requires a human-reviewed golden.
+      - name: Generate candidate screenshots (Phase 4B-A)
+        run: |
+          set -euo pipefail
+          python scripts/generate-emulator-candidates.py \
+            --bin .pio/build/emulator_pc/program \
+            --out-dir out/emulator-candidates
+          echo "--- candidate inventory ---"
+          ls -l out/emulator-candidates/
+
+      - name: Upload candidate screenshots (Phase 4B-A)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: numos-emulator-candidates
+          path: out/emulator-candidates/
+          if-no-files-found: warn
+
+      - name: Compare candidates against accepted goldens (Phase 4B-A)
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          status=0
+          compared=0
+          for cand in out/emulator-candidates/*.ppm; do
+            name="$(basename "$cand")"
+            golden="tests/emulator/golden/$name"
+            mask="tests/emulator/masks/${name%.ppm}.mask"
+            if [ -f "$golden" ]; then
+              if [ -f "$mask" ]; then
+                echo "=== comparing $name against accepted golden (masked: $mask) ==="
+                cmp_ok=0
+                python scripts/compare-ppm.py "$golden" "$cand" --mask-file "$mask" || cmp_ok=$?
+              else
+                echo "=== comparing $name against accepted golden (exact) ==="
+                cmp_ok=0
+                python scripts/compare-ppm.py "$golden" "$cand" || cmp_ok=$?
+              fi
+              if [ "$cmp_ok" -eq 0 ]; then
+                echo "OK: $name matches accepted golden."
+              else
+                echo "::error::PPM mismatch — $name differs from accepted golden $golden (outside any mask)"
+                status=1
+              fi
+              compared=$((compared+1))
+            else
+              echo "::warning::No accepted golden for $name ($golden missing) — candidate uploaded for human review, not gating CI."
+            fi
+          done
+          echo "Compared $compared candidate(s) against accepted goldens."
+          exit $status
