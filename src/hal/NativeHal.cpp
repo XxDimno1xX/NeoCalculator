@@ -720,13 +720,22 @@ static bool saveScreenshotPPM(const char* path)
 // contiene el frame compuesto). El script se valida ENTERO al cargar (fail-fast,
 // exit != 0) para no ejecutar a medias y capturar un estado erroneo.
 // ════════════════════════════════════════════════════════════════════════════
-enum class ScriptCmdType : uint8_t { Wait, Key, KeyDown, KeyUp, Screenshot, Log };
+enum class ScriptCmdType : uint8_t {
+    Wait, Key, KeyDown, KeyUp, Screenshot, Log,
+    // Phase 4B-C: aserciones semanticas (sin OCR, sin pixeles). Comparan el
+    // estado de la app activa / el resultado calculado por CalculationApp.
+    AssertApp,             // assert_app NAME   (NAME canonico en strArg)
+    AssertResult,          // assert_result TEXT          (igualdad exacta)
+    AssertResultContains,  // assert_result_contains TEXT (subcadena)
+    AssertNoError          // assert_no_error             (resultado sin error)
+};
 
 struct ScriptCmd {
     ScriptCmdType type;
     KeyCode       key   = KeyCode::NONE;  // Key/KeyDown/KeyUp
     long          waitN = 0;              // Wait
-    std::string   strArg;                 // Screenshot (ruta) / Log (mensaje)
+    std::string   strArg;                 // Screenshot (ruta) / Log (mensaje) /
+                                          // Assert* (texto esperado / app canonica)
     int           line  = 0;              // linea de origen (diagnostico)
 };
 
@@ -752,6 +761,19 @@ static bool parseNonNegLong(const std::string& s, long& out)
     for (char c : s) if (c < '0' || c > '9') return false;
     out = std::strtol(s.c_str(), nullptr, 10);
     return out >= 0;
+}
+
+// Phase 4B-C: traduce el NOMBRE de app de un `assert_app` a su forma canonica.
+// Case-insensitive; acepta alias amigables. Devuelve nullptr si no se reconoce
+// (error de parseo -> el script falla al cargar con exit 2).
+static const char* canonicalAppName(const std::string& name)
+{
+    std::string lc = name;
+    for (char& c : lc) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (lc == "calculation" || lc == "calc")     return "Calculation";
+    if (lc == "menu"        || lc == "launcher") return "Menu";
+    if (lc == "splash")                           return "Splash";
+    return nullptr;
 }
 
 // Carga y VALIDA el script entero. Devuelve false (sin ejecutar nada) ante el
@@ -820,6 +842,35 @@ static bool loadScript(const char* path)
             sc.type   = ScriptCmdType::Log;
             sc.strArg = rest;
         }
+        else if (lc == "assert_app") {
+            std::string name, extra;
+            if (!(iss >> name)) return scriptErr(path, lineNo, "assert_app requiere un NOMBRE de app");
+            if (iss >> extra)   return scriptErr(path, lineNo, "assert_app: demasiados argumentos");
+            const char* canon = canonicalAppName(name);
+            if (!canon) return scriptErr(path, lineNo, "assert_app: app desconocida (Calculation|Menu|Splash)");
+            sc.type   = ScriptCmdType::AssertApp;
+            sc.strArg = canon;
+        }
+        else if (lc == "assert_result" || lc == "assert_result_contains") {
+            // Resto de la linea (texto esperado): recorta espacios y comillas.
+            std::string rest;
+            std::getline(iss, rest);
+            size_t b = rest.find_first_not_of(" \t");
+            rest = (b == std::string::npos) ? std::string() : rest.substr(b);
+            size_t e = rest.find_last_not_of(" \t");
+            if (e != std::string::npos) rest = rest.substr(0, e + 1);
+            if (rest.size() >= 2 && rest.front() == '"' && rest.back() == '"')
+                rest = rest.substr(1, rest.size() - 2);
+            if (rest.empty()) return scriptErr(path, lineNo, "assert_result requiere el texto esperado");
+            sc.type   = (lc == "assert_result") ? ScriptCmdType::AssertResult
+                                                : ScriptCmdType::AssertResultContains;
+            sc.strArg = rest;
+        }
+        else if (lc == "assert_no_error") {
+            std::string extra;
+            if (iss >> extra) return scriptErr(path, lineNo, "assert_no_error no acepta argumentos");
+            sc.type = ScriptCmdType::AssertNoError;
+        }
         else {
             return scriptErr(path, lineNo, "comando desconocido");
         }
@@ -830,6 +881,70 @@ static bool loadScript(const char* path)
     g_scriptActive = !g_script.empty();
     std::printf("[SCRIPT] cargado '%s': %zu comandos\n", path, g_script.size());
     return true;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Phase 4B-C: aserciones semanticas (sin OCR, sin pixeles).
+// ════════════════════════════════════════════════════════════════════════════
+
+// Forma textual canonica del resultado de CalculationApp. Lee el ExactVal ya
+// calculado (no toca el render) y lo formatea. Es EXACTA para los casos que
+// asertamos —entero y fraccion pura, p.ej. "3" y "5/6"— y best-effort (forma
+// lineal determinista) para radicales/π/e, cuya asercion queda fuera del
+// alcance de esta fase.
+static std::string formatExactVal(const vpam::ExactVal& v)
+{
+    if (!v.ok)         return v.error.empty() ? std::string("ERROR") : v.error;
+    if (v.approximate) {
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "%.10g", v.approxVal);
+        return std::string(buf);
+    }
+
+    auto frac = [](long long n, long long d) -> std::string {
+        char buf[48];
+        if (d == 1) std::snprintf(buf, sizeof(buf), "%lld", n);
+        else        std::snprintf(buf, sizeof(buf), "%lld/%lld", n, d);
+        return std::string(buf);
+    };
+
+    // Entero o fraccion pura (den>0): el caso comun y el unico que asertamos.
+    if (v.inner == 1 && v.piMul == 0 && v.eMul == 0)
+        return frac(static_cast<long long>(v.num), static_cast<long long>(v.den));
+
+    // Radicales / π / e: forma lineal best-effort.
+    std::string s = frac(static_cast<long long>(v.num), static_cast<long long>(v.den));
+    if (v.inner > 1) {
+        s += "*";
+        if (v.outer != 1) { s += std::to_string(static_cast<long long>(v.outer)); s += "*"; }
+        s += "sqrt(" + std::to_string(static_cast<long long>(v.inner)) + ")";
+    }
+    if (v.piMul != 0) { s += "*pi"; if (v.piMul != 1) s += "^" + std::to_string(static_cast<int>(v.piMul)); }
+    if (v.eMul  != 0) { s += "*e";  if (v.eMul  != 1) s += "^" + std::to_string(static_cast<int>(v.eMul));  }
+    return s;
+}
+
+// Nombre canonico de la app activa (coherente con canonicalAppName()).
+static const char* activeAppName()
+{
+    return (g_mode == AppMode::SPLASH) ? "Splash"
+         : (g_mode == AppMode::MENU)   ? "Menu"
+                                       : "Calculation";
+}
+
+// Diagnostico de asercion: SIEMPRE se imprime (independiente de --quiet, que
+// solo silencia ruido por-frame). Un FAIL marca exit 4 y detiene el replay.
+static void assertFail(int line, const std::string& msg)
+{
+    std::fprintf(stderr, "[ASSERT] %s:%d: FAIL - %s\n",
+                 g_opts.scriptPath ? g_opts.scriptPath : "<script>", line, msg.c_str());
+    g_exitCode = 4;
+    g_quit     = true;
+}
+static void assertPass(int line, const std::string& msg)
+{
+    std::printf("[ASSERT] %s:%d: PASS - %s\n",
+                g_opts.scriptPath ? g_opts.scriptPath : "<script>", line, msg.c_str());
 }
 
 // Procesa el comando de script de ESTE frame. Se llama AL INICIO del bucle,
@@ -862,6 +977,52 @@ static void scriptStepBegin()
         case ScriptCmdType::Log:
             std::printf("[SCRIPT] %s\n", sc.strArg.c_str());
             break;
+
+        // ── Phase 4B-C: aserciones semanticas ───────────────────────────
+        case ScriptCmdType::AssertApp: {
+            const char* cur = activeAppName();
+            if (sc.strArg == cur)
+                assertPass(sc.line, "assert_app " + sc.strArg);
+            else
+                assertFail(sc.line, "assert_app esperaba '" + sc.strArg +
+                                    "' pero la app activa es '" + cur + "'");
+            break;
+        }
+        case ScriptCmdType::AssertResult:
+        case ScriptCmdType::AssertResultContains: {
+            if (g_mode != AppMode::CALCULATION || !g_calcApp) {
+                assertFail(sc.line, "assert_result requiere CalculationApp activa (app actual: '" +
+                                    std::string(activeAppName()) + "')");
+                break;
+            }
+            if (!g_calcApp->debugHasResult()) {
+                assertFail(sc.line, "assert_result: no hay resultado evaluado "
+                                    "(pulsa ENTER y deja asentar con `wait` antes de asertar)");
+                break;
+            }
+            const std::string actual = formatExactVal(g_calcApp->debugLastResult());
+            const bool ok = (sc.type == ScriptCmdType::AssertResult)
+                          ? (actual == sc.strArg)
+                          : (actual.find(sc.strArg) != std::string::npos);
+            const char* verb = (sc.type == ScriptCmdType::AssertResult) ? "==" : "contiene";
+            if (ok)
+                assertPass(sc.line, "assert_result " + std::string(verb) + " '" +
+                                    sc.strArg + "' (actual='" + actual + "')");
+            else
+                assertFail(sc.line, "assert_result esperaba (" + std::string(verb) + ") '" +
+                                    sc.strArg + "' pero actual='" + actual + "'");
+            break;
+        }
+        case ScriptCmdType::AssertNoError: {
+            if (g_mode == AppMode::CALCULATION && g_calcApp && g_calcApp->debugHasResult() &&
+                !g_calcApp->debugLastResult().ok) {
+                assertFail(sc.line, "assert_no_error: el resultado tiene error '" +
+                                    g_calcApp->debugLastResult().error + "'");
+            } else {
+                assertPass(sc.line, "assert_no_error");
+            }
+            break;
+        }
     }
 }
 

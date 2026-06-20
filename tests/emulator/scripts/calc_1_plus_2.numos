@@ -1,11 +1,18 @@
-# calc_1_plus_2.numos — Phase 4A scripted-replay: type "1+2" and evaluate.
+# calc_1_plus_2.numos — type "1+2", evaluate, screenshot, and ASSERT the result.
 #
-# Demonstrates driving CalculationApp through the SAME dispatch path as live SDL
-# input: open the (centered, default-focused) Calculation card, type 1 + 2, press
-# ENTER, let the result render, then screenshot.
+# Drives CalculationApp through the SAME dispatch path as live SDL input: open
+# the (centered, default-focused) Calculation card, type 1 + 2, press ENTER, let
+# the result render, screenshot, then make SEMANTIC assertions.
 #
-# This phase proves SCRIPTED INPUT works deterministically. It does NOT assert the
-# pixels say "3" (no OCR / golden compare yet — that is Phase 4B).
+# Phase 4A proved scripted input is deterministic. Phase 4B-C adds the semantic
+# proof: instead of only trusting a golden image, we read the value NumOS
+# actually computed and assert it equals 3 — no OCR, no pixel matching. The probe
+# reads CalculationApp's evaluated ExactVal through an emulator-only read-only
+# accessor (NATIVE_SIM); see NativeHal::formatExactVal.
+#
+# Note: assert_result checks the COMPUTED value, not the rendered pixels. Visual
+# correctness (does the 2D layout draw "3") is the separate, human-gated golden
+# flow (Phase 4B-A/B) — assertions and goldens are complementary, not redundant.
 #
 # Timing notes (deterministic, step-ms 16):
 #   * 200 frames  -> splash (~frame 125) is safely done; we are in the launcher.
@@ -16,6 +23,7 @@
 # Run:
 #   program --headless --deterministic --script tests/emulator/scripts/calc_1_plus_2.numos \
 #           --frames 1400 --screenshot out/calc_1_plus_2.ppm --quiet
+# Exit codes: 0 ok · 2 script/parse error · 3 screenshot write error · 4 assertion failure.
 
 log "calc_1_plus_2: waiting for launcher"
 wait 200
@@ -33,5 +41,15 @@ key 2
 key ENTER
 wait 120
 
+# Screenshot FIRST: the deferred capture happens on this frame, before the
+# asserts run on later frames, so the artifact is produced even if an assertion
+# then fails.
 screenshot out/calc_1_plus_2.ppm
 log "calc_1_plus_2: screenshot captured"
+
+# Semantic assertions (Phase 4B-C): the active app is Calculation, the result
+# evaluated without error, and the computed value is exactly 3.
+assert_app Calculation
+assert_no_error
+assert_result 3
+log "calc_1_plus_2: assertions passed (result == 3)"

@@ -209,6 +209,53 @@ jobs:
           if-no-files-found: ignore
 
       # ---------------------------------------------------------------------
+      # Semantic assertions (Phase 4B-C) — additive, and SEPARATE from the
+      # visual candidate/golden flow below (which is kept intact). This runs the
+      # scripted fixtures headless+deterministic and lets the .numos `assert_*`
+      # commands check the value CalculationApp actually COMPUTED — no OCR, no
+      # pixels: 1+2 == 3 and 1/2+1/3 == 5/6. The emulator exits 0 on success and
+      # 4 on any assertion failure; we assert exit 0 EXPLICITLY (redirect to a
+      # file so the status is not masked by a pipe) and grep the PASS markers.
+      # This proves correctness WITHOUT a hand-reviewed golden image.
+      - name: Semantic assertion smoke (headless deterministic, Phase 4B-C)
+        run: |
+          set -euo pipefail
+          BIN=.pio/build/emulator_pc/program
+          mkdir -p out
+
+          run_assert() {
+            script="$1"; log="$2"
+            echo "=== $script ==="
+            rc=0
+            SDL_VIDEODRIVER=dummy timeout 60s "$BIN" \
+              --headless --deterministic --script "$script" \
+              --frames 1400 --quiet > "$log" 2>&1 || rc=$?
+            cat "$log"
+            if [ "$rc" -ne 0 ]; then
+              echo "::error::semantic assertions FAILED for $script (exit $rc)"
+              return 1
+            fi
+            grep -q "PASS - assert_result" "$log"
+            ! grep -q "FAIL -" "$log"
+          }
+
+          run_assert tests/emulator/scripts/calc_1_plus_2.numos     out/semantic_calc_1_plus_2.log
+          grep -q "assert_result == '3'" out/semantic_calc_1_plus_2.log
+          run_assert tests/emulator/scripts/calc_fraction_sum.numos out/semantic_calc_fraction_sum.log
+          grep -q "assert_result == '5/6'" out/semantic_calc_fraction_sum.log
+          echo "OK: semantic assertions passed (1+2==3, 1/2+1/3==5/6) with NO golden image."
+
+      - name: Upload Phase 4B-C semantic smoke logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: numos-emulator-semantic-smoke
+          path: |
+            out/semantic_calc_1_plus_2.log
+            out/semantic_calc_fraction_sum.log
+          if-no-files-found: ignore
+
+      # ---------------------------------------------------------------------
       # Candidate screenshot generation + golden comparison (Phase 4B-A).
       #
       # Additive to the Phase 3A/3B/4A smokes above (kept as-is). This generates

@@ -257,6 +257,10 @@ contain spaces.
 | `keydown NAME` / `keyup NAME` | Inject only the press / only the release. |
 | `screenshot PATH` | Dump a 320×240 PPM at `PATH`, captured *after* this frame's render. |
 | `log "message"` | Print `message` to stdout (handy for CI log markers). |
+| `assert_app NAME` | (Phase 4B-C) Assert the active app is `NAME` ∈ `Calculation`/`Menu`/`Splash` (aliases `Calc`/`Launcher`). |
+| `assert_result TEXT` | (Phase 4B-C) Assert CalculationApp's *computed* result equals `TEXT` exactly (e.g. `3`, `5/6`). |
+| `assert_result_contains TEXT` | (Phase 4B-C) Like `assert_result` but a substring match. |
+| `assert_no_error` | (Phase 4B-C) Assert the last evaluated result has no error flag. |
 
 **Key names** map onto existing calculator `KeyCode`s (no parallel key system):
 
@@ -298,19 +302,70 @@ argument points; the bundled scripts write under `out/` (git-ignored). PPM P6,
 
 | Condition | Exit |
 |:--|:--|
-| Unknown command, invalid key name, missing argument, negative `wait`, unreadable script file | `2` |
+| Success (all commands ran; any assertions passed) | `0` |
+| Unknown command, invalid key name, missing argument, negative `wait`, unknown `assert_app` name, unreadable script file | `2` |
 | `screenshot` write failure at run time (bad path / disk full) | `3` |
+| Assertion failure (`assert_*`) at run time (Phase 4B-C) | `4` |
 
-Each prints `[SCRIPT] <file>:<line>: <reason>` to stderr, so CI fails loudly.
+Parse errors print `[SCRIPT] <file>:<line>: <reason>` to stderr; assertion failures
+print `[ASSERT] <file>:<line>: FAIL - expected … got …` to stderr — both fail CI
+loudly. Assertion diagnostics print regardless of `--quiet` (which only silences
+per-frame noise).
 
 **Determinism.** Two runs of the same scripted command produce **byte-identical**
 PPMs (verified locally via SHA-256, and re-checked in CI by running
 `calc_1_plus_2.numos` twice and comparing hashes).
 
 **What Phase 4A does *not* do.** It proves scripted input is *deterministic and
-reproducible*; it does **not** yet assert the pixels are *correct* (no OCR, no
-golden-image diff). Confirming "`1+2` renders `3`" or "`1/2+1/3` renders `5/6`" is
-**Phase 4B** (assertions / golden-image comparison).
+reproducible*; it does **not** assert the pixels are *correct* (no OCR, no
+golden-image diff). Confirming the *rendered pixels* read "`3`" is the golden flow
+below; confirming the *computed value* is `3` is Phase 4B-C, next.
+
+### Semantic assertions (Phase 4B-C)
+
+Phase 4B-C lets a `.numos` script assert the value NumOS **actually computed**,
+without OCR and without relying only on a golden image. The four `assert_*`
+commands (see the syntax table above) read CalculationApp's evaluated result
+through an **emulator-only, read-only** accessor (`debugLastResult()`, guarded by
+`#ifdef NATIVE_SIM`), format the exact `vpam::ExactVal` to text
+(`NativeHal::formatExactVal`: `3`, `5/6`, …), and compare. No pixels are parsed,
+no renderer geometry is touched, and the firmware binary is unchanged (the
+accessor is excised when `NATIVE_SIM` is undefined).
+
+```text
+# … type 1 + 2, press ENTER, let it settle …
+key ENTER
+wait 120
+screenshot out/calc_1_plus_2.ppm   # capture FIRST, so the artifact exists even if an assert fails
+assert_app Calculation             # active app is the calculator
+assert_no_error                    # evaluation produced no error
+assert_result 3                    # the computed value is exactly 3
+```
+
+Run it (exit 0 on pass, `4` on assertion failure):
+
+```bash
+SDL_VIDEODRIVER=dummy ./scripts/run-emulator-linux.sh \
+  --headless --deterministic --script tests/emulator/scripts/calc_1_plus_2.numos \
+  --frames 1400 --quiet
+```
+
+Each assertion prints `[ASSERT] <file>:<line>: PASS|FAIL - …` (the `actual='…'`
+value is shown on both outcomes), regardless of `--quiet`. `tests/emulator/scripts/`
+ships two asserting fixtures: `calc_1_plus_2.numos` (`== 3`) and
+`calc_fraction_sum.numos` (`== 5/6`). CI runs both as a headless deterministic
+**semantic smoke** (separate from the golden flow below).
+
+**Semantic assertions vs. visual goldens — they are complementary, not redundant.**
+`assert_result` proves the *math engine computed the right value*; it says nothing
+about whether the 2D layout *draws* it correctly. A golden image proves the
+*rendered pixels* match a human-accepted reference; it says nothing about
+correctness unless a human vetted that reference. Use assertions for value
+correctness (cheap, no human gate) and goldens for render correctness (human-gated).
+**Current limitation:** assertions cover CalculationApp's `ExactVal` result only —
+`formatExactVal` is exact for integers and pure fractions (what the fixtures
+assert) and best-effort for radicals/π/e; there is no assertion of the *rendered*
+output, and other apps are not covered.
 
 ### Candidate screenshots & golden comparison (Phase 4B-A)
 
@@ -376,8 +431,9 @@ differences fall inside masks, the result is `IDENTICAL (after masking …)` →
 blinking cursor). Keep it tight — never mask the expression or result pixels, and
 never use a mask to hide a rendering bug (the renderer/cursor is frozen, so the
 blink is masked in the comparator, not fixed in `src/`). A mask is **not** a
-substitute for a semantic assertion that the result is correct — that is still a
-human judgement at promotion time (automated result extraction is Phase 4B-C). See
+substitute for a semantic assertion that the result is correct — for *value*
+correctness use the Phase 4B-C [`assert_result`](#semantic-assertions-phase-4b-c)
+commands; render correctness remains a human judgement at promotion time. See
 [`tests/emulator/masks/README.md`](../tests/emulator/masks/README.md).
 
 **Promote a candidate to a golden** by visually confirming it is correct, then
@@ -491,23 +547,26 @@ PlatformIO paths can hit the Windows path-length limit). Consequences:
   in the launcher.
 - **Only CalculationApp is wired** in the emulator; other apps print
   "no implementada" ([NativeHal.cpp](../src/hal/NativeHal.cpp)).
-- **Scripted input replay + golden tooling exist; semantic value assertions do
-  not yet.** Phase 3A adds `--frames` / `--run-for-ms` / `--headless` for
-  unattended boot smokes, Phase 3B adds `--deterministic` + `--screenshot` for a
-  reproducible 320×240 PPM artifact, Phase 4A adds `--script` for deterministic
-  `.numos` input replay (see
+- **Scripted input replay, golden tooling, AND semantic value assertions exist;
+  rendered-pixel assertion does not.** Phase 3A adds `--frames` / `--run-for-ms` /
+  `--headless` for unattended boot smokes, Phase 3B adds `--deterministic` +
+  `--screenshot` for a reproducible 320×240 PPM artifact, Phase 4A adds `--script`
+  for deterministic `.numos` input replay (see
   [Scripted input replay](#scripted-input-replay-phase-4a)), **Phase 4B-A**
   adds candidate-screenshot generation + a dependency-free PPM comparator + a
-  human-gated golden directory, and **Phase 4B-B** adds cursor-safe masking
+  human-gated golden directory, **Phase 4B-B** adds cursor-safe masking
   (`--ignore-rect` / `--mask-file`) so calc screenshots compare despite cursor
   blink (see
-  [Candidate screenshots & golden comparison](#candidate-screenshots--golden-comparison-phase-4b-a)).
-  Still future (**Phase 4B-C**): *semantic* value assertions like "the pixels
-  actually read `3`" without a hand-reviewed golden (e.g. OCR / result
-  extraction). Byte-comparison against a golden (even masked) only proves a
-  candidate equals a human-accepted image; it does not by itself prove
-  correctness. The interactive window (no `--script`/`--frames`) still runs until
-  you close it.
+  [Candidate screenshots & golden comparison](#candidate-screenshots--golden-comparison-phase-4b-a)),
+  and **Phase 4B-C** adds `assert_*` commands that check the value CalculationApp
+  actually *computed* — no OCR, no pixels — via an emulator-only read-only probe
+  (see [Semantic assertions](#semantic-assertions-phase-4b-c)). Byte-comparison
+  against a golden (even masked) only proves a candidate equals a human-accepted
+  image; a Phase 4B-C assertion proves the *math result* is correct but says
+  nothing about the *rendered pixels*. Still future: asserting that the rendered
+  output reads `3` *without* a hand-reviewed golden (e.g. OCR), and extending
+  assertions beyond CalculationApp's `ExactVal` result. The interactive window
+  (no `--script`/`--frames`) still runs until you close it.
 
 ---
 
