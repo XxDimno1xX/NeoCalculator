@@ -45,16 +45,31 @@ also human-gated; see [`tests/emulator/masks/README.md`](../masks/README.md).
    `convert out/emulator-candidates/calc_1_plus_2.ppm calc.png`.
 
 3. **Promote** — only after a human confirms correctness — by copying the
-   candidate here and committing it:
+   candidate here and committing it. Use the helper (Phase 4B-D) so the copy is
+   byte-exact and you get the SHA-256 + the compare mode CI will use:
 
    ```bash
-   cp out/emulator-candidates/calc_1_plus_2.ppm tests/emulator/golden/calc_1_plus_2.ppm
+   # See what's promotable (read-only): stem, sha256, golden/mask state.
+   python scripts/promote-emulator-golden.py --list-candidates
+   # Preview without writing anything:
+   python scripts/promote-emulator-golden.py --dry-run calc_1_plus_2
+   # Promote (refuses if the candidate is missing or not a valid 320x240 PPM,
+   # and refuses to clobber an existing golden without --force):
+   python scripts/promote-emulator-golden.py calc_1_plus_2
    git add tests/emulator/golden/calc_1_plus_2.ppm
    git commit -m "Accept golden: calc_1_plus_2 renders 3"
    ```
 
-   The commit message records the human acceptance. Re-blessing a changed golden
-   follows the same path; review the old-vs-new diff in the PR.
+   The tool only does the copy + reporting step — it **never** generates images,
+   **never** edits masks, and **never** commits. The commit is the human
+   acceptance record. The equivalent manual copy is still valid:
+
+   ```bash
+   cp out/emulator-candidates/calc_1_plus_2.ppm tests/emulator/golden/calc_1_plus_2.ppm
+   ```
+
+   Re-blessing a changed golden follows the same path with `--force`; review the
+   old-vs-new diff in the PR (see *Updating a golden* below).
 
 ### Promoting a golden that needs a mask (cursor nondeterminism)
 
@@ -71,19 +86,41 @@ because the input cursor blinks. To promote one safely:
    covering the cursor band, with a comment explaining why.
 4. Verify the mask closes the gate: `compare-ppm.py a.ppm b.ppm --mask-file
    tests/emulator/masks/<name>.mask` must report IDENTICAL (exit 0).
-5. Commit the golden **and** the mask together so review sees both:
+5. Commit the golden **and** the mask together so review sees both. The promote
+   helper copies the golden and prints `masked compare (…)` when a mask already
+   exists for that stem (it never writes the mask — you author and stage that by
+   hand):
 
    ```bash
-   cp out/emulator-candidates/calc_1_plus_2.ppm tests/emulator/golden/calc_1_plus_2.ppm
+   python scripts/promote-emulator-golden.py calc_1_plus_2   # copies the golden
    git add tests/emulator/golden/calc_1_plus_2.ppm tests/emulator/masks/calc_1_plus_2.mask
    git commit -m "Accept golden+mask: calc_1_plus_2 renders 3 (cursor region masked)"
    ```
 
+## Updating a golden after an intentional UI / render change
+
+When a deliberate change legitimately alters the rendered pixels, the old golden
+*should* now mismatch — that is the gate doing its job. To re-bless it:
+
+1. Regenerate candidates from the changed build
+   (`python scripts/generate-emulator-candidates.py`).
+2. **Visually re-confirm** the new candidate is correct — the bar is the same as a
+   first promotion; a passing-by-construction copy is not a review.
+3. Re-promote with `--force` (the tool refuses to clobber a golden otherwise):
+   `python scripts/promote-emulator-golden.py --force <stem>`.
+4. Commit the changed golden in its own PR; the diff (old vs new bytes) is the
+   record reviewers approve. If the mask must also change, stage it in the same
+   commit and justify it (see [`../masks/README.md`](../masks/README.md)).
+
 ## Guarantees
 
-- **No tool writes here.** `scripts/generate-emulator-candidates.py` only writes
-  to `out/emulator-candidates/`; CI only *reads* this directory. The only way a
-  golden changes is a human `git commit`.
+- **No *automated* step writes here.** `scripts/generate-emulator-candidates.py`
+  only writes to `out/emulator-candidates/`; CI only *reads* this directory and
+  never invokes the promote tool. The only writer is
+  `scripts/promote-emulator-golden.py` — a **human-run** convenience that you
+  must invoke by hand with an explicit stem (no implicit "promote all"), and it
+  never commits. So a golden still only enters the tree through a deliberate
+  human `git commit`.
 - **CI cannot ossify a bad screenshot.** When a golden is **absent**, CI prints a
   warning, uploads the candidate, and **does not fail** — so an unreviewed image
   can never silently become a passing gate. When a golden is **present**, CI

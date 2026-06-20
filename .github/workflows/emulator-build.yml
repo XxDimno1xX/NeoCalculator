@@ -19,6 +19,12 @@ on:
       - 'tests/emulator/**'
       - 'platformio.ini'
       - 'scripts/sdl2_env.py'
+      # The visual gate's own logic: changing the comparator or candidate
+      # generator must re-run the gate. (Promoting a golden already triggers via
+      # 'tests/emulator/**'. The human-run promote-emulator-golden.py is
+      # deliberately NOT listed — CI never invokes it.)
+      - 'scripts/compare-ppm.py'
+      - 'scripts/generate-emulator-candidates.py'
       - '.github/workflows/emulator-build.yml'
   pull_request:
     paths:
@@ -26,6 +32,10 @@ on:
       - 'tests/emulator/**'
       - 'platformio.ini'
       - 'scripts/sdl2_env.py'
+      # Keep in sync with push.paths above: the gate must re-run when its own
+      # comparator / candidate generator changes.
+      - 'scripts/compare-ppm.py'
+      - 'scripts/generate-emulator-candidates.py'
       - '.github/workflows/emulator-build.yml'
   workflow_dispatch:
 

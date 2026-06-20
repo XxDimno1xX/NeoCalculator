@@ -436,28 +436,47 @@ correctness use the Phase 4B-C [`assert_result`](#semantic-assertions-phase-4b-c
 commands; render correctness remains a human judgement at promotion time. See
 [`tests/emulator/masks/README.md`](../tests/emulator/masks/README.md).
 
-**Promote a candidate to a golden** by visually confirming it is correct, then
-copying + committing it (with its mask, if it needs one):
+**Promote a candidate to a golden (Phase 4B-D)** by visually confirming it is
+correct, then using the human-run helper to do the byte-exact copy and commit it
+(with its mask, if it needs one):
 
 ```bash
-cp out/emulator-candidates/calc_1_plus_2.ppm tests/emulator/golden/calc_1_plus_2.ppm
+python scripts/promote-emulator-golden.py --list-candidates   # stem, sha256, golden/mask state
+python scripts/promote-emulator-golden.py --dry-run calc_1_plus_2   # preview, writes nothing
+python scripts/promote-emulator-golden.py calc_1_plus_2            # copy candidate -> golden
 git add tests/emulator/golden/calc_1_plus_2.ppm tests/emulator/masks/calc_1_plus_2.mask
 git commit -m "Accept golden+mask: calc_1_plus_2 renders 3 (cursor region masked)"
 ```
 
-No tool ever writes into `tests/emulator/golden/` or `tests/emulator/masks/`.
+[`promote-emulator-golden.py`](../scripts/promote-emulator-golden.py) refuses a
+missing or malformed candidate, refuses to clobber an existing golden without
+`--force`, prints the promoted file's SHA-256, and reports whether CI will compare
+it masked or byte-exact. It **never** generates images, **never** writes a mask,
+and **never** commits — the commit is the human acceptance record. The equivalent
+manual step is `cp out/emulator-candidates/<stem>.ppm
+tests/emulator/golden/<stem>.ppm`. No *automated* step ever writes into
+`tests/emulator/golden/` or `tests/emulator/masks/`; CI never invokes the promote
+tool.
 
 **Accepted goldens & the review gate.** Accepted, human-reviewed goldens live in
 [`tests/emulator/golden/`](../tests/emulator/golden/) (committed; same stem as the
 script). A candidate becomes a golden only by a human visually confirming it is
-correct and then copying + committing it:
+correct and then promoting + committing it:
 
 ```bash
-cp out/emulator-candidates/calc_1_plus_2.ppm tests/emulator/golden/calc_1_plus_2.ppm
+python scripts/promote-emulator-golden.py calc_1_plus_2
 git add tests/emulator/golden/calc_1_plus_2.ppm && git commit -m "Accept golden: 1+2 = 3"
 ```
 
-No tool ever writes into `tests/emulator/golden/`. See
+No *automated* step writes into `tests/emulator/golden/`; the only writer is the
+human-run promote helper, and it never commits.
+
+**Updating a golden after an intentional UI/render change.** A deliberate render
+change will (correctly) make the old golden mismatch. Regenerate candidates,
+**re-confirm** the new one is correct, then re-bless with
+`python scripts/promote-emulator-golden.py --force <stem>` (it refuses to clobber
+a golden without `--force`) and commit the changed bytes in their own PR so the
+old-vs-new diff is what reviewers approve. See
 [`tests/emulator/golden/README.md`](../tests/emulator/golden/README.md) for the full
 policy.
 
