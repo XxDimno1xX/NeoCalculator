@@ -88,9 +88,14 @@
 #include "../input/LvglKeypad.h"
 #include "../input/KeyboardManager.h"
 #include "../apps/CalculationApp.h"
+#include "../apps/SettingsApp.h"          // Phase 5A: emulator-safe LVGL-native app
 #include "../display/DisplayDriver.h"
 #include "../ui/SplashScreen.h"
 #include "../ui/MainMenu.h"
+#include "../ui/StatusBar.h"              // Phase 5A: Math Showcase title bar
+#include "../ui/MathRenderer.h"          // Phase 5A: MathCanvas (reuse, no geometry change)
+#include "../ui/MathTypography.h"        // Phase 5A: initMathTypography()
+#include "../math/MathRenderVisualCases.h" // Phase 5A: curated accepted expressions
 
 // ════════════════════════════════════════════════════════════════════════════
 // Global CAS settings (native definitions)
@@ -173,7 +178,9 @@ static uint32_t detTickCb() { return g_detTick; }
 enum class AppMode : uint8_t {
     SPLASH,         // Pantalla de carga con animación
     MENU,           // Launcher (grid de apps)
-    CALCULATION     // Calculadora científica
+    CALCULATION,    // Calculadora científica
+    SETTINGS,       // Ajustes (LVGL-native; Phase 5A, emulador)
+    MATH_SHOWCASE   // Vitrina de render matemático (Phase 5A, solo emulador)
 };
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -191,6 +198,19 @@ static DisplayDriver    g_displayStub;        // Stub para MainMenu
 static SplashScreen*    g_splash  = nullptr;
 static MainMenu*        g_menu    = nullptr;
 static CalculationApp*  g_calcApp = nullptr;
+static SettingsApp*     g_settingsApp = nullptr;   // Phase 5A (emulador)
+
+// ── Math Showcase (Phase 5A, solo emulador) ─────────────────────────────────
+// Identificador de app fuera del rango de tarjetas del launcher (0..21) para que
+// nunca colisione con una tarjeta real: la vitrina NO es una tarjeta, se abre con
+// `open_app MathShowcase`. Su estado se crea perezosamente en showcaseLoad().
+static constexpr int     APPID_MATH_SHOWCASE = 100;
+static lv_obj_t*         g_showcaseScreen  = nullptr;
+static ui::StatusBar*    g_showcaseBar     = nullptr;
+static vpam::MathCanvas* g_showcaseCanvas  = nullptr;
+static lv_obj_t*         g_showcaseCaption = nullptr;
+static vpam::NodePtr     g_showcaseRoot;            // AST de la expresión activa
+static int               g_showcaseIndex   = 0;
 
 // Buffer de LVGL (pantalla completa, RGB565)
 // 320×240 × 2 bytes = 153 600 bytes → trivial en PC
@@ -200,6 +220,10 @@ static uint8_t g_lvBuf[SCREEN_W * SCREEN_H * sizeof(uint16_t)];
 static void launchApp(int appId);
 static void returnToMenu();
 static void onSplashDone();
+// Phase 5A: Math Showcase (definidas tras returnToMenu).
+static void showcaseLoad();
+static void showcaseShow(int slot);
+static void showcaseEnd();
 
 // ════════════════════════════════════════════════════════════════════════════
 // sdl_flush_cb — Transfiere pixels LVGL a la SDL texture
@@ -462,6 +486,42 @@ static void dispatchKey(KeyCode kc, KeyAction action, bool isDown)
                 g_calcApp->handleKey(ke);
             }
             break;
+
+        case AppMode::SETTINGS:
+            // Mismo contrato que CALCULATION: MODE vuelve al launcher; el resto
+            // (incluido RELEASE) se reenvia a SettingsApp::handleKey, que filtra
+            // todo lo que no sea PRESS/REPEAT igual que en el firmware.
+            if (isDown && kc == KeyCode::MODE) {
+                returnToMenu();
+                break;
+            }
+            if (g_settingsApp) {
+                KeyEvent ke;
+                ke.code   = kc;
+                ke.action = action;
+                ke.row    = -1;
+                ke.col    = -1;
+                g_settingsApp->handleKey(ke);
+            }
+            break;
+
+        case AppMode::MATH_SHOWCASE:
+            // MODE vuelve al launcher; IZQ/ARRIBA y DCHA/ABAJO recorren los casos
+            // curados. Solo en el down-edge (una pulsacion = un paso), sin cursor
+            // ni timers → captura determinista.
+            if (isDown && kc == KeyCode::MODE) {
+                returnToMenu();
+                break;
+            }
+            if (isDown) {
+                if (kc == KeyCode::LEFT || kc == KeyCode::UP) {
+                    showcaseShow(g_showcaseIndex - 1);
+                } else if (kc == KeyCode::RIGHT || kc == KeyCode::DOWN ||
+                           kc == KeyCode::ENTER) {
+                    showcaseShow(g_showcaseIndex + 1);
+                }
+            }
+            break;
     }
 }
 
@@ -553,6 +613,10 @@ static void transitionToMenu()
     g_calcApp = new CalculationApp();
     g_calcApp->begin();
 
+    // Phase 5A: SettingsApp (LVGL-native). begin() perezoso: su pantalla se crea
+    // en el primer load() (SettingsApp::load llama a begin() si hace falta).
+    g_settingsApp = new SettingsApp();
+
     // Crear y mostrar el MainMenu
     g_menu = new MainMenu(g_displayStub);
     g_menu->create();
@@ -580,6 +644,20 @@ static void launchApp(int appId)
             std::printf("[APP] CalculationApp activa — escribe con el teclado\n");
             break;
 
+        case 10: // Settings (LVGL-native; mismo id que la tarjeta del launcher)
+            if (g_settingsApp) {
+                g_settingsApp->load();
+                g_mode = AppMode::SETTINGS;
+                std::printf("[APP] SettingsApp activa\n");
+            }
+            break;
+
+        case APPID_MATH_SHOWCASE: // Math Showcase (solo emulador)
+            showcaseLoad();
+            g_mode = AppMode::MATH_SHOWCASE;
+            std::printf("[APP] Math Showcase activa — IZQ/DCHA cambia de caso\n");
+            break;
+
         default:
             std::printf("[APP] App %d no implementada en simulador\n", appId);
             break;
@@ -594,9 +672,25 @@ static void returnToMenu()
 {
     std::printf("[APP] Volviendo al launcher\n");
 
-    if (g_calcApp) {
-        g_calcApp->end();
-        g_calcApp->begin();   // Pre-crear para la próxima vez
+    // Teardown segun la app activa ANTES de cambiar g_mode. Llamado fuera del
+    // contexto de lv_timer_handler (desde dispatchKey/scriptStepBegin), por lo
+    // que el destruir/re-crear sincrono es seguro.
+    switch (g_mode) {
+        case AppMode::CALCULATION:
+            if (g_calcApp) {
+                g_calcApp->end();
+                g_calcApp->begin();   // Pre-crear para la próxima vez
+            }
+            break;
+        case AppMode::SETTINGS:
+            // SettingsApp::load() vuelve a llamar begin() perezosamente.
+            if (g_settingsApp) g_settingsApp->end();
+            break;
+        case AppMode::MATH_SHOWCASE:
+            showcaseEnd();
+            break;
+        default:
+            break;
     }
 
     // Resetear modificadores de teclado (SHIFT/ALPHA/STO)
@@ -606,6 +700,137 @@ static void returnToMenu()
     lv_indev_set_group(LvglKeypad::indev(), g_menu->group());
     g_mode = AppMode::MENU;
     std::printf("[MENU] Launcher restaurado\n");
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Math Showcase (Phase 5A) — SOLO emulador
+//
+// Muestra un subconjunto CURADO de los MathRenderVisualCases ACEPTADOS, dibujados
+// con el MISMO MathCanvas que usa el firmware, con el cursor APAGADO (sin
+// parpadeo → captura determinista), sin overlays de diagnostico y sin logs por
+// caso. NO construye geometria nueva: reutiliza tal cual los builders aceptados de
+// src/math/MathRenderVisualCases.cpp. Es independiente del MathRenderVisualTestApp
+// de validacion (que vuelca metricas por serial y vive tras NUMOS_MATH_VISUAL_VERIFY).
+// ════════════════════════════════════════════════════════════════════════════
+
+// Casos curados (en el orden de presentacion pedido). Cada id existe en
+// mathRenderVisualCases() (MathRenderVisualCases.cpp:158-178); se resuelven por id
+// para reutilizar EXACTAMENTE la geometria aceptada.
+static const char* const kShowcaseIds[] = {
+    "mixed_row_fraction_power",     // 1 + 2/3 + x^2
+    "photo_2_plus_2_over_2",        // 2 + 2/2
+    "power_2_squared",              // 2^2
+    "power_x_ten",                  // x^10
+    "power_fraction_base_squared",  // (2/3)^2
+    "power_two_half",               // 2^(1/2)
+    "nested_fraction",              // (1 + 1/2) / (x + 3)  (fraccion anidada)
+};
+static constexpr int kShowcaseCount =
+    static_cast<int>(sizeof(kShowcaseIds) / sizeof(kShowcaseIds[0]));
+
+static const vpam::MathRenderVisualCase* showcaseCaseAt(int slot)
+{
+    const vpam::MathRenderVisualCase* cases = vpam::mathRenderVisualCases();
+    const std::size_t n = vpam::mathRenderVisualCaseCount();
+    for (std::size_t i = 0; i < n; ++i) {
+        if (std::strcmp(cases[i].id, kShowcaseIds[slot]) == 0) return &cases[i];
+    }
+    return nullptr;
+}
+
+static void showcaseShow(int slot)
+{
+    if (kShowcaseCount <= 0 || !g_showcaseCanvas) return;
+    if (slot < 0)               slot = kShowcaseCount - 1;
+    if (slot >= kShowcaseCount) slot = 0;
+    g_showcaseIndex = slot;
+
+    const vpam::MathRenderVisualCase* vc = showcaseCaseAt(slot);
+    if (!vc) return;
+
+    // Orden de llamadas IDENTICO al consumidor probado y aceptado
+    // (MathRenderVisualTestApp::showCase, CursorMode::Off): desconectar antes de
+    // que el unique_ptr libere el AST anterior, reconstruir, fijar expresion con
+    // cursor nullptr (sin parpadeo), estilo y reset de scroll.
+    g_showcaseCanvas->setExpression(nullptr, nullptr);
+    g_showcaseRoot = vc->build();
+    vpam::NodeRow* rootRow = static_cast<vpam::NodeRow*>(g_showcaseRoot.get());
+
+    g_showcaseCanvas->stopCursorBlink();
+    g_showcaseCanvas->setExpression(rootRow, nullptr);   // cursor OFF → determinista
+    g_showcaseCanvas->setMathStyle(vc->style);
+    g_showcaseCanvas->resetScroll();
+    g_showcaseCanvas->invalidate();
+
+    if (g_showcaseCaption) {
+        char buf[96];
+        std::snprintf(buf, sizeof(buf), "%d/%d   %s",
+                      slot + 1, kShowcaseCount, vc->label);
+        lv_label_set_text(g_showcaseCaption, buf);
+    }
+}
+
+static void showcaseBuild()
+{
+    if (g_showcaseScreen) return;
+    ui::initMathTypography();   // idempotente; CalculationApp ya lo hizo
+
+    g_showcaseScreen = lv_obj_create(nullptr);
+    lv_obj_set_style_bg_color(g_showcaseScreen, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(g_showcaseScreen, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_remove_flag(g_showcaseScreen, LV_OBJ_FLAG_SCROLLABLE);
+
+    g_showcaseBar = new ui::StatusBar();
+    g_showcaseBar->create(g_showcaseScreen);
+    g_showcaseBar->setTitle("Math Showcase");
+    g_showcaseBar->setBatteryLevel(100);
+
+    const int barH = ui::StatusBar::HEIGHT + 8;
+
+    g_showcaseCanvas = new vpam::MathCanvas();
+    g_showcaseCanvas->create(g_showcaseScreen);
+    g_showcaseCanvas->setAutoHeightEnabled(false);
+    lv_obj_set_pos(g_showcaseCanvas->obj(), 0, barH);
+    lv_obj_set_size(g_showcaseCanvas->obj(), SCREEN_W, SCREEN_H - barH - 40);
+    lv_obj_set_style_bg_opa(g_showcaseCanvas->obj(), LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(g_showcaseCanvas->obj(), 0, LV_PART_MAIN);
+
+    // Pie de pagina limpio (texto, no overlay) con el caso actual.
+    g_showcaseCaption = lv_label_create(g_showcaseScreen);
+    lv_obj_set_style_text_font(g_showcaseCaption, &stix_math_18, LV_PART_MAIN);
+    lv_obj_set_style_text_color(g_showcaseCaption, lv_color_hex(0x808080), LV_PART_MAIN);
+    lv_obj_set_width(g_showcaseCaption, SCREEN_W - 24);
+    lv_label_set_long_mode(g_showcaseCaption, LV_LABEL_LONG_CLIP);
+    lv_obj_set_pos(g_showcaseCaption, 12, SCREEN_H - 30);
+}
+
+static void showcaseLoad()
+{
+    showcaseBuild();
+    g_showcaseIndex = 0;
+    showcaseShow(0);
+    lv_screen_load_anim(g_showcaseScreen, LV_SCREEN_LOAD_ANIM_FADE_IN, 200, 0, false);
+}
+
+static void showcaseEnd()
+{
+    if (g_showcaseCanvas) {
+        g_showcaseCanvas->setExpression(nullptr, nullptr);
+        g_showcaseCanvas->destroy();
+        delete g_showcaseCanvas;
+        g_showcaseCanvas = nullptr;
+    }
+    g_showcaseRoot.reset();
+    if (g_showcaseBar) {
+        g_showcaseBar->destroy();     // nulifica antes de borrar la pantalla padre
+        delete g_showcaseBar;
+        g_showcaseBar = nullptr;
+    }
+    if (g_showcaseScreen) {
+        lv_obj_delete(g_showcaseScreen);
+        g_showcaseScreen  = nullptr;
+        g_showcaseCaption = nullptr;
+    }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -712,6 +937,8 @@ static bool saveScreenshotPPM(const char* path)
 //   keyup NOMBRE        · solo RELEASE
 //   screenshot RUTA     · vuelca un PPM tras el render de ESTE frame
 //   log "mensaje"       · imprime un mensaje a stdout
+//   open_app NOMBRE     · (Phase 5A) lanza una app por nombre via launchApp()
+//                         (Calculation|Settings|MathShowcase) — sin navegar el grid
 //
 // Modelo de planificacion (determinista): UN comando por frame, ejecutado ANTES
 // de processSdlEvents() para que la tecla sea visible al avance de tick y a
@@ -722,6 +949,7 @@ static bool saveScreenshotPPM(const char* path)
 // ════════════════════════════════════════════════════════════════════════════
 enum class ScriptCmdType : uint8_t {
     Wait, Key, KeyDown, KeyUp, Screenshot, Log,
+    OpenApp,               // open_app NAME  (Phase 5A: lanza app por nombre)
     // Phase 4B-C: aserciones semanticas (sin OCR, sin pixeles). Comparan el
     // estado de la app activa / el resultado calculado por CalculationApp.
     AssertApp,             // assert_app NAME   (NAME canonico en strArg)
@@ -733,9 +961,10 @@ enum class ScriptCmdType : uint8_t {
 struct ScriptCmd {
     ScriptCmdType type;
     KeyCode       key   = KeyCode::NONE;  // Key/KeyDown/KeyUp
-    long          waitN = 0;              // Wait
+    long          waitN = 0;              // Wait (frames) / OpenApp (id resuelto)
     std::string   strArg;                 // Screenshot (ruta) / Log (mensaje) /
-                                          // Assert* (texto esperado / app canonica)
+                                          // Assert* (texto esperado / app canonica) /
+                                          // OpenApp (nombre canonico, para el log)
     int           line  = 0;              // linea de origen (diagnostico)
 };
 
@@ -773,7 +1002,25 @@ static const char* canonicalAppName(const std::string& name)
     if (lc == "calculation" || lc == "calc")     return "Calculation";
     if (lc == "menu"        || lc == "launcher") return "Menu";
     if (lc == "splash")                           return "Splash";
+    if (lc == "settings")                         return "Settings";        // Phase 5A
+    if (lc == "mathshowcase" || lc == "math_showcase" ||
+        lc == "showcase")                         return "MathShowcase";    // Phase 5A
     return nullptr;
+}
+
+// Phase 5A: traduce el NOMBRE de app de `open_app` a su id de launchApp(). Acepta
+// los mismos alias amigables que canonicalAppName(). Devuelve -1 si no se reconoce
+// (error de parseo -> el script falla al cargar con exit 2). Solo apps cableadas
+// en el emulador son lanzables.
+static int scriptAppNameToId(const std::string& name)
+{
+    std::string lc = name;
+    for (char& c : lc) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (lc == "calculation" || lc == "calc")                          return 0;
+    if (lc == "settings")                                             return 10;
+    if (lc == "mathshowcase" || lc == "math_showcase" || lc == "showcase")
+                                                                      return APPID_MATH_SHOWCASE;
+    return -1;
 }
 
 // Carga y VALIDA el script entero. Devuelve false (sin ejecutar nada) ante el
@@ -842,12 +1089,25 @@ static bool loadScript(const char* path)
             sc.type   = ScriptCmdType::Log;
             sc.strArg = rest;
         }
+        else if (lc == "open_app") {
+            std::string name, extra;
+            if (!(iss >> name)) return scriptErr(path, lineNo, "open_app requiere un NOMBRE de app");
+            if (iss >> extra)   return scriptErr(path, lineNo, "open_app: demasiados argumentos");
+            int id = scriptAppNameToId(name);
+            if (id < 0) return scriptErr(path, lineNo,
+                                         "open_app: app no lanzable (Calculation|Settings|MathShowcase)");
+            sc.type   = ScriptCmdType::OpenApp;
+            sc.waitN  = id;
+            const char* canon = canonicalAppName(name);
+            sc.strArg = canon ? canon : name;
+        }
         else if (lc == "assert_app") {
             std::string name, extra;
             if (!(iss >> name)) return scriptErr(path, lineNo, "assert_app requiere un NOMBRE de app");
             if (iss >> extra)   return scriptErr(path, lineNo, "assert_app: demasiados argumentos");
             const char* canon = canonicalAppName(name);
-            if (!canon) return scriptErr(path, lineNo, "assert_app: app desconocida (Calculation|Menu|Splash)");
+            if (!canon) return scriptErr(path, lineNo,
+                                         "assert_app: app desconocida (Calculation|Menu|Splash|Settings|MathShowcase)");
             sc.type   = ScriptCmdType::AssertApp;
             sc.strArg = canon;
         }
@@ -927,9 +1187,11 @@ static std::string formatExactVal(const vpam::ExactVal& v)
 // Nombre canonico de la app activa (coherente con canonicalAppName()).
 static const char* activeAppName()
 {
-    return (g_mode == AppMode::SPLASH) ? "Splash"
-         : (g_mode == AppMode::MENU)   ? "Menu"
-                                       : "Calculation";
+    return (g_mode == AppMode::SPLASH)        ? "Splash"
+         : (g_mode == AppMode::MENU)          ? "Menu"
+         : (g_mode == AppMode::SETTINGS)      ? "Settings"
+         : (g_mode == AppMode::MATH_SHOWCASE) ? "MathShowcase"
+                                              : "Calculation";
 }
 
 // Diagnostico de asercion: SIEMPRE se imprime (independiente de --quiet, que
@@ -976,6 +1238,11 @@ static void scriptStepBegin()
             break;
         case ScriptCmdType::Log:
             std::printf("[SCRIPT] %s\n", sc.strArg.c_str());
+            break;
+
+        // ── Phase 5A: lanzar app por nombre (misma ruta que el launcher) ──
+        case ScriptCmdType::OpenApp:
+            launchApp(static_cast<int>(sc.waitN));
             break;
 
         // ── Phase 4B-C: aserciones semanticas ───────────────────────────
@@ -1289,6 +1556,8 @@ int main(int argc, char** argv)
     // ── 7. Cleanup ──────────────────────────────────────────────────────
     std::printf("\n[SIM] Cerrando...\n");
     if (g_calcApp) { g_calcApp->end(); delete g_calcApp; }
+    if (g_settingsApp) { g_settingsApp->end(); delete g_settingsApp; }  // Phase 5A
+    showcaseEnd();                                                      // Phase 5A (no-op si inactiva)
     delete g_menu;
     delete g_splash;
 

@@ -1,0 +1,39 @@
+# settings_smoke.numos — open the Settings app, screenshot, and ASSERT it is active.
+#
+# Phase 5A smoke test. SettingsApp is LVGL-native and emulator-safe (no Arduino
+# Preferences/NVS — its three values are the in-memory setting_* globals defined
+# in NativeHal.cpp:103-105). This script opens it through the emulator-only
+# `open_app` command (added in Phase 5A: it calls the SAME NativeHal launchApp()
+# the launcher uses, so it is deterministic and does not depend on fragile grid
+# navigation), captures a screenshot, and asserts the active app is "Settings".
+#
+# Settings has NO blinking cursor and NO animation once its 200 ms fade-in
+# settles. The only volatile region is the StatusBar clock (HH:MM, ~x[27..33]
+# y[8..16]) — the same per-minute variation every emulator status-bar screen has,
+# not a Phase 5A artifact. This phase makes NO golden claim; the screenshot is a
+# CANDIDATE for human review only (a future golden would mask the clock, exactly
+# as calc_1_plus_2 masks the blinking cursor).
+#
+# Timing notes (deterministic, step-ms 16):
+#   * 200 frames -> splash (~frame 125) is done; we are in the launcher.
+#   * 60 frames  -> Settings screen load + fade settles after open_app.
+#
+# Run:
+#   program --headless --deterministic --script tests/emulator/scripts/settings_smoke.numos \
+#           --frames 800 --screenshot out/settings_smoke.ppm --quiet
+# Exit codes: 0 ok · 2 script/parse error · 3 screenshot write error · 4 assertion failure.
+
+log "settings_smoke: waiting for launcher"
+wait 200
+
+# Open Settings (emulator launchApp id 10 — same id as the launcher's Settings card).
+open_app Settings
+wait 60
+
+# Screenshot FIRST: the deferred capture happens on this frame, before the assert
+# runs on a later frame, so the artifact is produced even if the assertion fails.
+screenshot out/settings_smoke.ppm
+log "settings_smoke: screenshot captured"
+
+assert_app Settings
+log "settings_smoke: assertion passed (Settings active)"

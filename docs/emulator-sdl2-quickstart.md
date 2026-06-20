@@ -257,7 +257,8 @@ contain spaces.
 | `keydown NAME` / `keyup NAME` | Inject only the press / only the release. |
 | `screenshot PATH` | Dump a 320×240 PPM at `PATH`, captured *after* this frame's render. |
 | `log "message"` | Print `message` to stdout (handy for CI log markers). |
-| `assert_app NAME` | (Phase 4B-C) Assert the active app is `NAME` ∈ `Calculation`/`Menu`/`Splash` (aliases `Calc`/`Launcher`). |
+| `open_app NAME` | (Phase 5A) Launch an app directly by name through the same `launchApp()` the launcher uses — deterministic, no fragile grid navigation. `NAME` ∈ `Calculation`/`Settings`/`MathShowcase` (aliases `Calc`, `Showcase`/`Math_Showcase`). Use it from the launcher (MENU) state. |
+| `assert_app NAME` | (Phase 4B-C / 5A) Assert the active app is `NAME` ∈ `Calculation`/`Menu`/`Splash`/`Settings`/`MathShowcase` (aliases `Calc`/`Launcher`/`Showcase`). |
 | `assert_result TEXT` | (Phase 4B-C) Assert CalculationApp's *computed* result equals `TEXT` exactly (e.g. `3`, `5/6`). |
 | `assert_result_contains TEXT` | (Phase 4B-C) Like `assert_result` but a substring match. |
 | `assert_no_error` | (Phase 4B-C) Assert the last evaluated result has no error flag. |
@@ -384,7 +385,9 @@ pio run -e emulator_pc
 python scripts/generate-emulator-candidates.py
 # -> out/emulator-candidates/launcher_smoke.ppm
 #    out/emulator-candidates/calc_1_plus_2.ppm
-#    out/emulator-candidates/calc_fraction_sum.ppm   (each 320x240, 230415 bytes)
+#    out/emulator-candidates/calc_fraction_sum.ppm
+#    out/emulator-candidates/settings_smoke.ppm        (Phase 5A)
+#    out/emulator-candidates/math_showcase_smoke.ppm   (Phase 5A; each 320x240, 230415 bytes)
 ```
 
 It drives each bundled `.numos` script with `--headless --deterministic --script
@@ -494,6 +497,67 @@ So an unreviewed image can never silently become a passing gate, missing goldens
 never fail CI (they just produce a downloadable candidate to review), and adding a
 mask never weakens a screen that already compares exactly.
 
+### Additional emulator apps: Settings & Math Showcase (Phase 5A)
+
+Phase 5A widens emulator app coverage beyond CalculationApp with two **safe**
+apps. Both are **emulator-only** wiring in
+[`NativeHal.cpp`](../src/hal/NativeHal.cpp); the firmware, the renderer geometry,
+the STIX assets, and the CAS/Giac engine are **untouched**. Open either with the
+new [`open_app`](#scripted-input-replay-phase-4a) script command (or, for
+Settings, by navigating the launcher to its card and pressing ENTER).
+
+**Settings.** The real, unmodified [`SettingsApp`](../src/apps/SettingsApp.cpp) —
+the same LVGL-native panel the firmware ships (complex-numbers toggle, decimal
+precision, step-by-step mode). It needs **no HAL work**: it touches only LVGL +
+`ui::StatusBar` and the three `setting_*` globals already defined for the native
+build ([NativeHal.cpp:103-105](../src/hal/NativeHal.cpp#L103)). 
+
+> **Settings persistence is in-memory only (both firmware and emulator).**
+> `SettingsApp` reads/writes the `setting_*` globals directly; it performs **no**
+> Preferences/NVS/flash persistence in either build, so there is nothing to stub.
+> Changes last for the session. This is the app's existing design, not an
+> emulator fallback.
+
+**Math Showcase.** An **emulator-only**, screenshot-friendly display of a
+*curated* subset of the **accepted** `MathRenderVisualCases`, rendered through the
+same `MathCanvas` the firmware uses — with the **cursor OFF** (deterministic, no
+blink), **no diagnostic colored overlays**, and **no per-case serial spam**. It is
+deliberately **separate** from the diagnostic `MathRenderVisualTestApp` (which is
+firmware-validation-only, behind `NUMOS_MATH_VISUAL_VERIFY`, and prints layout
+dumps). The Showcase **builds nothing new**: it reuses the accepted renderer
+geometry verbatim. Cycle the curated cases with LEFT/RIGHT (or UP/DOWN):
+
+```text
+1 + 2/3 + x^2      2 + 2/2      2^2      x^10      (2/3)^2      2^(1/2)      (1 + 1/2) / (x + 3)
+```
+
+> Math Showcase is **emulator-only** (not a firmware launcher card). The same
+> expressions remain accessible to firmware validation through
+> `MathRenderVisualTestApp` under `NUMOS_MATH_VISUAL_VERIFY`; the Showcase is the
+> *clean, demo/screenshot* presentation of that shared, accepted case list.
+
+**Smoke scripts.** `tests/emulator/scripts/settings_smoke.numos` and
+`math_showcase_smoke.numos` each `open_app` the app, screenshot, and
+`assert_app <Name>`. They are also wired into
+[`generate-emulator-candidates.py`](../scripts/generate-emulator-candidates.py), so
+CI generates and uploads their candidate PPMs and warns (does not fail) on a
+missing golden — **no golden is blessed by this phase**.
+
+```bash
+SDL_VIDEODRIVER=dummy ./scripts/run-emulator-linux.sh \
+  --headless --deterministic --script tests/emulator/scripts/settings_smoke.numos \
+  --frames 800 --screenshot out/settings_smoke.ppm --quiet            # Linux
+```
+
+**Limitations.** Only `assert_app` (not `assert_result`) is supported for these
+non-calculation apps in this phase. Settings persistence is in-memory only (see
+above). Math Showcase is read-only display (it evaluates nothing). Both screens
+are byte-deterministic within a run (verified by a back-to-back SHA-256 compare);
+across runs the only volatile region is the StatusBar clock (`HH:MM`, ~`x[27..33]
+y[8..16]`) — the same per-minute variation every status-bar screen has — so a
+future golden would mask the clock, just as `calc_1_plus_2` masks the blinking
+cursor.
+
 ## Keyboard map (Phase 3A)
 
 PC keys map directly to calculator `KeyCode`s in
@@ -564,8 +628,11 @@ PlatformIO paths can hit the Windows path-length limit). Consequences:
   [Keyboard map](#keyboard-map-phase-3a)); full matrix / serial-text input is
   still future. SHIFT/ALPHA/STO are only meaningful inside CalculationApp, not
   in the launcher.
-- **Only CalculationApp is wired** in the emulator; other apps print
-  "no implementada" ([NativeHal.cpp](../src/hal/NativeHal.cpp)).
+- **CalculationApp, Settings, and Math Showcase are wired** in the emulator
+  (Phase 5A); the remaining apps still print "no implementada"
+  ([NativeHal.cpp](../src/hal/NativeHal.cpp)). Settings is the real firmware app;
+  Math Showcase is emulator-only. See
+  [Additional emulator apps](#additional-emulator-apps-settings--math-showcase-phase-5a).
 - **Scripted input replay, golden tooling, AND semantic value assertions exist;
   rendered-pixel assertion does not.** Phase 3A adds `--frames` / `--run-for-ms` /
   `--headless` for unattended boot smokes, Phase 3B adds `--deterministic` +

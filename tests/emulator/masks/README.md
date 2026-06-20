@@ -2,8 +2,9 @@
 
 This directory holds **ignore-rect mask files** for the NumOS SDL2 emulator visual
 tests. A mask lets [`scripts/compare-ppm.py`](../../../scripts/compare-ppm.py)
-tolerate *known, justified* non-deterministic pixels (today: the CalculationApp
-blinking text cursor) without weakening byte-comparison anywhere else.
+tolerate *known, justified* non-deterministic pixels — today two classes: the
+CalculationApp blinking text cursor (calc screens) and the StatusBar `HH:MM` clock
+(Settings / Math Showcase) — without weakening byte-comparison anywhere else.
 
 Masking is the **narrow exception** to byte-exact comparison — not the rule. It
 exists only because the cursor blink is genuinely nondeterministic across separate
@@ -21,6 +22,23 @@ phase *within* a run, so same-session runs match but spaced-apart launches diffe
 Every observed differing pixel falls inside `x[10..34] y[8..16]` (≈ a 25×9 px band);
 zero pixels differ outside it. The committed masks below cover that band with a
 small safety margin.
+
+## The StatusBar clock finding (Phase 5B)
+
+`settings_smoke.ppm` and `math_showcase_smoke.ppm` have **no** blinking cursor, but
+they are still not byte-stable across launches: the StatusBar draws a live `HH:MM`
+clock from the real wall clock (`StatusBar::updateClock()` →
+`time()`/`localtime`/`"%02d:%02d"`, [`src/ui/StatusBar.cpp`](../../../src/ui/StatusBar.cpp)),
+so two runs on different minutes (or hours) differ inside the clock glyphs only.
+The label is `LV_ALIGN_LEFT_MID,6` in `lv_font_montserrat_12` and always 5 glyphs,
+so its box is ≈ `x[6..38] y[8..16]`. A back-to-back jitter diff across a minute
+rollover put the changed pixels at `x[31..37] y[8..16]` (the minute-units digit);
+because the **hour** digits can change between arbitrary launches too, the committed
+`settings_smoke` / `math_showcase_smoke` masks cover the *whole* label (`4,6,37,13`
+→ `x[4..40] y[6..18]`), not just the minutes. That band touches only the clock —
+the app title is centered, the battery/angle/modifier are right-aligned, and the app
+body is below the `y=24` StatusBar separator. As with the cursor, this is masked in
+the comparator, never patched in the (frozen) `src/`.
 
 ## Naming
 

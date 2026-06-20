@@ -1,0 +1,40 @@
+# math_showcase_smoke.numos — open the Math Showcase, screenshot, and ASSERT it is active.
+#
+# Phase 5A smoke test. Math Showcase is an emulator-only, screenshot-friendly
+# display of a CURATED subset of the accepted MathRenderVisualCases, rendered
+# through the same MathCanvas the firmware uses — with cursor OFF (deterministic),
+# no diagnostic overlays and no per-case serial spam. It builds NOTHING new: it
+# reuses the accepted renderer geometry verbatim (see NativeHal.cpp showcase mode
+# and src/math/MathRenderVisualCases.cpp).
+#
+# Opened via the emulator-only `open_app` command (Phase 5A). The Showcase is NOT
+# a launcher card (it is emulator-only), so `open_app` is the intended entry. Use
+# LEFT/RIGHT (or UP/DOWN) to cycle cases interactively; this script just shows the
+# first case (1 + 2/3 + x^2) for the candidate screenshot.
+#
+# Cursor is OFF (no blink) so the math is byte-stable within a run; the only
+# volatile region is the StatusBar clock (HH:MM), like every emulator status-bar
+# screen. NO golden is claimed here — the screenshot is a CANDIDATE for review.
+#
+# Timing notes (deterministic, step-ms 16):
+#   * 200 frames -> splash done; we are in the launcher.
+#   * 60 frames  -> Showcase screen load + fade settles after open_app.
+#
+# Run:
+#   program --headless --deterministic --script tests/emulator/scripts/math_showcase_smoke.numos \
+#           --frames 800 --screenshot out/math_showcase_smoke.ppm --quiet
+# Exit codes: 0 ok · 2 script/parse error · 3 screenshot write error · 4 assertion failure.
+
+log "math_showcase_smoke: waiting for launcher"
+wait 200
+
+# Open the Math Showcase (emulator-only launchApp id 100).
+open_app MathShowcase
+wait 60
+
+# Screenshot FIRST so the artifact is produced even if the assertion later fails.
+screenshot out/math_showcase_smoke.ppm
+log "math_showcase_smoke: screenshot captured"
+
+assert_app MathShowcase
+log "math_showcase_smoke: assertion passed (MathShowcase active)"

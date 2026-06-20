@@ -40,6 +40,12 @@ CANDIDATES = [
     ("launcher_smoke", "tests/emulator/scripts/launcher_smoke.numos", 800),
     ("calc_1_plus_2", "tests/emulator/scripts/calc_1_plus_2.numos", 1400),
     ("calc_fraction_sum", "tests/emulator/scripts/calc_fraction_sum.numos", 1400),
+    # Phase 5A: additional safe apps (Settings + Math Showcase). Each script
+    # opens its app via `open_app`, screenshots, and asserts the active app name;
+    # a failed assert_app exits 4, which this generator reports as FAIL. No golden
+    # is blessed here — the compare step warns (not fails) when a golden is absent.
+    ("settings_smoke", "tests/emulator/scripts/settings_smoke.numos", 800),
+    ("math_showcase_smoke", "tests/emulator/scripts/math_showcase_smoke.numos", 800),
 ]
 
 
