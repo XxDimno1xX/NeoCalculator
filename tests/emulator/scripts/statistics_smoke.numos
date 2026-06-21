@@ -1,0 +1,38 @@
+# statistics_smoke.numos — open the Statistics app, screenshot, and ASSERT it is active.
+#
+# Phase 6A smoke test. StatisticsApp is LVGL-native and emulator-safe: it pulls
+# only lvgl + ui::StatusBar + input/KeyCodes + KeyboardManager + a pure <cmath>/STL
+# StatsEngine (no Giac/CAS, no LittleFS/Preferences, no heap_caps/PSRAM, no
+# sensors/WiFi). This script opens it through the emulator-only `open_app` command
+# (added in Phase 5A: it calls the SAME NativeHal launchApp() the launcher uses, so
+# it is deterministic and does not depend on fragile grid navigation), captures a
+# screenshot, and asserts the active app is "Statistics".
+#
+# The app opens on its "Data" tab (an lv_table editor); no statistics are computed
+# on open, so there is no empty-data edge case. As with every emulator screen, the
+# only volatile region across runs is the StatusBar clock (HH:MM). This phase makes
+# NO golden claim; the screenshot is a CANDIDATE for human review only.
+#
+# Timing notes (deterministic, step-ms 16):
+#   * 200 frames -> splash (~frame 125) is done; we are in the launcher.
+#   * 60 frames  -> Statistics screen load + fade settles after open_app.
+#
+# Run:
+#   program --headless --deterministic --script tests/emulator/scripts/statistics_smoke.numos \
+#           --frames 800 --screenshot out/statistics_smoke.ppm --quiet
+# Exit codes: 0 ok · 2 script/parse error · 3 screenshot write error · 4 assertion failure.
+
+log "statistics_smoke: waiting for launcher"
+wait 200
+
+# Open Statistics (emulator launchApp id 4 — same id as the launcher's Statistics card).
+open_app Statistics
+wait 60
+
+# Screenshot FIRST: the deferred capture happens on this frame, before the assert
+# runs on a later frame, so the artifact is produced even if the assertion fails.
+screenshot out/statistics_smoke.ppm
+log "statistics_smoke: screenshot captured"
+
+assert_app Statistics
+log "statistics_smoke: assertion passed (Statistics active)"

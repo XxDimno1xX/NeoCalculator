@@ -89,6 +89,8 @@
 #include "../input/KeyboardManager.h"
 #include "../apps/CalculationApp.h"
 #include "../apps/SettingsApp.h"          // Phase 5A: emulator-safe LVGL-native app
+#include "../apps/StatisticsApp.h"        // Phase 6A: LVGL-only, pure-math (no CAS/HW)
+#include "../apps/ProbabilityApp.h"       // Phase 6A: LVGL-only, pure-math (no CAS/HW)
 #include "../display/DisplayDriver.h"
 #include "../ui/SplashScreen.h"
 #include "../ui/MainMenu.h"
@@ -180,7 +182,9 @@ enum class AppMode : uint8_t {
     MENU,           // Launcher (grid de apps)
     CALCULATION,    // Calculadora científica
     SETTINGS,       // Ajustes (LVGL-native; Phase 5A, emulador)
-    MATH_SHOWCASE   // Vitrina de render matemático (Phase 5A, solo emulador)
+    MATH_SHOWCASE,  // Vitrina de render matemático (Phase 5A, solo emulador)
+    STATISTICS,     // Estadística (LVGL-native; Phase 6A, emulador)
+    PROBABILITY     // Probabilidad (LVGL-native; Phase 6A, emulador)
 };
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -199,6 +203,8 @@ static SplashScreen*    g_splash  = nullptr;
 static MainMenu*        g_menu    = nullptr;
 static CalculationApp*  g_calcApp = nullptr;
 static SettingsApp*     g_settingsApp = nullptr;   // Phase 5A (emulador)
+static StatisticsApp*   g_statsApp = nullptr;      // Phase 6A (emulador)
+static ProbabilityApp*  g_probApp  = nullptr;      // Phase 6A (emulador)
 
 // ── Math Showcase (Phase 5A, solo emulador) ─────────────────────────────────
 // Identificador de app fuera del rango de tarjetas del launcher (0..21) para que
@@ -505,6 +511,40 @@ static void dispatchKey(KeyCode kc, KeyAction action, bool isDown)
             }
             break;
 
+        case AppMode::STATISTICS:
+            // Phase 6A: mismo contrato que SETTINGS — MODE vuelve al launcher; el
+            // resto (incluido RELEASE) se reenvia a StatisticsApp::handleKey.
+            if (isDown && kc == KeyCode::MODE) {
+                returnToMenu();
+                break;
+            }
+            if (g_statsApp) {
+                KeyEvent ke;
+                ke.code   = kc;
+                ke.action = action;
+                ke.row    = -1;
+                ke.col    = -1;
+                g_statsApp->handleKey(ke);
+            }
+            break;
+
+        case AppMode::PROBABILITY:
+            // Phase 6A: mismo contrato que SETTINGS — MODE vuelve al launcher; el
+            // resto (incluido RELEASE) se reenvia a ProbabilityApp::handleKey.
+            if (isDown && kc == KeyCode::MODE) {
+                returnToMenu();
+                break;
+            }
+            if (g_probApp) {
+                KeyEvent ke;
+                ke.code   = kc;
+                ke.action = action;
+                ke.row    = -1;
+                ke.col    = -1;
+                g_probApp->handleKey(ke);
+            }
+            break;
+
         case AppMode::MATH_SHOWCASE:
             // MODE vuelve al launcher; IZQ/ARRIBA y DCHA/ABAJO recorren los casos
             // curados. Solo en el down-edge (una pulsacion = un paso), sin cursor
@@ -617,6 +657,12 @@ static void transitionToMenu()
     // en el primer load() (SettingsApp::load llama a begin() si hace falta).
     g_settingsApp = new SettingsApp();
 
+    // Phase 6A: Statistics & Probability (LVGL-native). Mismo patron perezoso que
+    // SettingsApp: solo se construye el objeto; su pantalla se crea en el primer
+    // load() (cada *App::load() llama a begin() si hace falta).
+    g_statsApp = new StatisticsApp();
+    g_probApp  = new ProbabilityApp();
+
     // Crear y mostrar el MainMenu
     g_menu = new MainMenu(g_displayStub);
     g_menu->create();
@@ -642,6 +688,22 @@ static void launchApp(int appId)
             g_calcApp->load();
             g_mode = AppMode::CALCULATION;
             std::printf("[APP] CalculationApp activa — escribe con el teclado\n");
+            break;
+
+        case 4: // Statistics (LVGL-native; Phase 6A, mismo id que la tarjeta del launcher)
+            if (g_statsApp) {
+                g_statsApp->load();
+                g_mode = AppMode::STATISTICS;
+                std::printf("[APP] StatisticsApp activa\n");
+            }
+            break;
+
+        case 5: // Probability (LVGL-native; Phase 6A, mismo id que la tarjeta del launcher)
+            if (g_probApp) {
+                g_probApp->load();
+                g_mode = AppMode::PROBABILITY;
+                std::printf("[APP] ProbabilityApp activa\n");
+            }
             break;
 
         case 10: // Settings (LVGL-native; mismo id que la tarjeta del launcher)
@@ -685,6 +747,14 @@ static void returnToMenu()
         case AppMode::SETTINGS:
             // SettingsApp::load() vuelve a llamar begin() perezosamente.
             if (g_settingsApp) g_settingsApp->end();
+            break;
+        case AppMode::STATISTICS:
+            // Phase 6A: StatisticsApp::load() vuelve a llamar begin() perezosamente.
+            if (g_statsApp) g_statsApp->end();
+            break;
+        case AppMode::PROBABILITY:
+            // Phase 6A: ProbabilityApp::load() vuelve a llamar begin() perezosamente.
+            if (g_probApp) g_probApp->end();
             break;
         case AppMode::MATH_SHOWCASE:
             showcaseEnd();
@@ -1005,6 +1075,8 @@ static const char* canonicalAppName(const std::string& name)
     if (lc == "settings")                         return "Settings";        // Phase 5A
     if (lc == "mathshowcase" || lc == "math_showcase" ||
         lc == "showcase")                         return "MathShowcase";    // Phase 5A
+    if (lc == "statistics" || lc == "stats")      return "Statistics";      // Phase 6A
+    if (lc == "probability" || lc == "prob")      return "Probability";     // Phase 6A
     return nullptr;
 }
 
@@ -1017,6 +1089,8 @@ static int scriptAppNameToId(const std::string& name)
     std::string lc = name;
     for (char& c : lc) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     if (lc == "calculation" || lc == "calc")                          return 0;
+    if (lc == "statistics" || lc == "stats")                          return 4;   // Phase 6A
+    if (lc == "probability" || lc == "prob")                          return 5;   // Phase 6A
     if (lc == "settings")                                             return 10;
     if (lc == "mathshowcase" || lc == "math_showcase" || lc == "showcase")
                                                                       return APPID_MATH_SHOWCASE;
@@ -1095,7 +1169,7 @@ static bool loadScript(const char* path)
             if (iss >> extra)   return scriptErr(path, lineNo, "open_app: demasiados argumentos");
             int id = scriptAppNameToId(name);
             if (id < 0) return scriptErr(path, lineNo,
-                                         "open_app: app no lanzable (Calculation|Settings|MathShowcase)");
+                                         "open_app: app no lanzable (Calculation|Statistics|Probability|Settings|MathShowcase)");
             sc.type   = ScriptCmdType::OpenApp;
             sc.waitN  = id;
             const char* canon = canonicalAppName(name);
@@ -1107,7 +1181,7 @@ static bool loadScript(const char* path)
             if (iss >> extra)   return scriptErr(path, lineNo, "assert_app: demasiados argumentos");
             const char* canon = canonicalAppName(name);
             if (!canon) return scriptErr(path, lineNo,
-                                         "assert_app: app desconocida (Calculation|Menu|Splash|Settings|MathShowcase)");
+                                         "assert_app: app desconocida (Calculation|Menu|Splash|Statistics|Probability|Settings|MathShowcase)");
             sc.type   = ScriptCmdType::AssertApp;
             sc.strArg = canon;
         }
@@ -1191,6 +1265,8 @@ static const char* activeAppName()
          : (g_mode == AppMode::MENU)          ? "Menu"
          : (g_mode == AppMode::SETTINGS)      ? "Settings"
          : (g_mode == AppMode::MATH_SHOWCASE) ? "MathShowcase"
+         : (g_mode == AppMode::STATISTICS)    ? "Statistics"
+         : (g_mode == AppMode::PROBABILITY)   ? "Probability"
                                               : "Calculation";
 }
 
@@ -1557,6 +1633,8 @@ int main(int argc, char** argv)
     std::printf("\n[SIM] Cerrando...\n");
     if (g_calcApp) { g_calcApp->end(); delete g_calcApp; }
     if (g_settingsApp) { g_settingsApp->end(); delete g_settingsApp; }  // Phase 5A
+    if (g_statsApp) { g_statsApp->end(); delete g_statsApp; }           // Phase 6A
+    if (g_probApp)  { g_probApp->end();  delete g_probApp;  }           // Phase 6A
     showcaseEnd();                                                      // Phase 5A (no-op si inactiva)
     delete g_menu;
     delete g_splash;

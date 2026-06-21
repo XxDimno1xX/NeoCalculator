@@ -1,0 +1,39 @@
+# probability_smoke.numos — open the Probability app, screenshot, and ASSERT it is active.
+#
+# Phase 6A smoke test. ProbabilityApp is LVGL-native and emulator-safe: it pulls
+# only lvgl + ui::StatusBar + input/KeyCodes + KeyboardManager + a pure <cmath>
+# ProbEngine (no Giac/CAS, no LittleFS/Preferences, no heap_caps/PSRAM, no
+# sensors/WiFi). This script opens it through the emulator-only `open_app` command
+# (added in Phase 5A: it calls the SAME NativeHal launchApp() the launcher uses, so
+# it is deterministic and does not depend on fragile grid navigation), captures a
+# screenshot, and asserts the active app is "Probability".
+#
+# The app opens with default normal-distribution parameters mu=0, sigma=1, x=0
+# (sigma=1 != 0, so the bell-curve PDF/CDF compute has no division-by-zero). As
+# with every emulator screen, the only volatile region across runs is the StatusBar
+# clock (HH:MM). This phase makes NO golden claim; the screenshot is a CANDIDATE for
+# human review only.
+#
+# Timing notes (deterministic, step-ms 16):
+#   * 200 frames -> splash (~frame 125) is done; we are in the launcher.
+#   * 60 frames  -> Probability screen load + fade settles after open_app.
+#
+# Run:
+#   program --headless --deterministic --script tests/emulator/scripts/probability_smoke.numos \
+#           --frames 800 --screenshot out/probability_smoke.ppm --quiet
+# Exit codes: 0 ok · 2 script/parse error · 3 screenshot write error · 4 assertion failure.
+
+log "probability_smoke: waiting for launcher"
+wait 200
+
+# Open Probability (emulator launchApp id 5 — same id as the launcher's Probability card).
+open_app Probability
+wait 60
+
+# Screenshot FIRST: the deferred capture happens on this frame, before the assert
+# runs on a later frame, so the artifact is produced even if the assertion fails.
+screenshot out/probability_smoke.ppm
+log "probability_smoke: screenshot captured"
+
+assert_app Probability
+log "probability_smoke: assertion passed (Probability active)"

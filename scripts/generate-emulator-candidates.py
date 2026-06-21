@@ -46,6 +46,13 @@ CANDIDATES = [
     # is blessed here — the compare step warns (not fails) when a golden is absent.
     ("settings_smoke", "tests/emulator/scripts/settings_smoke.numos", 800),
     ("math_showcase_smoke", "tests/emulator/scripts/math_showcase_smoke.numos", 800),
+    # Phase 6A: additional safe LVGL-only educational apps (Statistics + Probability).
+    # Each script opens its app via `open_app`, screenshots, and asserts the active
+    # app name; a failed assert_app exits 4, which this generator reports as FAIL.
+    # No golden is blessed here — the compare step warns (not fails) when a golden
+    # is absent.
+    ("statistics_smoke", "tests/emulator/scripts/statistics_smoke.numos", 800),
+    ("probability_smoke", "tests/emulator/scripts/probability_smoke.numos", 800),
 ]
 
 

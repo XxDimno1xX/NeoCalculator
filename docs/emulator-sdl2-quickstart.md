@@ -387,7 +387,9 @@ python scripts/generate-emulator-candidates.py
 #    out/emulator-candidates/calc_1_plus_2.ppm
 #    out/emulator-candidates/calc_fraction_sum.ppm
 #    out/emulator-candidates/settings_smoke.ppm        (Phase 5A)
-#    out/emulator-candidates/math_showcase_smoke.ppm   (Phase 5A; each 320x240, 230415 bytes)
+#    out/emulator-candidates/math_showcase_smoke.ppm   (Phase 5A)
+#    out/emulator-candidates/statistics_smoke.ppm      (Phase 6A)
+#    out/emulator-candidates/probability_smoke.ppm     (Phase 6A; each 320x240, 230415 bytes)
 ```
 
 It drives each bundled `.numos` script with `--headless --deterministic --script
@@ -558,6 +560,54 @@ y[8..16]`) — the same per-minute variation every status-bar screen has — so 
 future golden would mask the clock, just as `calc_1_plus_2` masks the blinking
 cursor.
 
+### Additional emulator apps: Statistics & Probability (Phase 6A)
+
+Phase 6A widens emulator app coverage with two more **safe**, LVGL-only educational
+apps. As in Phase 5A, this is **emulator-only** wiring in
+[`NativeHal.cpp`](../src/hal/NativeHal.cpp); the firmware, the renderer geometry,
+the STIX assets, and the CAS/Giac engine are **untouched**. Open either with the
+[`open_app`](#scripted-input-replay-phase-4a) script command (or by navigating the
+launcher to its card — Statistics or Probability — and pressing ENTER).
+
+**Statistics.** The real, unmodified [`StatisticsApp`](../src/apps/StatisticsApp.cpp)
+— a 3-tab panel (Data table editor / computed Stats / histogram) backed by a pure
+`<vector>`/`<cmath>` [`StatsEngine`](../src/apps/StatsEngine.cpp). It needs **no HAL
+work**: it touches only LVGL + `ui::StatusBar` + `KeyboardManager`, with no Giac,
+no filesystem, no `heap_caps`/PSRAM, and no sensors. It opens on the **Data** tab, so
+no statistics are computed on open (no empty-dataset edge case).
+
+**Probability.** The real, unmodified [`ProbabilityApp`](../src/apps/ProbabilityApp.cpp)
+— a normal-distribution N(μ, σ) explorer with an `lv_chart` bell curve and PDF/CDF
+readout, backed by a pure `<cmath>` [`ProbEngine`](../src/apps/ProbEngine.cpp). Same
+dependency profile as Statistics. It opens with defaults μ=0, σ=1, x=0 (σ≠0, so the
+curve computation has no division-by-zero).
+
+> Both apps are the **same code the firmware ships** (already compiled there via
+> `+<*>`); Phase 6A only adds their `.cpp` to the native
+> [`build_src_filter`](../platformio.ini#L188) and routes `open_app`/`assert_app`/
+> launcher id 4 (Statistics) and 5 (Probability) in `NativeHal.cpp`. No app logic is
+> modified.
+
+**Smoke scripts.** `tests/emulator/scripts/statistics_smoke.numos` and
+`probability_smoke.numos` each `open_app` the app, screenshot, and
+`assert_app <Name>`. They are wired into
+[`generate-emulator-candidates.py`](../scripts/generate-emulator-candidates.py), so
+CI generates and uploads their candidate PPMs and **warns (does not fail)** on a
+missing golden — **no golden is blessed by this phase**.
+
+```bash
+SDL_VIDEODRIVER=dummy ./scripts/run-emulator-linux.sh \
+  --headless --deterministic --script tests/emulator/scripts/statistics_smoke.numos \
+  --frames 800 --screenshot out/statistics_smoke.ppm --quiet           # Linux
+```
+
+**Limitations.** These two apps are **smoke-only** (open + `assert_app` + screenshot);
+they have **no `assert_result`-style semantic assertions** (that path is
+CalculationApp-only). Both open in their default state and are not driven with data
+entry in this phase. As with every emulator screen the only across-run volatile
+region is the StatusBar clock (`HH:MM`); a future golden would mask it, exactly as
+`calc_1_plus_2` masks the blinking cursor.
+
 ## Keyboard map (Phase 3A)
 
 PC keys map directly to calculator `KeyCode`s in
@@ -628,11 +678,13 @@ PlatformIO paths can hit the Windows path-length limit). Consequences:
   [Keyboard map](#keyboard-map-phase-3a)); full matrix / serial-text input is
   still future. SHIFT/ALPHA/STO are only meaningful inside CalculationApp, not
   in the launcher.
-- **CalculationApp, Settings, and Math Showcase are wired** in the emulator
-  (Phase 5A); the remaining apps still print "no implementada"
-  ([NativeHal.cpp](../src/hal/NativeHal.cpp)). Settings is the real firmware app;
-  Math Showcase is emulator-only. See
-  [Additional emulator apps](#additional-emulator-apps-settings--math-showcase-phase-5a).
+- **CalculationApp, Settings, Math Showcase, Statistics, and Probability are wired**
+  in the emulator (Settings + Math Showcase in Phase 5A; Statistics + Probability in
+  Phase 6A); the remaining apps still print "no implementada"
+  ([NativeHal.cpp](../src/hal/NativeHal.cpp)). Settings, Statistics, and Probability
+  are real firmware apps; Math Showcase is emulator-only. See
+  [Additional emulator apps (Phase 5A)](#additional-emulator-apps-settings--math-showcase-phase-5a)
+  and [Statistics & Probability (Phase 6A)](#additional-emulator-apps-statistics--probability-phase-6a).
 - **Scripted input replay, golden tooling, AND semantic value assertions exist;
   rendered-pixel assertion does not.** Phase 3A adds `--frames` / `--run-for-ms` /
   `--headless` for unattended boot smokes, Phase 3B adds `--deterministic` +
