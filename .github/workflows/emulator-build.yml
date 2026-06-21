@@ -17,6 +17,7 @@ on:
     paths:
       - 'src/**'
       - 'tests/emulator/**'
+      - 'tests/host/**'
       - 'platformio.ini'
       - 'scripts/sdl2_env.py'
       # The visual gate's own logic: changing the comparator or candidate
@@ -25,17 +26,20 @@ on:
       # deliberately NOT listed — CI never invokes it.)
       - 'scripts/compare-ppm.py'
       - 'scripts/generate-emulator-candidates.py'
+      - 'scripts/check-keycode-digit-patterns.py'
       - '.github/workflows/emulator-build.yml'
   pull_request:
     paths:
       - 'src/**'
       - 'tests/emulator/**'
+      - 'tests/host/**'
       - 'platformio.ini'
       - 'scripts/sdl2_env.py'
       # Keep in sync with push.paths above: the gate must re-run when its own
       # comparator / candidate generator changes.
       - 'scripts/compare-ppm.py'
       - 'scripts/generate-emulator-candidates.py'
+      - 'scripts/check-keycode-digit-patterns.py'
       - '.github/workflows/emulator-build.yml'
   workflow_dispatch:
 
@@ -72,6 +76,32 @@ jobs:
 
       - name: Diagnose dependencies
         run: python scripts/check-emulator-deps.py
+
+      # ---------------------------------------------------------------------
+      # KeyCode digit-helper regression guard (Phase 6F).
+      #
+      # Two cheap, fail-fast checks that protect the digit-entry fix from
+      # Phases 6D/6E (StatisticsApp, ProbabilityApp, CircuitCoreApp, MatricesApp,
+      # RegressionApp, SequencesApp). The KeyCode enum lays NUM_0..NUM_9 out in
+      # physical keypad order, so NUM_0 > NUM_9; the old `>= NUM_0 && <= NUM_9`
+      # range test silently dropped every digit and `code - NUM_0` was garbage.
+      #   1. Static scan — fails if that range test or the `- NUM_0` enum
+      #      arithmetic ever reappears under src/ (comment-aware; switch labels
+      #      and the doc notes are not flagged). --selftest first proves the
+      #      matcher itself still catches the bad idioms.
+      #   2. Host unit test — actually executes keyCodeDigitValue() and asserts
+      #      NUM_0..NUM_9 -> 0..9 and that representative non-digits return -1.
+      # Neither touches firmware/runtime code; running it before the build makes
+      # a digit regression fail in seconds instead of after the full build.
+      - name: KeyCode digit-helper guard (Phase 6F)
+        run: |
+          set -euo pipefail
+          echo "--- static anti-pattern scan (src/) ---"
+          python scripts/check-keycode-digit-patterns.py --selftest
+          python scripts/check-keycode-digit-patterns.py
+          echo "--- host unit test (keyCodeDigitValue) ---"
+          g++ -std=c++17 -Wall -Wextra tests/host/keycode_digit_test.cpp -o keycode_digit_test
+          ./keycode_digit_test
 
       - name: Build emulator (emulator_pc)
         run: pio run -e emulator_pc

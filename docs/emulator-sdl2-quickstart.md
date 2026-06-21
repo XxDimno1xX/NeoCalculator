@@ -427,12 +427,21 @@ merely launchable:
 > `switch` returning `0`–`9` or `-1`; no heap, no tables, host/firmware safe) and routed
 > both apps' digit detection through it (`StatisticsApp.cpp`, `ProbabilityApp.cpp`).
 > Digit keys now register, so the two scripts above type real values instead of working
-> around the bug. The same broken range test still exists in four other firmware apps
+> around the bug. **Phase 6E** then applied the identical one-line `keyCodeDigitValue`
+> substitution to the four other firmware apps that shared the broken range test but are
 > not built into the emulator — `CircuitCoreApp`, `MatricesApp`, `RegressionApp`,
-> `SequencesApp` — and is left for a follow-up **Phase 6E** sweep (each would take the
-> identical one-line `keyCodeDigitValue` substitution). Because these scripts now reach
-> data-driven states, their candidate screenshots changed and **need fresh human-reviewed
-> goldens** before any byte-exact comparison is meaningful.
+> `SequencesApp` — so a repo-wide scan now finds zero unsafe digit predicates. Because the
+> two scripts above now reach data-driven states, their candidate screenshots changed and
+> **need fresh human-reviewed goldens** before any byte-exact comparison is meaningful.
+>
+> **Phase 6F** locks this in with a regression guard that the emulator CI runs *before* the
+> build (`.github/workflows/emulator-build.yml`): a host unit test that executes
+> `keyCodeDigitValue()` and asserts `NUM_0..NUM_9 → 0..9` plus non-digits → `-1`
+> (`tests/host/keycode_digit_test.cpp`), and a comment-aware static scan that fails if the
+> `>= NUM_0 && <= NUM_9` range test or `- NUM_0` enum arithmetic ever returns to `src/`
+> (`scripts/check-keycode-digit-patterns.py`, whose `--selftest` proves the matcher itself).
+> Run them locally with `python scripts/check-keycode-digit-patterns.py` and
+> `g++ -std=c++17 tests/host/keycode_digit_test.cpp -o k && ./k`.
 
 Both new screens are **human-gated**: this phase makes **no golden claim** — the
 candidates are for human review only, and no golden/mask is promoted automatically.
