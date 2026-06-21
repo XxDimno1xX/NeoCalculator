@@ -1,0 +1,64 @@
+# probability_edit_smoke.numos — Phase 6C: change a ProbabilityApp parameter and recompute.
+#
+# Unlike probability_smoke.numos (which only opens the app at its default normal
+# parameters mu=0, sigma=1, x=0), this script proves ProbabilityApp is INTERACTABLE:
+# it raises the focused mu parameter and lets the app recompute the normal PDF/CDF
+# and redraw the bell curve, so the rendered frame visibly differs from default.
+#
+# Why the quick-adjust key (not the numeric editor): the numeric edit-buffer path
+# (ENTER to edit, type digits, ENTER to commit) does NOT work here because digit
+# detection in ProbabilityApp uses the range test `code >= NUM_0 && code <= NUM_9`
+# (ProbabilityApp.cpp:405,495). The KeyCode enum declares the digits NON-contiguously
+# and out of order — NUM_7..NUM_9 (row 3), NUM_4..NUM_6 (row 4), NUM_1..NUM_3 then
+# NUM_0 last near ENTER (row 5) — so NUM_0 > NUM_9 and that range is always empty
+# (KeyCodes.h:68-77). Digit keys are therefore silently ignored. This is a PRE-EXISTING
+# firmware app-logic bug (CalculationApp avoids it with explicit per-digit case labels,
+# CalculationApp.cpp:326-335); fixing it is out of scope for an emulator-only phase.
+#
+# So this smoke edits mu via the nav-mode quick-increment instead: RIGHT adds +0.5 to
+# the focused field and calls recompute() directly (ProbabilityApp.cpp:483-491). Four
+# RIGHT presses move mu 0 -> 2.0, shifting the bell curve right and changing the
+# displayed PDF/CDF — a deterministic, visibly recomputed state. The focus starts on
+# mu (ProbabilityApp.cpp:125), so no field navigation is needed. Pure <cmath> ProbEngine:
+# no Giac/CAS, no PSRAM, no LittleFS.
+#
+# Existing script key names suffice (NativeHal.cpp scriptNameToKeyCode): `right` is
+# already mapped — Probability needs NO new key tokens.
+#
+# As with every emulator screen the only volatile region is the StatusBar clock
+# (HH:MM). This phase makes NO golden claim; the screenshot is a CANDIDATE for human
+# review only (a clock mask is added by the human at promotion time, rect 4,6,37,13).
+#
+# Timing notes (deterministic, step-ms 16):
+#   * 200 frames -> splash done, in launcher.
+#   * 60 frames  -> Probability screen load + fade settles after open_app.
+#   * one frame per key command (1 command/frame).
+#   * 120 frames -> recompute + bell-curve redraw settles.
+#
+# Run:
+#   program --headless --deterministic --script tests/emulator/scripts/probability_edit_smoke.numos \
+#           --frames 800 --screenshot out/probability_edit_smoke.ppm --quiet
+# Exit codes: 0 ok · 2 script/parse error · 3 screenshot write error · 4 assertion failure.
+
+log "probability_edit_smoke: waiting for launcher"
+wait 200
+
+# Open Probability (emulator launchApp id 5 — same id as the launcher's Probability card).
+open_app Probability
+wait 60
+assert_app Probability
+
+# Raise focused mu 0 -> 2.0 via four nav-mode quick-increments; each RIGHT does
+# mu += 0.5 and recompute() (ProbabilityApp.cpp:483-491).
+key right
+key right
+key right
+key right
+wait 120
+
+# Screenshot FIRST so the artifact exists even if a later assertion fails.
+screenshot out/probability_edit_smoke.ppm
+log "probability_edit_smoke: screenshot captured (mu raised to 2, PDF/CDF recomputed)"
+
+assert_app Probability
+log "probability_edit_smoke: assertion passed (Probability active)"

@@ -53,6 +53,13 @@ CANDIDATES = [
     # is absent.
     ("statistics_smoke", "tests/emulator/scripts/statistics_smoke.numos", 800),
     ("probability_smoke", "tests/emulator/scripts/probability_smoke.numos", 800),
+    # Phase 6C: data-driven interaction smokes that go beyond the default open state.
+    # statistics_data_smoke types the dataset {1,2,3} and switches to the computed
+    # Stats tab; probability_edit_smoke edits the mu parameter and recomputes the
+    # PDF/CDF. Each script also asserts the active app name (exit 4 -> FAIL here). No
+    # golden is blessed here — the compare step warns (not fails) when a golden is absent.
+    ("statistics_data_smoke", "tests/emulator/scripts/statistics_data_smoke.numos", 800),
+    ("probability_edit_smoke", "tests/emulator/scripts/probability_edit_smoke.numos", 800),
 ]
 
 

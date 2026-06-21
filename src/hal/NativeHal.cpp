@@ -415,6 +415,11 @@ static KeyCode scriptNameToKeyCode(const std::string& raw)
     if (n == "ac" || n == "esc" ||
         n == "escape")                        return KeyCode::AC;
     if (n == "home" || n == "mode")           return KeyCode::MODE;
+    // GRAPH (KeyCodes.h:61): app-specific function key. StatisticsApp uses it to
+    // cycle Data->Stats->Graph tabs (StatisticsApp.cpp:532); on the Data tab
+    // LEFT/RIGHT are column nav, so GRAPH is the only key that reaches a computed
+    // tab. Needed by statistics_data_smoke.numos (Phase 6C). Emulator-only.
+    if (n == "graph")                         return KeyCode::GRAPH;
     if (n == "x" || n == "varx")              return KeyCode::VAR_X;
     if (n == "y" || n == "vary")              return KeyCode::VAR_Y;
     if (n == "pow")                           return KeyCode::POW;

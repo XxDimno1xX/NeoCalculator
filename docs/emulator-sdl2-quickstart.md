@@ -389,8 +389,49 @@ python scripts/generate-emulator-candidates.py
 #    out/emulator-candidates/settings_smoke.ppm        (Phase 5A)
 #    out/emulator-candidates/math_showcase_smoke.ppm   (Phase 5A)
 #    out/emulator-candidates/statistics_smoke.ppm      (Phase 6A)
-#    out/emulator-candidates/probability_smoke.ppm     (Phase 6A; each 320x240, 230415 bytes)
+#    out/emulator-candidates/probability_smoke.ppm     (Phase 6A)
+#    out/emulator-candidates/statistics_data_smoke.ppm (Phase 6C)
+#    out/emulator-candidates/probability_edit_smoke.ppm(Phase 6C; each 320x240, 230415 bytes)
 ```
+
+**Deeper interaction smokes (Phase 6C).** Beyond the Phase 6A default-open smokes,
+Statistics and Probability now have scripts that drive the apps past their default
+state, proving they are *interactable*, not merely launchable:
+
+- `probability_edit_smoke.numos` raises the focused `mu` parameter from `0` to `2`
+  with four `RIGHT` presses (nav-mode quick-adjust, `mu += 0.5` + `recompute()` per
+  press, `ProbabilityApp.cpp:483-491`); the bell curve shifts right and the PDF/CDF
+  labels change.
+- `statistics_data_smoke.numos` appends rows with `AC` and switches to the computed
+  **Stats** tab with `GRAPH`. Reaching a computed tab from the Data tab requires the
+  `GRAPH` key — on the Data tab `LEFT`/`RIGHT` are column navigation — so the emulator
+  script-key table maps a `graph` token (`scriptNameToKeyCode`, `src/hal/NativeHal.cpp`,
+  emulator-only, guarded by `#ifdef NATIVE_SIM` so it is firmware-neutral). The Stats
+  tab then renders the 1-Var statistics via `switchTab` → `recompute()` →
+  `updateStatsDisplay()` (`StatisticsApp.cpp:318`).
+
+> **Known limitation — numeric entry into these apps is firmware-bugged.** Neither
+> script types digits into a field/cell, because digit entry into StatisticsApp and
+> ProbabilityApp is silently broken. Both detect digits with the range test
+> `code >= KeyCode::NUM_0 && code <= KeyCode::NUM_9` (`StatisticsApp.cpp:553,642`,
+> `ProbabilityApp.cpp:405,495`), but `KeyCodes.h:68-77` declares the digits
+> non-contiguously and out of order (NUM_7..NUM_9, then NUM_4..NUM_6, then NUM_1..NUM_3
+> and finally NUM_0 near `ENTER`), so `NUM_0 > NUM_9` and the range is always empty —
+> every digit key is ignored. CalculationApp is immune because it uses explicit
+> per-digit `case` labels (`CalculationApp.cpp:326-335`). This is a **pre-existing
+> firmware app-logic bug**, not an emulator artifact, and fixing it is out of scope
+> for an emulator-only phase. As a result the Probability smoke changes `mu` via the
+> quick-adjust key (not the numeric editor), and the Statistics smoke computes over the
+> default (zero) rows rather than a typed dataset. **Recommended Phase 6D:** fix the
+> digit range test in both apps (e.g. an explicit digit predicate), then extend these
+> scripts to type a real dataset (`{1,2,3}`) and edit `mu` numerically.
+
+Both new screens are **human-gated**: this phase makes **no golden claim** — the
+candidates are for human review only, and no golden/mask is promoted automatically.
+There are **no semantic numeric assertions** for Statistics/Probability yet (only the
+`assert_app` smoke); adding one would require a read-only app-state accessor and is
+deferred. A clock mask (shared rect `4,6,37,13`) is added by the human at promotion
+time, as with the other app smokes.
 
 It drives each bundled `.numos` script with `--headless --deterministic --script
 --frames --screenshot`, writing one PPM per script into `out/emulator-candidates/`

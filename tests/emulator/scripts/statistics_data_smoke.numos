@@ -1,0 +1,72 @@
+# statistics_data_smoke.numos — Phase 6C: drive StatisticsApp past its default tab.
+#
+# Unlike statistics_smoke.numos (which only opens the app on its default empty "Data"
+# tab), this script proves StatisticsApp is INTERACTABLE: it grows the data table and
+# switches to the computed "Stats" tab, which runs the 1-Var StatsEngine and renders
+# its results — a code path the open-only smoke never reaches.
+#
+# IMPORTANT LIMITATION (honest scope note): this smoke does NOT type numeric values,
+# because digit entry into the table is broken by a pre-existing firmware app-logic
+# bug. StatisticsApp detects digits with the range test `code >= NUM_0 && code <= NUM_9`
+# (StatisticsApp.cpp:553,642), but the KeyCode enum declares the digits NON-contiguously
+# and out of order — NUM_7..NUM_9 (row 3), NUM_4..NUM_6 (row 4), NUM_1..NUM_3 then NUM_0
+# last near ENTER (row 5) — so NUM_0 > NUM_9 and that range is always empty
+# (KeyCodes.h:68-77). Digit keys are silently ignored, so a value cell cannot be set to
+# a nonzero number from a script. (CalculationApp is immune: it uses explicit per-digit
+# case labels, CalculationApp.cpp:326-335.) Fixing the range test is a firmware app-logic
+# change, out of scope for an emulator-only phase — see the Phase 6D recommendation in
+# docs/emulator-sdl2-quickstart.md.
+#
+# So this smoke exercises the parts that DO work deterministically with mapped keys:
+#   * AC (nav mode) appends a fresh row: value 0, freq 1, ++_numRows (StatisticsApp.cpp:631-638).
+#   * GRAPH cycles Data -> Stats -> Graph; it is the ONLY key that leaves the Data tab
+#     (on Data, LEFT/RIGHT are column nav — the tab-switch guard requires
+#     _activeTab != Tab::DATA, StatisticsApp.cpp:521,526). switchTab(STATS) calls
+#     recompute() + updateStatsDisplay() (StatisticsApp.cpp:318). The emulator `key graph`
+#     token is mapped in scriptNameToKeyCode (NativeHal.cpp, #ifdef NATIVE_SIM,
+#     firmware-neutral).
+#   * The Stats tab then shows the 1-Var statistics over the default rows (all value 0:
+#     Mean/Median/.../Sum = 0, Count n = 2 — recompute() includes rows with value != 0
+#     OR index < numRows-1, StatisticsApp.cpp:439). Pure <cmath>/STL StatsEngine: no
+#     Giac/CAS, no PSRAM, no LittleFS. Fully deterministic (constructor zero-fills the
+#     data: _values[i]=0.0, _freqs[i]=1.0, StatisticsApp.cpp:70-71).
+#
+# As with every emulator screen the only volatile region is the StatusBar clock
+# (HH:MM). This phase makes NO golden claim; the screenshot is a CANDIDATE for human
+# review only (a clock mask is added by the human at promotion time, rect 4,6,37,13).
+#
+# Timing notes (deterministic, step-ms 16):
+#   * 200 frames -> splash done, in launcher.
+#   * 60 frames  -> Statistics screen load + fade settles after open_app.
+#   * one frame per key command (1 command/frame).
+#   * 120 frames -> Data->Stats tab switch + StatsEngine recompute settles.
+#
+# Run:
+#   program --headless --deterministic --script tests/emulator/scripts/statistics_data_smoke.numos \
+#           --frames 800 --screenshot out/statistics_data_smoke.ppm --quiet
+# Exit codes: 0 ok · 2 script/parse error · 3 screenshot write error · 4 assertion failure.
+
+log "statistics_data_smoke: waiting for launcher"
+wait 200
+
+# Open Statistics (emulator launchApp id 4 — same id as the launcher's Statistics card).
+open_app Statistics
+wait 60
+assert_app Statistics
+
+# Grow the table by two rows (nav-mode AC appends a row each).
+key ac
+key ac
+
+# Switch Data -> Stats: GRAPH is the only key that leaves the Data tab, and it triggers
+# recompute() + updateStatsDisplay() over the rows.
+key graph
+wait 120
+
+# Screenshot FIRST so the artifact exists even if a later assertion fails.
+screenshot out/statistics_data_smoke.ppm
+log "statistics_data_smoke: screenshot captured (Stats tab, 1-Var stats rendered)"
+
+# Still the Statistics app after the in-app tab switch (tab switch does not change g_mode).
+assert_app Statistics
+log "statistics_data_smoke: assertion passed (Statistics active)"
