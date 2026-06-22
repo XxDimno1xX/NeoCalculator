@@ -246,9 +246,14 @@ void RegressionApp::createEquationTab() {
     lv_obj_remove_flag(_eqPanel, LV_OBJ_FLAG_SCROLLABLE);
 
     // Model label (toggle with SHIFT)
+    // NOTE: Equation-tab body labels use lv_font_montserrat_14 (the LVGL default
+    // body font), NOT stix_math_18. The STIX math font's cmap starts at U+0021,
+    // so it has no glyph for U+0020 (space); with LV_USE_FONT_PLACEHOLDER it paints
+    // a tofu box at every space. Montserrat has a real space glyph. STIX is kept for
+    // the tab bar / data table where it renders fine. (Phase 7E)
     _eqModelLabel = lv_label_create(_eqPanel);
     lv_label_set_text(_eqModelLabel, "Model: Linear  (SHIFT to toggle)");
-    lv_obj_set_style_text_font(_eqModelLabel, &stix_math_18, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_eqModelLabel, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_style_text_color(_eqModelLabel, lv_color_hex(COL_HINT), LV_PART_MAIN);
     lv_obj_set_pos(_eqModelLabel, 8, 6);
 
@@ -258,7 +263,7 @@ void RegressionApp::createEquationTab() {
         "Slope (m) / a:",
         "Intercept (b):",
         "c:",
-        "R\xC2\xB2:",       // R² (UTF-8)
+        "R2:",             // R-squared (ASCII; montserrat_14 has no U+00B2)
         "Points (n):"
     };
 
@@ -268,14 +273,14 @@ void RegressionApp::createEquationTab() {
         // Name label (left)
         lv_obj_t* name = lv_label_create(_eqPanel);
         lv_label_set_text(name, names[i]);
-        lv_obj_set_style_text_font(name, &stix_math_18, LV_PART_MAIN);
+        lv_obj_set_style_text_font(name, &lv_font_montserrat_14, LV_PART_MAIN);
         lv_obj_set_style_text_color(name, lv_color_hex(COL_TEXT), LV_PART_MAIN);
         lv_obj_set_pos(name, 10, y);
 
         // Value label (right)
         _eqLabels[i] = lv_label_create(_eqPanel);
         lv_label_set_text(_eqLabels[i], "---");
-        lv_obj_set_style_text_font(_eqLabels[i], &stix_math_18, LV_PART_MAIN);
+        lv_obj_set_style_text_font(_eqLabels[i], &lv_font_montserrat_14, LV_PART_MAIN);
         lv_obj_set_style_text_color(_eqLabels[i], lv_color_hex(0x1565C0), LV_PART_MAIN);
         lv_obj_set_pos(_eqLabels[i], 150, y);
     }
@@ -492,7 +497,7 @@ void RegressionApp::updateEquationDisplay() {
     if (_model == RegressionEngine::Model::LINEAR) {
         snprintf(buf, sizeof(buf), "y = %.4gx + %.4g", _result.a, _result.b);
     } else {
-        snprintf(buf, sizeof(buf), "y = %.4gx\xC2\xB2 + %.4gx + %.4g",
+        snprintf(buf, sizeof(buf), "y = %.4gx^2 + %.4gx + %.4g",
                  _result.a, _result.b, _result.c);
     }
     if (_eqLabels[0]) lv_label_set_text(_eqLabels[0], buf);
