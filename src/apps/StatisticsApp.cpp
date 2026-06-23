@@ -199,7 +199,9 @@ void StatisticsApp::createDataTab() {
     lv_table_set_column_width(_table, 1, 150);
     lv_obj_set_size(_table, SCREEN_W - 8, panelH - 24);
     lv_obj_set_pos(_table, 4, 2);
-    lv_obj_set_style_text_font(_table, &stix_math_18, LV_PART_MAIN);
+    // Phase 7G: headers "V1 (Value)"/"N1 (Freq)" contain spaces; STIX has no
+    // U+0020 glyph → tofu. Use the LVGL body font (numeric cells render fine too).
+    lv_obj_set_style_text_font(_table, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_style_border_width(_table, 1, LV_PART_MAIN);
     lv_obj_set_style_border_color(_table, lv_color_hex(0xD0D0D0), LV_PART_MAIN);
 
@@ -211,11 +213,12 @@ void StatisticsApp::createDataTab() {
     _numRows = 1;
     refreshTable();
 
-    // Hint label at the bottom
+    // Hint label at the bottom.
+    // Phase 7G: plain UI text → montserrat_14 (STIX tofus spaces). LV_SYMBOL_UP/DOWN
+    // (U+F077/F078) are in neither font (already tofu) → dropped; "Nav" conveys it.
     _dataHint = lv_label_create(_dataPanel);
-    lv_label_set_text(_dataHint,
-        LV_SYMBOL_UP LV_SYMBOL_DOWN " Nav  ENTER Edit  DEL Clear  AC New row");
-    lv_obj_set_style_text_font(_dataHint, &stix_math_18, LV_PART_MAIN);
+    lv_label_set_text(_dataHint, "Nav  ENTER Edit  DEL Clear  AC New row");
+    lv_obj_set_style_text_font(_dataHint, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_style_text_color(_dataHint, lv_color_hex(COL_HINT), LV_PART_MAIN);
     lv_obj_set_pos(_dataHint, 6, panelH - 18);
 }
@@ -251,16 +254,19 @@ void StatisticsApp::createStatsTab() {
         int y = 6 + i * 24;
 
         // Name label (left)
+        // Phase 7G: stat names "Std Dev:"/"Count (n):" contain spaces → STIX tofus
+        // them; use montserrat_14. The paired value label is switched too so both
+        // columns share a baseline (matches the Phase 7E RegressionApp precedent).
         lv_obj_t* name = lv_label_create(_statsPanel);
         lv_label_set_text(name, statNames[i]);
-        lv_obj_set_style_text_font(name, &stix_math_18, LV_PART_MAIN);
+        lv_obj_set_style_text_font(name, &lv_font_montserrat_14, LV_PART_MAIN);
         lv_obj_set_style_text_color(name, lv_color_hex(COL_TEXT), LV_PART_MAIN);
         lv_obj_set_pos(name, 10, y);
 
         // Value label (right)
         _statLabels[i] = lv_label_create(_statsPanel);
         lv_label_set_text(_statLabels[i], "---");
-        lv_obj_set_style_text_font(_statLabels[i], &stix_math_18, LV_PART_MAIN);
+        lv_obj_set_style_text_font(_statLabels[i], &lv_font_montserrat_14, LV_PART_MAIN);
         lv_obj_set_style_text_color(_statLabels[i], lv_color_hex(0x1565C0), LV_PART_MAIN);
         lv_obj_set_pos(_statLabels[i], 180, y);
     }

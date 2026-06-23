@@ -183,23 +183,26 @@ void ProbabilityApp::createUI() {
     lv_obj_set_style_pad_all(_resultPanel, 4, LV_PART_MAIN);
     lv_obj_remove_flag(_resultPanel, LV_OBJ_FLAG_SCROLLABLE);
 
+    // Phase 7G: "PDF: ..."/"P(X<x): ..." contain spaces; STIX has no U+0020 glyph
+    // → tofu. Plain UI result text uses montserrat_14 (the LVGL body font).
     _pdfLabel = lv_label_create(_resultPanel);
     lv_label_set_text(_pdfLabel, "PDF: ---");
-    lv_obj_set_style_text_font(_pdfLabel, &stix_math_18, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_pdfLabel, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_style_text_color(_pdfLabel, lv_color_hex(COL_RESULT), LV_PART_MAIN);
     lv_obj_set_pos(_pdfLabel, 8, 4);
 
     _cdfLabel = lv_label_create(_resultPanel);
     lv_label_set_text(_cdfLabel, "P(X<x): ---");
-    lv_obj_set_style_text_font(_cdfLabel, &stix_math_18, LV_PART_MAIN);
+    lv_obj_set_style_text_font(_cdfLabel, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_style_text_color(_cdfLabel, lv_color_hex(COL_RESULT), LV_PART_MAIN);
     lv_obj_set_pos(_cdfLabel, 8, 24);
 
-    // Hint at very bottom
+    // Hint at very bottom.
+    // Phase 7G: plain UI text → montserrat_14 (STIX tofus spaces). LV_SYMBOL_UP/DOWN
+    // (U+F077/F078) are in neither font (already tofu) → dropped; "Select" conveys it.
     _hintLabel = lv_label_create(_screen);
-    lv_label_set_text(_hintLabel,
-        LV_SYMBOL_UP LV_SYMBOL_DOWN " Select  ENTER Edit  MODE Back");
-    lv_obj_set_style_text_font(_hintLabel, &stix_math_18, LV_PART_MAIN);
+    lv_label_set_text(_hintLabel, "Select  ENTER Edit  MODE Back");
+    lv_obj_set_style_text_font(_hintLabel, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_style_text_color(_hintLabel, lv_color_hex(COL_HINT), LV_PART_MAIN);
     lv_obj_set_pos(_hintLabel, 8, SCREEN_H - 16);
 }

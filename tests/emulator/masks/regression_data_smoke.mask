@@ -1,0 +1,33 @@
+# Ignore-rect mask for regression_data_smoke (NumOS SDL2 emulator visual test).
+#
+# Reason: the ONLY volatile region on this RegressionApp screen across separate
+# launches is the StatusBar clock. This script types the three points
+# {(1,2),(2,4),(3,6)} and switches to the "Equation" tab, which shows the computed
+# linear fit (y = 2x + 0, Slope/a = 2, Intercept/b = 0, c: N/A, R2: 1, Points/n = 3).
+# RegressionApp has no update() method, no blinking input cursor (the cell editor is
+# closed at screenshot time, on the Equation tab), and no animation once its 200 ms
+# fade-in settles, so the body (tab bar, the six Equation name/value label rows) is
+# byte-stable. Verified: regenerating this candidate in two different minutes differs
+# ONLY inside the clock glyphs — raw diff bounding box x[10..33] y[8..16] (24x9 px,
+# 156 px), fully contained by the rect below; masked compare is IDENTICAL. The clock
+# label is drawn by StatusBar::updateClock() from the real wall clock (time() ->
+# localtime -> "%02d:%02d", src/ui/StatusBar.cpp), so HH:MM reflects the minute each
+# scripted run happens to execute on. This is expected per-minute UI nondeterminism,
+# NOT a renderer bug.
+#
+# Region: the SAME shared StatusBar clock rect as regression_smoke / statistics_smoke /
+# statistics_data_smoke / probability_smoke / sequences_smoke / settings_smoke /
+# math_showcase_smoke. The label is aligned LV_ALIGN_LEFT_MID,6 in lv_font_montserrat_12
+# (StatusBar.cpp:61-65) and is always exactly 5 glyphs ("HH:MM"), so its box spans
+# ~x[6..38] y[8..16]. Because both the HOUR and the MINUTE digits can vary across
+# arbitrary launches, the mask covers the WHOLE label, not just the minutes.
+#
+# Rect = full HH:MM label box (~x[6..38] y[8..16]) padded ~2px on each side ->
+# x[4..40] y[6..18]. This is tight to the clock: the app title "Regression" is
+# centered (x~160), the angle/battery indicators are right-aligned (x>240), and the
+# Equation tab content (Data/Equation/Graph tab bar + the six label rows + computed
+# values) renders below the y=24 StatusBar separator — none are masked. In particular
+# the Equation body labels and computed values are NOT covered.
+#
+# x,y,w,h
+4,6,37,13
