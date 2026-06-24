@@ -243,11 +243,11 @@ void OpticsLabApp::createUI() {
     // key-binding hints.
     _infoLabel = lv_label_create(_screen);
     lv_obj_align(_infoLabel, LV_ALIGN_BOTTOM_LEFT, 2, -2);
-    lv_obj_set_style_text_font(_infoLabel, &stix_math_18, 0);
+    lv_obj_set_style_text_font(_infoLabel, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(_infoLabel,
                                  lv_color_hex(0xAAAAAA), 0);
     lv_obj_set_style_bg_opa(_infoLabel, LV_OPA_TRANSP, 0);
-    lv_label_set_text(_infoLabel, "UP/DN:sel  LR:move  +/-:R  \xC3\x97/\xC3\xB7:n  F1:mode");
+    lv_label_set_text(_infoLabel, "UP/DN:sel  LR:move  +/-:R  x/:n  F1:mode");
 
     // ── Simulation timer (~30 FPS) ────────────────────────────────────
     _simTimer = lv_timer_create(onSimTimer, 33, this);
