@@ -188,7 +188,11 @@ void BridgeDesignerApp::createUI() {
     // Info label (bottom overlay)
     _infoLabel = lv_label_create(_screen);
     lv_obj_set_pos(_infoLabel, 4, SCREEN_H - INFO_H - 2);
-    lv_obj_set_style_text_font(_infoLabel, &stix_math_18, LV_PART_MAIN);
+    // Plain UI status prose: stix_math_18 has no U+0020 glyph (spaces tofu as
+    // '?'). lv_font_montserrat_14 is the project plain-UI default and covers
+    // ASCII + spaces. (Em-dash status strings are ASCII-hyphenated below; even
+    // montserrat lacks U+2014.)
+    lv_obj_set_style_text_font(_infoLabel, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_style_text_color(_infoLabel, lv_color_hex(COL_TEXT_DIM), LV_PART_MAIN);
     lv_label_set_text(_infoLabel, "Arrows:move  ENTER:place  EXE:sim");
 }
@@ -220,7 +224,9 @@ void BridgeDesignerApp::createToolbar() {
 
         lv_obj_t* lbl = lv_label_create(btn);
         lv_label_set_text(lbl, TOOL_NAMES[i]);
-        lv_obj_set_style_text_font(lbl, &stix_math_18, LV_PART_MAIN);
+        // Plain UI button captions: use the project default plain-UI font, not
+        // the math font (consistent with _infoLabel; centered below).
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, LV_PART_MAIN);
         lv_obj_set_style_text_color(lbl, lv_color_hex(COL_TEXT), LV_PART_MAIN);
         lv_obj_center(lbl);
     }
@@ -755,7 +761,7 @@ void BridgeDesignerApp::handleKeyEdit(const KeyEvent& ev) {
                     // Start beam creation from this node
                     _startBeamNode = nodeHere;
                     _selectedNode  = nodeHere;
-                    if (_infoLabel) lv_label_set_text(_infoLabel, "Beam start — select end node");
+                    if (_infoLabel) lv_label_set_text(_infoLabel, "Beam start - select end node");
                 } else if (_startBeamNode != nodeHere) {
                     // Finish beam
                     uint8_t mat = static_cast<uint8_t>(_currentTool);
@@ -858,7 +864,7 @@ void BridgeDesignerApp::handleKeySim(const KeyEvent& ev) {
             }
             _appMode = AppMode::EDIT_MODE;
             resetSimulation();
-            if (_infoLabel) lv_label_set_text(_infoLabel, "Sim stopped — edit mode");
+            if (_infoLabel) lv_label_set_text(_infoLabel, "Sim stopped - edit mode");
             if (_drawObj) lv_obj_invalidate(_drawObj);
             break;
 
