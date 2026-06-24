@@ -204,14 +204,19 @@ void NeuralLabApp::createUI() {
     // ── Info label at bottom ──
     _infoLabel = lv_label_create(_screen);
     lv_obj_set_style_text_color(_infoLabel, lv_color_hex(COL_ACCENT), 0);
-    lv_obj_set_style_text_font(_infoLabel, &stix_math_18, 0);
+    // Plain UI prose: stix_math_18 has no U+0020 glyph (spaces tofu as '?').
+    // lv_font_montserrat_14 covers ASCII + spaces. See updateInfoLabel() for the
+    // RUN/PAUSE ASCII status (montserrat does not cover U+25B6/U+23F8 either).
+    lv_obj_set_style_text_font(_infoLabel, &lv_font_montserrat_14, 0);
     lv_obj_align(_infoLabel, LV_ALIGN_BOTTOM_LEFT, 4, -2);
     lv_label_set_text(_infoLabel, "Neural Lab | F2:Train F4:Scenario");
 
     // ── Topology HUD label (top-left overlay) ──
     _hudLabel = lv_label_create(_screen);
     lv_obj_set_style_text_color(_hudLabel, lv_color_hex(COL_ACCENT), 0);
-    lv_obj_set_style_text_font(_hudLabel, &stix_math_18, 0);
+    // Topology HUD is plain ASCII status text with spaces; use montserrat_14
+    // so the spaces render (stix_math_18 has no U+0020 glyph).
+    lv_obj_set_style_text_font(_hudLabel, &lv_font_montserrat_14, 0);
     lv_obj_set_style_bg_color(_hudLabel, lv_color_hex(COL_HUD_BG), 0);
     lv_obj_set_style_bg_opa(_hudLabel, LV_OPA_70, 0);
     lv_obj_set_style_pad_all(_hudLabel, 3, 0);
@@ -239,7 +244,9 @@ void NeuralLabApp::updateInfoLabel() {
              (unsigned long)_epochCount, (double)_lastLoss,
              (double)_engine.getLearningRate(),
              scenarioName, actName,
-             _training ? " \xE2\x96\xB6" : " \xE2\x8F\xB8");
+             // ASCII status, not U+25B6/U+23F8 play/pause glyphs: montserrat_14
+             // (and stix_math_18) lack those codepoints, so they would tofu.
+             _training ? " RUN" : " PAUSE");
     lv_label_set_text(_infoLabel, _infoBuf);
 }
 
