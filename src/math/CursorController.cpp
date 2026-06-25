@@ -319,7 +319,11 @@ void CursorController::ensureNotEmpty(NodeRow* row) {
 // ════════════════════════════════════════════════════════════════════════════
 void CursorController::insertDigit(char c) {
     if (!_cur.isValid()) return;
-    if (c < '0' || (c > '9' && c != '.')) return;
+    // Aceptar dígitos '0'..'9' y el punto decimal '.'. OJO con el orden: '.' es
+    // ASCII 46, MENOR que '0' (48), así que un guard `c < '0' || ...` rechazaría
+    // '.' por la PRIMERA cláusula antes de llegar a la excepción. La forma correcta
+    // exime '.' primero y solo entonces aplica el rango de dígitos.
+    if (c != '.' && (c < '0' || c > '9')) return;
 
     // Si el nodo a la izquierda es un Number, extender ese número
     MathNode* left = _cur.nodeLeft();

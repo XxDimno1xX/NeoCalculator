@@ -333,28 +333,10 @@ void CalculationApp::handleKey(const KeyEvent& ev) {
         case KeyCode::NUM_7: clearResult(); _cursor.insertDigit('7'); break;
         case KeyCode::NUM_8: clearResult(); _cursor.insertDigit('8'); break;
         case KeyCode::NUM_9: clearResult(); _cursor.insertDigit('9'); break;
-        case KeyCode::DOT: {
-            clearResult();
-            // Decimal point. NOTE: _cursor.insertDigit('.') drops the dot — the
-            // shared CursorController guard rejects it via `c < '0'` (ASCII '.'=46
-            // < '0'=48) before its own `c != '.'` exception applies. That guard
-            // lives in src/math/CursorController.cpp (out of scope to edit here), so
-            // we reproduce correct decimal insertion through the existing editing
-            // architecture: append '.' to the NodeNumber left of the cursor, or
-            // seed a leading zero first (".5" -> "0.5"). NodeNumber::appendChar
-            // itself enforces "at most one decimal point", so repeated dots are
-            // ignored exactly as before. Integer/fraction/operator input is
-            // untouched — only this DOT arm changes.
-            vpam::MathNode* left = _cursor.cursor().nodeLeft();
-            if (!left || left->type() != vpam::NodeType::Number) {
-                _cursor.insertDigit('0');               // '0' passes the guard; ".5" -> "0.5"
-                left = _cursor.cursor().nodeLeft();
-            }
-            if (left && left->type() == vpam::NodeType::Number) {
-                static_cast<vpam::NodeNumber*>(left)->appendChar('.');
-            }
-            break;
-        }
+        // Punto decimal: la inserción correcta vive ahora en el guard compartido
+        // de CursorController::insertDigit (Phase 8E). Se revierte el workaround
+        // local de Phase 8D — ya no se necesita.
+        case KeyCode::DOT:   clearResult(); _cursor.insertDigit('.'); break;
 
         // ── Operadores ──
         case KeyCode::ADD: clearResult(); _cursor.insertOperator(vpam::OpKind::Add); break;
