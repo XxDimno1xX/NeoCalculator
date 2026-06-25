@@ -93,6 +93,7 @@
 #include "../apps/ProbabilityApp.h"       // Phase 6A: LVGL-only, pure-math (no CAS/HW)
 #include "../apps/SequencesApp.h"         // Phase 7A: LVGL-only, pure-math (no CAS/HW)
 #include "../apps/RegressionApp.h"        // Phase 7C: LVGL-only, pure-math (no CAS/HW)
+#include "../math/VariableManager.h"      // Phase 8B: assert_variable lee el singleton de variables
 #include "../display/DisplayDriver.h"
 #include "../ui/SplashScreen.h"
 #include "../ui/MainMenu.h"
@@ -447,10 +448,23 @@ static KeyCode scriptNameToKeyCode(const std::string& raw)
     if (n == "e")                             return KeyCode::CONST_E;
     if (n == "negate" || n == "neg")          return KeyCode::NEGATE;
     if (n == "ans")                           return KeyCode::ANS;
+    if (n == "preans")                        return KeyCode::PREANS;  // Phase 8B (KeyCodes.h:92)
     if (n == "shift")                         return KeyCode::SHIFT;
     if (n == "alpha")                         return KeyCode::ALPHA;
     if (n == "sto")                           return KeyCode::STO;
     if (n == "freeeq" || n == "sd")           return KeyCode::FREE_EQ;
+
+    // Phase 8B: alias inofensivos hacia KeyCodes que YA existen en KeyCodes.h. No
+    // anaden conducta nueva a ninguna app (CalculationApp no maneja EXE/TABLE/F1..F5,
+    // salvo F2); solo permiten nombrarlos desde `.numos` para futuros tests (p.ej.
+    // Grapher en 8E). No se anaden ni reordenan valores del enum KeyCode.
+    if (n == "exe")                           return KeyCode::EXE;     // KeyCodes.h:81
+    if (n == "table")                         return KeyCode::TABLE;   // KeyCodes.h:60
+    if (n == "f1")                            return KeyCode::F1;      // KeyCodes.h:42
+    if (n == "f2")                            return KeyCode::F2;      // KeyCodes.h:43
+    if (n == "f3")                            return KeyCode::F3;      // KeyCodes.h:44
+    if (n == "f4")                            return KeyCode::F4;      // KeyCodes.h:45
+    if (n == "f5")                            return KeyCode::F5;      // KeyCodes.h:80
 
     return KeyCode::NONE;
 }
@@ -1090,6 +1104,13 @@ static bool saveScreenshotPPM(const char* path)
 //   log "mensaje"       · imprime un mensaje a stdout
 //   open_app NOMBRE     · (Phase 5A) lanza una app por nombre via launchApp()
 //                         (Calculation|Settings|MathShowcase) — sin navegar el grid
+//   assert_app NOMBRE   · (Phase 4B-C) aserta la app activa
+//   assert_result TEXT            · valor calculado (igualdad exacta)
+//   assert_result_contains TEXT   · valor calculado (subcadena)
+//   assert_no_error     · el resultado evaluado NO es error
+//   assert_error [TEXT] · (Phase 8B) el resultado ES error; TEXT subcadena opcional
+//   assert_variable N V · (Phase 8B) la variable N (A-F|x|y|z|ans|preans) vale V
+//                         (lee el singleton VariableManager, sin OCR ni pixeles)
 //
 // Modelo de planificacion (determinista): UN comando por frame, ejecutado ANTES
 // de processSdlEvents() para que la tecla sea visible al avance de tick y a
@@ -1106,13 +1127,17 @@ enum class ScriptCmdType : uint8_t {
     AssertApp,             // assert_app NAME   (NAME canonico en strArg)
     AssertResult,          // assert_result TEXT          (igualdad exacta)
     AssertResultContains,  // assert_result_contains TEXT (subcadena)
-    AssertNoError          // assert_no_error             (resultado sin error)
+    AssertNoError,         // assert_no_error             (resultado sin error)
+    // Phase 8B: aserciones adicionales (NativeHal-only, sin OCR, sin pixeles).
+    AssertError,           // assert_error [TEXT]   (resultado con error; TEXT subcadena opcional en strArg)
+    AssertVariable         // assert_variable NAME VALUE  (var como char en waitN; VALUE esperado en strArg)
 };
 
 struct ScriptCmd {
     ScriptCmdType type;
     KeyCode       key   = KeyCode::NONE;  // Key/KeyDown/KeyUp
-    long          waitN = 0;              // Wait (frames) / OpenApp (id resuelto)
+    long          waitN = 0;              // Wait (frames) / OpenApp (id resuelto) /
+                                          // AssertVariable (nombre de variable como char)
     std::string   strArg;                 // Screenshot (ruta) / Log (mensaje) /
                                           // Assert* (texto esperado / app canonica) /
                                           // OpenApp (nombre canonico, para el log)
@@ -1180,6 +1205,21 @@ static int scriptAppNameToId(const std::string& name)
     if (lc == "mathshowcase" || lc == "math_showcase" || lc == "showcase")
                                                                       return APPID_MATH_SHOWCASE;
     return -1;
+}
+
+// Phase 8B: traduce el NOMBRE de variable de `assert_variable` a su char interno
+// del VariableManager (A-F, x, y, z, '#'=Ans, '$'=PreAns). Acepta un identificador
+// de un solo caracter ya valido, o las palabras `ans`/`preans`. Devuelve '\0' si
+// no se reconoce (error de parseo -> el script falla al cargar con exit 2).
+static char scriptVarNameToChar(const std::string& raw)
+{
+    if (raw.size() == 1 && vpam::VariableManager::isValidName(raw[0]))
+        return raw[0];
+    std::string lc = raw;
+    for (char& c : lc) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (lc == "ans")    return vpam::VAR_ANS;     // '#'
+    if (lc == "preans") return vpam::VAR_PREANS;  // '$'
+    return '\0';
 }
 
 // Carga y VALIDA el script entero. Devuelve false (sin ejecutar nada) ante el
@@ -1289,6 +1329,39 @@ static bool loadScript(const char* path)
             std::string extra;
             if (iss >> extra) return scriptErr(path, lineNo, "assert_no_error no acepta argumentos");
             sc.type = ScriptCmdType::AssertNoError;
+        }
+        else if (lc == "assert_error") {
+            // Phase 8B. TEXT opcional (resto de la linea): recorta espacios/comillas.
+            std::string rest;
+            std::getline(iss, rest);
+            size_t b = rest.find_first_not_of(" \t");
+            rest = (b == std::string::npos) ? std::string() : rest.substr(b);
+            size_t e = rest.find_last_not_of(" \t");
+            if (e != std::string::npos) rest = rest.substr(0, e + 1);
+            if (rest.size() >= 2 && rest.front() == '"' && rest.back() == '"')
+                rest = rest.substr(1, rest.size() - 2);
+            sc.type   = ScriptCmdType::AssertError;
+            sc.strArg = rest;   // vacio => solo exige que EXISTA un error
+        }
+        else if (lc == "assert_variable") {
+            // Phase 8B. NOMBRE (1er token) + VALOR esperado (resto de la linea).
+            std::string name;
+            if (!(iss >> name)) return scriptErr(path, lineNo, "assert_variable requiere NOMBRE y VALOR");
+            std::string rest;
+            std::getline(iss, rest);
+            size_t b = rest.find_first_not_of(" \t");
+            rest = (b == std::string::npos) ? std::string() : rest.substr(b);
+            size_t e = rest.find_last_not_of(" \t");
+            if (e != std::string::npos) rest = rest.substr(0, e + 1);
+            if (rest.size() >= 2 && rest.front() == '"' && rest.back() == '"')
+                rest = rest.substr(1, rest.size() - 2);
+            if (rest.empty()) return scriptErr(path, lineNo, "assert_variable requiere el VALOR esperado");
+            char varCh = scriptVarNameToChar(name);
+            if (varCh == '\0') return scriptErr(path, lineNo,
+                "assert_variable: nombre de variable invalido (A-F|x|y|z|ans|preans)");
+            sc.type   = ScriptCmdType::AssertVariable;
+            sc.waitN  = static_cast<long>(static_cast<unsigned char>(varCh));
+            sc.strArg = rest;
         }
         else {
             return scriptErr(path, lineNo, "comando desconocido");
@@ -1451,6 +1524,51 @@ static void scriptStepBegin()
             } else {
                 assertPass(sc.line, "assert_no_error");
             }
+            break;
+        }
+
+        // ── Phase 8B: aserciones adicionales (NativeHal-only) ────────────
+        case ScriptCmdType::AssertError: {
+            if (g_mode != AppMode::CALCULATION || !g_calcApp) {
+                assertFail(sc.line, "assert_error requiere CalculationApp activa (app actual: '" +
+                                    std::string(activeAppName()) + "')");
+                break;
+            }
+            if (!g_calcApp->debugHasResult()) {
+                assertFail(sc.line, "assert_error: no hay resultado evaluado "
+                                    "(pulsa ENTER y deja asentar con `wait` antes de asertar)");
+                break;
+            }
+            const vpam::ExactVal& r = g_calcApp->debugLastResult();
+            if (r.ok) {
+                assertFail(sc.line, "assert_error esperaba un error pero el resultado es valido (actual='" +
+                                    formatExactVal(r) + "')");
+                break;
+            }
+            if (!sc.strArg.empty() && r.error.find(sc.strArg) == std::string::npos) {
+                assertFail(sc.line, "assert_error: el texto de error '" + r.error +
+                                    "' no contiene '" + sc.strArg + "'");
+                break;
+            }
+            assertPass(sc.line, "assert_error" +
+                                (sc.strArg.empty() ? std::string() : (" contiene '" + sc.strArg + "'")) +
+                                " (error='" + r.error + "')");
+            break;
+        }
+        case ScriptCmdType::AssertVariable: {
+            // Lee el singleton VariableManager (independiente de la app activa).
+            // Nota: una variable nunca asignada devuelve 0 (getVariable, no hay
+            // estado "unset" distinguible), por eso el NOMBRE se valida al parsear.
+            const char varName = static_cast<char>(static_cast<unsigned char>(sc.waitN));
+            const vpam::ExactVal v = vpam::VariableManager::instance().getVariable(varName);
+            const std::string actual = formatExactVal(v);
+            const char* label = vpam::VariableManager::variableLabel(varName);
+            if (actual == sc.strArg)
+                assertPass(sc.line, "assert_variable " + std::string(label) + " == '" +
+                                    sc.strArg + "' (actual='" + actual + "')");
+            else
+                assertFail(sc.line, "assert_variable " + std::string(label) + " esperaba '" +
+                                    sc.strArg + "' pero actual='" + actual + "'");
             break;
         }
     }

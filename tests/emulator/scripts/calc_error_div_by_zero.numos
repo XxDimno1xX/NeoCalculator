@@ -1,0 +1,41 @@
+# calc_error_div_by_zero.numos — evaluate 1/0 and ASSERT it is an error.
+#
+# Phase 8B semantic smoke for the new `assert_error` command. NO screenshot,
+# NO golden image: this is a pure semantic test (exit code + PASS/FAIL tokens).
+#
+# In NumOS the division key IS the fraction key (KeyCode::DIV -> insertFraction,
+# CalculationApp.cpp:344), so `FRAC` builds the fraction 1/0: type 1 (numerator),
+# FRAC, 0 (denominator), RIGHT to exit the fraction, then ENTER to evaluate.
+# Division by zero returns ExactVal::makeError("Math ERROR")
+# (MathEvaluator.cpp:354-356), i.e. debugLastResult().ok == false.
+#
+# `assert_error`        passes iff Calculation has a result AND it is an error.
+# `assert_error ERROR`  additionally requires "ERROR" to be a substring of the
+#                       error text ("Math ERROR" contains "ERROR").
+#
+# Run:
+#   program --headless --deterministic --script tests/emulator/scripts/calc_error_div_by_zero.numos \
+#           --frames 1400 --quiet
+# Exit codes: 0 ok · 2 script/parse error · 3 screenshot write error · 4 assertion failure.
+
+log "calc_error_div_by_zero: waiting for launcher"
+wait 200
+
+# Open Calculation (appId 0 — dead-center-visible on power-on).
+key ENTER
+wait 60
+
+# Build the fraction 1/0 and evaluate it.
+key 1
+key FRAC
+key 0
+key RIGHT
+key ENTER
+wait 120
+
+# Semantic assertions (Phase 8B): Calculation active, the evaluated result IS an
+# error, and the error text contains "ERROR". No OCR, no pixels, no golden.
+assert_app Calculation
+assert_error
+assert_error ERROR
+log "calc_error_div_by_zero: assertions passed (1/0 is an error)"
