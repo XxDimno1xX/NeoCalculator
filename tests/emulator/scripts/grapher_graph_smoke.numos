@@ -1,0 +1,94 @@
+# grapher_graph_smoke.numos — open Grapher, commit a plottable function (y=x),
+# switch to the Graph tab, render the first native plot, screenshot, and ASSERT.
+#
+# Phase 8I smoke. Exercises the first native Grapher Graph-tab RENDER, which is the
+# previously-untested path: createGraphPanel() allocates the Kandinsky RGB565 buffer
+# via the Phase 8G native PSRAMBuffer std::malloc fallback (utils::PSRAMBuffer,
+# GrapherApp.h:167), and replot() rasterizes grid + axes + the sampled curve into
+# that native buffer (GraphView clearBuffer/drawGrid/drawAxes + sampleFuncAdaptive,
+# GrapherApp.cpp:1639-1646). Verified: "[GRAPHER] Kandinsky buffer 91520 bytes
+# (native heap)" — no crash, no hang.
+#
+# TWO deliberate, evidence-driven choices (see the Phase 8I report for full detail):
+#
+#  (A) The committed function is "y=x", NOT bare "x". GrapherApp's GraphModel only
+#      treats an expression as a plottable function if it contains "=":
+#      GraphModel::getExprRHS returns nullptr without an '=' (GraphModel.cpp:28-36),
+#      so bare "x" commits as INVALID (valid=false) and replot() SKIPS it
+#      (GrapherApp.cpp:1644) — no curve is drawn. "y=x" is the minimal plottable
+#      form needed to actually exercise the native curve-sampling render. This is a
+#      test-input choice only; no Grapher code is modified.
+#
+#  (B) The first Graph-tab entry deliberately DEFERS replot ("don't replot yet —
+#      wait for layout pass", GrapherApp.cpp:778) and GrapherApp has no update(), so
+#      nothing auto-triggers the first plot — `key graph` + wait alone leaves the
+#      plot area white. The deferred replot is flushed by `ac` then a neutral key:
+#      `ac` exits the forced TRACE mode into NAVIGATE mode WITHOUT moving the
+#      viewport and hides the trace overlays (GrapherApp.cpp:2543-2556); the neutral
+#      `0` key is unhandled by handleGraphNav and falls through to its
+#      `if (_plotDirty) replot()` flush (GrapherApp.cpp:2462) at the DEFAULT
+#      [-10,10]x[-7,7] viewport. No pan, zoom, or trace movement is performed, and no
+#      trace cursor/POI overlay is drawn — this is purely the minimal existing-input
+#      step required to render the first plot.
+#
+# Determinism: run1-vs-run2 from fresh launches is byte-identical (the graph body —
+# grid, axes, and the red y=x curve — is fully deterministic on the same binary).
+# As with every emulator screen, the only wall-clock-volatile region is the
+# StatusBar clock (HH:MM). This phase makes NO golden claim and adds NO mask; the
+# screenshot is a CANDIDATE for human review only.
+#
+# All key tokens are already scriptable (NativeHal scriptNameToKeyCode): no NativeHal
+# change is required.
+#
+# Timing notes (deterministic, step-ms 16):
+#   * 200 frames -> splash done; launcher.
+#   *  60 frames -> Grapher load + fade settles.
+#   *   6 keys   -> commit y=x (down, enter, y, =, x, enter).
+#   *  80 frames -> expression committed/settled.
+#   * 120 frames -> Graph panel created + LVGL layout pass computed.
+#   *   2 keys   -> ac (TRACE->NAVIGATE) + 0 (flush deferred replot).
+#   * 180 frames -> replot rasterizes + screen settles.
+#
+# Run:
+#   program --headless --deterministic --script tests/emulator/scripts/grapher_graph_smoke.numos \
+#           --frames 800 --screenshot out/grapher_graph_smoke.ppm --quiet
+# Exit codes: 0 ok · 2 script/parse error · 3 screenshot write error · 4 assertion failure.
+
+log "grapher_graph_smoke: waiting for launcher"
+wait 200
+
+# Open Grapher (emulator launchApp id 1 — same id as the launcher's Grapher card).
+open_app Grapher
+wait 60
+
+# Commit the plottable function y=x into the first slot. Sequence:
+#   down  : TAB_BAR -> CONTENT (Add row, _numFuncs=0)
+#   enter : addFunction() -> startEditing() slot 0
+#   y = x : insertVariable('y'), insertVariable('='), insertVariable('x')
+#   enter : commit -> stopEditing(); function is parsed and marked valid
+key down
+key enter
+key y
+key =
+key x
+key enter
+wait 80
+
+# Switch to the Graph tab (createGraphPanel + native Kandinsky buffer allocation).
+key graph
+wait 120
+
+# Flush the app's deliberately-deferred first replot WITHOUT panning/zooming/tracing:
+#   ac : TRACE -> NAVIGATE (no viewport change; hides trace overlays)
+#   0  : neutral key -> handleGraphNav's `if (_plotDirty) replot()` flush
+key ac
+key 0
+wait 180
+
+# Screenshot FIRST: the deferred capture happens on this frame, before the assert
+# runs on a later frame, so the artifact is produced even if the assertion fails.
+screenshot out/grapher_graph_smoke.ppm
+log "grapher_graph_smoke: screenshot captured"
+
+assert_app Grapher
+log "grapher_graph_smoke: assertion passed (Grapher active, y=x plotted)"

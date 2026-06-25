@@ -86,6 +86,14 @@ CANDIDATES = [
     # FAIL here). No golden is blessed here — the compare step warns (not fails) when
     # a golden is absent.
     ("grapher_expr_smoke", "tests/emulator/scripts/grapher_expr_smoke.numos", 800),
+    # Phase 8I: Graph-tab render — grapher_graph_smoke commits the plottable function
+    # y=x, switches to the Graph tab (createGraphPanel + native PSRAMBuffer std::malloc
+    # allocation), and flushes the app's deferred first replot (ac + neutral key, no
+    # pan/zoom/trace) so the grid + axes + curve rasterize into the native buffer. It
+    # asserts the active app name (exit 4 -> FAIL here). Run1-vs-run2 is byte-identical
+    # (deterministic graph body). No golden is blessed here — the compare step warns
+    # (not fails) when a golden is absent.
+    ("grapher_graph_smoke", "tests/emulator/scripts/grapher_graph_smoke.numos", 800),
 ]
 
 
