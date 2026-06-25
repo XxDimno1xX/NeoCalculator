@@ -93,6 +93,7 @@
 #include "../apps/ProbabilityApp.h"       // Phase 6A: LVGL-only, pure-math (no CAS/HW)
 #include "../apps/SequencesApp.h"         // Phase 7A: LVGL-only, pure-math (no CAS/HW)
 #include "../apps/RegressionApp.h"        // Phase 7C: LVGL-only, pure-math (no CAS/HW)
+#include "../apps/GrapherApp.h"           // Phase 8G: LVGL-native grapher (RPN pipeline; no Giac/CAS)
 #include "../math/VariableManager.h"      // Phase 8B: assert_variable lee el singleton de variables
 #include "../display/DisplayDriver.h"
 #include "../ui/SplashScreen.h"
@@ -189,7 +190,8 @@ enum class AppMode : uint8_t {
     STATISTICS,     // Estadística (LVGL-native; Phase 6A, emulador)
     PROBABILITY,    // Probabilidad (LVGL-native; Phase 6A, emulador)
     SEQUENCES,      // Secuencias (LVGL-native; Phase 7A, emulador)
-    REGRESSION      // Regresion (LVGL-native; Phase 7C, emulador)
+    REGRESSION,     // Regresion (LVGL-native; Phase 7C, emulador)
+    GRAPHER         // Grapher (LVGL-native; Phase 8G, emulador)
 };
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -212,6 +214,7 @@ static StatisticsApp*   g_statsApp = nullptr;      // Phase 6A (emulador)
 static ProbabilityApp*  g_probApp  = nullptr;      // Phase 6A (emulador)
 static SequencesApp*    g_seqApp   = nullptr;      // Phase 7A (emulador)
 static RegressionApp*   g_regApp   = nullptr;      // Phase 7C (emulador)
+static GrapherApp*      g_grapherApp = nullptr;    // Phase 8G (emulador)
 
 // ── Math Showcase (Phase 5A, solo emulador) ─────────────────────────────────
 // Identificador de app fuera del rango de tarjetas del launcher (0..21) para que
@@ -604,6 +607,24 @@ static void dispatchKey(KeyCode kc, KeyAction action, bool isDown)
             }
             break;
 
+        case AppMode::GRAPHER:
+            // Phase 8G: mismo contrato que SETTINGS — MODE vuelve al launcher; el
+            // resto (incluido RELEASE) se reenvia a GrapherApp::handleKey, que
+            // gestiona su propia jerarquia de foco (AC retrocede el foco interno).
+            if (isDown && kc == KeyCode::MODE) {
+                returnToMenu();
+                break;
+            }
+            if (g_grapherApp) {
+                KeyEvent ke;
+                ke.code   = kc;
+                ke.action = action;
+                ke.row    = -1;
+                ke.col    = -1;
+                g_grapherApp->handleKey(ke);
+            }
+            break;
+
         case AppMode::MATH_SHOWCASE:
             // MODE vuelve al launcher; IZQ/ARRIBA y DCHA/ABAJO recorren los casos
             // curados. Solo en el down-edge (una pulsacion = un paso), sin cursor
@@ -730,6 +751,11 @@ static void transitionToMenu()
     // el objeto; su pantalla se crea en el primer load() (load() llama a begin()).
     g_regApp   = new RegressionApp();
 
+    // Phase 8G: GrapherApp (LVGL-native). Mismo patron perezoso: solo se construye
+    // el objeto (sin begin(), para no agotar el heap LVGL al arranque); su pantalla
+    // se crea en el primer load() (GrapherApp::load() llama a begin() si hace falta).
+    g_grapherApp = new GrapherApp();
+
     // Crear y mostrar el MainMenu
     g_menu = new MainMenu(g_displayStub);
     g_menu->create();
@@ -755,6 +781,14 @@ static void launchApp(int appId)
             g_calcApp->load();
             g_mode = AppMode::CALCULATION;
             std::printf("[APP] CalculationApp activa — escribe con el teclado\n");
+            break;
+
+        case 1: // Grapher (LVGL-native; Phase 8G, mismo id que la tarjeta del launcher)
+            if (g_grapherApp) {
+                g_grapherApp->load();
+                g_mode = AppMode::GRAPHER;
+                std::printf("[APP] GrapherApp activa\n");
+            }
             break;
 
         case 4: // Statistics (LVGL-native; Phase 6A, mismo id que la tarjeta del launcher)
@@ -846,6 +880,10 @@ static void returnToMenu()
         case AppMode::REGRESSION:
             // Phase 7C: RegressionApp::load() vuelve a llamar begin() perezosamente.
             if (g_regApp) g_regApp->end();
+            break;
+        case AppMode::GRAPHER:
+            // Phase 8G: GrapherApp::load() vuelve a llamar begin() perezosamente.
+            if (g_grapherApp) g_grapherApp->end();
             break;
         case AppMode::MATH_SHOWCASE:
             showcaseEnd();
@@ -1185,6 +1223,7 @@ static const char* canonicalAppName(const std::string& name)
     if (lc == "probability" || lc == "prob")      return "Probability";     // Phase 6A
     if (lc == "sequences" || lc == "seq")         return "Sequences";       // Phase 7A
     if (lc == "regression" || lc == "reg")        return "Regression";      // Phase 7C
+    if (lc == "grapher" || lc == "graph")         return "Grapher";         // Phase 8G
     return nullptr;
 }
 
@@ -1201,6 +1240,7 @@ static int scriptAppNameToId(const std::string& name)
     if (lc == "probability" || lc == "prob")                          return 5;   // Phase 6A
     if (lc == "sequences" || lc == "seq")                             return 7;   // Phase 7A
     if (lc == "regression" || lc == "reg")                            return 6;   // Phase 7C
+    if (lc == "grapher" || lc == "graph")                             return 1;   // Phase 8G
     if (lc == "settings")                                             return 10;
     if (lc == "mathshowcase" || lc == "math_showcase" || lc == "showcase")
                                                                       return APPID_MATH_SHOWCASE;
@@ -1294,7 +1334,7 @@ static bool loadScript(const char* path)
             if (iss >> extra)   return scriptErr(path, lineNo, "open_app: demasiados argumentos");
             int id = scriptAppNameToId(name);
             if (id < 0) return scriptErr(path, lineNo,
-                                         "open_app: app no lanzable (Calculation|Statistics|Probability|Sequences|Regression|Settings|MathShowcase)");
+                                         "open_app: app no lanzable (Calculation|Grapher|Statistics|Probability|Sequences|Regression|Settings|MathShowcase)");
             sc.type   = ScriptCmdType::OpenApp;
             sc.waitN  = id;
             const char* canon = canonicalAppName(name);
@@ -1306,7 +1346,7 @@ static bool loadScript(const char* path)
             if (iss >> extra)   return scriptErr(path, lineNo, "assert_app: demasiados argumentos");
             const char* canon = canonicalAppName(name);
             if (!canon) return scriptErr(path, lineNo,
-                                         "assert_app: app desconocida (Calculation|Menu|Splash|Statistics|Probability|Sequences|Regression|Settings|MathShowcase)");
+                                         "assert_app: app desconocida (Calculation|Grapher|Menu|Splash|Statistics|Probability|Sequences|Regression|Settings|MathShowcase)");
             sc.type   = ScriptCmdType::AssertApp;
             sc.strArg = canon;
         }
@@ -1427,6 +1467,7 @@ static const char* activeAppName()
          : (g_mode == AppMode::PROBABILITY)   ? "Probability"
          : (g_mode == AppMode::SEQUENCES)     ? "Sequences"
          : (g_mode == AppMode::REGRESSION)    ? "Regression"
+         : (g_mode == AppMode::GRAPHER)       ? "Grapher"
                                               : "Calculation";
 }
 

@@ -1,0 +1,48 @@
+# grapher_smoke.numos — open the Grapher app, screenshot, and ASSERT it is active.
+#
+# Phase 8G smoke test. GrapherApp is LVGL-native but, unlike the Phase 5A-7C apps,
+# it depends on the legacy RPN numeric pipeline (Tokenizer/Parser/Evaluator/
+# VariableContext) through its GraphModel. Phase 8G native-ports that minimal
+# prerequisite (Arduino String shim charAt/equalsIgnoreCase; VariableContext NVS
+# guarded #ifdef ARDUINO; PSRAMBuffer std::malloc fallback; esp_heap_caps/yield
+# guarded in GrapherApp.cpp) and wires Grapher into the emulator build filter and
+# NativeHal routing (launchApp id 1, aliases grapher/graph).
+#
+# This script opens Grapher through the emulator-only `open_app` command (Phase 5A:
+# it calls the SAME NativeHal launchApp() the launcher uses — id 1, the Grapher card
+# id, so it is deterministic and does not depend on fragile grid navigation),
+# captures a screenshot, and asserts the active app is "Grapher".
+#
+# SCOPE: this is an INITIAL-STATE smoke ONLY. Grapher opens on its "Expressions" tab
+# with focus at the tab bar and ZERO functions (GrapherApp.cpp begin() -> Tab::
+# EXPRESSIONS, Focus::TAB_BAR, _numFuncs=0). The script does NOT enter a function,
+# switch to the Graph/Table tab, trace, pan, or zoom — none of the plotting/sampling/
+# yield paths run on first open. The Graph (Kandinsky/PSRAM) panel is created lazily
+# only on the first Graph-tab switch, which this script never triggers.
+#
+# This phase makes NO golden claim; the screenshot is a CANDIDATE for human review
+# only (a future golden would mask the StatusBar clock, like the other app smokes).
+#
+# Timing notes (deterministic, step-ms 16):
+#   * 200 frames -> splash (~frame 125) is done; we are in the launcher.
+#   * 60 frames  -> Grapher screen load + 200ms fade settles after open_app.
+#
+# Run:
+#   program --headless --deterministic --script tests/emulator/scripts/grapher_smoke.numos \
+#           --frames 800 --screenshot out/grapher_smoke.ppm --quiet
+# Exit codes: 0 ok · 2 script/parse error · 3 screenshot write error · 4 assertion failure.
+
+log "grapher_smoke: waiting for launcher"
+wait 200
+
+# Open Grapher (emulator launchApp id 1 — same id as the launcher's Grapher card).
+open_app Grapher
+wait 60
+
+# Screenshot FIRST: the deferred capture happens on this frame, before the assert
+# runs on a later frame, so the artifact is produced even if the assertion fails.
+screenshot out/grapher_smoke.ppm
+log "grapher_smoke: screenshot captured"
+
+assert_app Grapher
+log "grapher_smoke: assertion passed (Grapher active)"

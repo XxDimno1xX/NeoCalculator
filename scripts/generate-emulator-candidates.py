@@ -74,6 +74,12 @@ CANDIDATES = [
     # here — the compare step warns (not fails) when a golden is absent.
     ("regression_smoke", "tests/emulator/scripts/regression_smoke.numos", 800),
     ("regression_data_smoke", "tests/emulator/scripts/regression_data_smoke.numos", 800),
+    # Phase 8G: GrapherApp (LVGL-native NumWorks-style grapher, backed by the legacy
+    # RPN pipeline native-ported in this phase). grapher_smoke opens the app on its
+    # default Expressions tab (no function entry, no plotting, no Graph/Table switch)
+    # and asserts the active app name (exit 4 -> FAIL here). No golden is blessed here
+    # — the compare step warns (not fails) when a golden is absent.
+    ("grapher_smoke", "tests/emulator/scripts/grapher_smoke.numos", 800),
 ]
 
 

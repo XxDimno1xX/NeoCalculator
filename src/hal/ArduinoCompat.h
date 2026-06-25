@@ -91,6 +91,20 @@ public:
     double toDouble() const { return std::atof(_s.c_str()); }
     float  toFloat()  const { return (float)std::atof(_s.c_str()); }
 
+    // charAt / equalsIgnoreCase: faithful to the Arduino String API, required by
+    // the legacy numeric pipeline (Tokenizer.cpp charAt; Evaluator.cpp charAt +
+    // equalsIgnoreCase). A const char* literal converts implicitly via
+    // String(const char*), matching firmware behaviour. Native-only (whole file
+    // is #ifndef ARDUINO); additive — no existing method semantics change.
+    char charAt(unsigned int index) const { return _s[index]; }
+    bool equalsIgnoreCase(const String& o) const {
+        if (_s.size() != o._s.size()) return false;
+        for (size_t i = 0; i < _s.size(); ++i)
+            if (::tolower((unsigned char)_s[i]) != ::tolower((unsigned char)o._s[i]))
+                return false;
+        return true;
+    }
+
     void toLowerCase() { std::transform(_s.begin(), _s.end(), _s.begin(), ::tolower); }
     void toUpperCase() { std::transform(_s.begin(), _s.end(), _s.begin(), ::toupper); }
     void trim() {

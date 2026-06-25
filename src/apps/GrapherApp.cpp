@@ -23,11 +23,22 @@
 #include <cstring>
 #include <cmath>
 #include <cstdio>
+#ifdef ARDUINO
 #include <esp_heap_caps.h>
+#endif
 #include "../math/VariableManager.h"
 #include "../utils/ColorUtils.h"
 
 using namespace vpam;
+
+#ifndef ARDUINO
+// Native (emulator_pc): Arduino's cooperative yield() does not exist. The four
+// call sites below feed the hardware watchdog during long plot/sample loops; the
+// single-threaded PC emulator has no watchdog, so a no-op is the correct native
+// equivalent. Firmware keeps the real Arduino yield(). None of these sites run in
+// the Grapher initial-state path — they only need to compile/link.
+static inline void yield() {}
+#endif
 
 // ── Layout colours (NumWorks-inspired palette) ─────────────────────────
 static constexpr uint32_t COL_BG        = 0xF5F5F5;  // Soft gray background (NumWorks 'fun')
@@ -531,9 +542,14 @@ void GrapherApp::createGraphPanel() {
     bool allocOk = _graphBuf.allocate(GRAPH_CANVAS_W * GRAPH_CANVAS_H);
     if (allocOk && _graphBuf) {
         memset(_graphBuf.data(), 0xFF, bufSz);  // Fill white (0xFFFF in RGB565)
+#ifdef ARDUINO
         Serial.printf("[GRAPHER] Kandinsky buffer %u bytes in PSRAM, free=%u\n",
                       (unsigned)bufSz,
                       (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+#else
+        Serial.printf("[GRAPHER] Kandinsky buffer %u bytes (native heap)\n",
+                      (unsigned)bufSz);
+#endif
         // Initialize GraphView with the buffer
         new (&_view) grapher::GraphView(_graphBuf.data(), GRAPH_CANVAS_W, GRAPH_CANVAS_H);
     } else {
@@ -652,7 +668,9 @@ static void tblZebraDrawCb(lv_event_t* e) {
 
 // ── Table panel ─────────────────────────────────────────────────────────
 void GrapherApp::createTablePanel() {
+#ifdef ARDUINO
     Serial.printf("[GRAPHER] tablePanel heap=%u\n", (unsigned)esp_get_free_heap_size());
+#endif
     int topY = BAR_H + TAB_H;
     int panelH = SCREEN_H - topY;
 

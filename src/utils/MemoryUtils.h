@@ -17,7 +17,14 @@
 
 #include <cstddef>
 #include <stdexcept>
+#ifdef ARDUINO
 #include <esp_heap_caps.h>
+#else
+// Native (emulator_pc): the ESP-IDF heap-caps allocator does not exist. Fall back
+// to the standard C heap with an identical PSRAMBuffer<T> API. Firmware behaviour
+// is unchanged — everything ESP-specific stays under #ifdef ARDUINO.
+#include <cstdlib>
+#endif
 
 namespace utils {
 
@@ -59,7 +66,11 @@ public:
         if (count == 0) {
             return true;
         }
+#ifdef ARDUINO
         _data = reinterpret_cast<T*>(heap_caps_malloc(count * sizeof(T), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+#else
+        _data = reinterpret_cast<T*>(std::malloc(count * sizeof(T)));
+#endif
         if (!_data) {
             _count = 0;
             return false;
@@ -70,7 +81,11 @@ public:
 
     void reset() {
         if (_data) {
+#ifdef ARDUINO
             heap_caps_free(_data);
+#else
+            std::free(_data);
+#endif
             _data = nullptr;
             _count = 0;
         }

@@ -33,6 +33,7 @@ int VariableContext::indexFromName(char name) const {
 
 
 
+#ifdef ARDUINO
 void VariableContext::loadFromNVS() {
     if (!_prefs.begin(NVS_NAMESPACE, true)) {
         // No se pudo abrir en solo lectura, inicializar en blanco
@@ -67,6 +68,12 @@ void VariableContext::saveToNVS() {
     _prefs.putBytes(NVS_KEY, &_data, sizeof(PackedVars));
     _prefs.end();
 }
+#else
+// Native (emulator_pc): NVS/Preferences do not exist. VariableContext.h already
+// provides inline no-op loadFromNVS()/saveToNVS() stubs for the non-Arduino path,
+// so defining them here too would be a redefinition. Firmware keeps the real NVS
+// implementations above unchanged.
+#endif // ARDUINO
 
 bool VariableContext::setVariable(char name, double value) {
     int idx = indexFromName(name);
