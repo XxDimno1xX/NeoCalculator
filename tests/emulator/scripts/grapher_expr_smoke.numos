@@ -1,0 +1,70 @@
+# grapher_expr_smoke.numos — open Grapher, type "x" into the first function slot,
+# commit it, screenshot the Expressions tab, and ASSERT Grapher is active.
+#
+# Phase 8H smoke. Goes one step deeper than grapher_smoke.numos (Phase 8G, which
+# only captures the empty initial state): it drives Grapher's expression-entry
+# flow and commits a simple function y=x into slot 0, all on the Expressions tab.
+# No Graph tab, no plotting, no trace/pan/zoom/table.
+#
+# Entry flow (all verified in src/apps/GrapherApp.cpp):
+#   * open_app Grapher opens the Expressions tab with focus on the TAB BAR and
+#     0 functions (begin(): GrapherApp.cpp:154; _numFuncs=0).
+#   * `down`  : handleTabBar moves focus TAB_BAR -> CONTENT; with _numFuncs=0 the
+#               selected row _exprIdx==0 IS the "Add an element" row
+#               (handleTabBar GrapherApp.cpp:2156-2166).
+#   * `enter` : on the Add row (_exprIdx==_numFuncs) -> addFunction() creates slot
+#               0 and startEditing() switches to EDITING mode (handleExprList
+#               GrapherApp.cpp:2211-2215; addFunction GrapherApp.cpp:934-943).
+#   * `x`     : handleExprEdit inserts the variable x into the slot's VPAM AST
+#               (cur.insertVariable('x'), GrapherApp.cpp:2318).
+#   * `enter` : commits the editor -> stopEditing() (GrapherApp.cpp:2248-2250),
+#               which calls stopCursorBlink() (GrapherApp.cpp:1001) and STAYS on
+#               the Expressions tab (no tab switch, no plotting).
+#
+# All key tokens are already scriptable (scriptNameToKeyCode, NativeHal.cpp:
+# down=422, enter=418, x=433) — no NativeHal change is required for this phase.
+#
+# Determinism: after the final ENTER the editor is committed and the cursor blink
+# is STOPPED, so slot 0 renders the static expression "x". No async timers run on
+# the Expressions tab (the POI/template timers are Graph-tab / modal only). As with
+# every emulator app screen, the ONLY volatile region is the StatusBar clock (HH:MM).
+# This phase makes NO golden claim; the screenshot is a CANDIDATE for human review
+# only (a future golden would mask the clock, exactly like the other app smokes).
+#
+# Timing notes (deterministic, step-ms 16):
+#   * 200 frames -> splash (~frame 125) is done; we are in the launcher.
+#   *  60 frames -> Grapher screen load + 200ms fade settles after open_app.
+#   *   4 keys run on consecutive frames (down, enter, x, enter).
+#   * 120 frames -> committed expression renders and the UI settles.
+#
+# Run:
+#   program --headless --deterministic --script tests/emulator/scripts/grapher_expr_smoke.numos \
+#           --frames 800 --screenshot out/grapher_expr_smoke.ppm --quiet
+# Exit codes: 0 ok · 2 script/parse error · 3 screenshot write error · 4 assertion failure.
+
+log "grapher_expr_smoke: waiting for launcher"
+wait 200
+
+# Open Grapher (emulator launchApp id 1 — same id as the launcher's Grapher card).
+open_app Grapher
+wait 60
+
+# Enter "x" into the first function slot, then commit. Sequence:
+#   down  : TAB_BAR -> CONTENT; lands on the "Add an element" row (_numFuncs=0)
+#   enter : addFunction() -> startEditing() slot 0 (EDITING mode)
+#   x     : insert variable x into the VPAM expression
+#   enter : commit -> stopEditing(); cursor blink stops; stays on Expressions tab
+# (.numos does not support inline comments after a command, so keep these full-line.)
+key down
+key enter
+key x
+key enter
+wait 120
+
+# Screenshot FIRST: the deferred capture happens on this frame, before the assert
+# runs on a later frame, so the artifact is produced even if the assertion fails.
+screenshot out/grapher_expr_smoke.ppm
+log "grapher_expr_smoke: screenshot captured"
+
+assert_app Grapher
+log "grapher_expr_smoke: assertion passed (Grapher active, x entered)"

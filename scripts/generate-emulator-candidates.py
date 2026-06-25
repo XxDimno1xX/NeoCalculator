@@ -80,6 +80,12 @@ CANDIDATES = [
     # and asserts the active app name (exit 4 -> FAIL here). No golden is blessed here
     # — the compare step warns (not fails) when a golden is absent.
     ("grapher_smoke", "tests/emulator/scripts/grapher_smoke.numos", 800),
+    # Phase 8H: one step deeper — grapher_expr_smoke types the function "x" into the
+    # first slot (down, enter, x, enter) and commits it, staying on the Expressions
+    # tab (no Graph tab, no plotting). It also asserts the active app name (exit 4 ->
+    # FAIL here). No golden is blessed here — the compare step warns (not fails) when
+    # a golden is absent.
+    ("grapher_expr_smoke", "tests/emulator/scripts/grapher_expr_smoke.numos", 800),
 ]
 
 
