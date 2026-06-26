@@ -94,6 +94,14 @@ CANDIDATES = [
     # (deterministic graph body). No golden is blessed here — the compare step warns
     # (not fails) when a golden is absent.
     ("grapher_graph_smoke", "tests/emulator/scripts/grapher_graph_smoke.numos", 800),
+    # Phase 8L: Table-tab render — grapher_table_smoke commits y=x and switches to the
+    # Table tab (`key table` -> switchTab(Tab::TABLE) -> synchronous rebuildTable(); no
+    # deferral/flush). It captures the sticky header (x / f1(x)) over the zebra-striped
+    # value table and asserts the active app name (exit 4 -> FAIL here). The Table body
+    # is pure numbers (no stix_math_18 no-space tofu). Run1-vs-run2 is byte-identical.
+    # No golden is blessed here — the compare step warns (not fails) when a golden is
+    # absent.
+    ("grapher_table_smoke", "tests/emulator/scripts/grapher_table_smoke.numos", 800),
 ]
 
 

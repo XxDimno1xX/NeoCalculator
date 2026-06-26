@@ -1,0 +1,73 @@
+# grapher_table_smoke.numos — open Grapher, commit y=x, switch to the Table tab,
+# screenshot the value table, and ASSERT Grapher is active.
+#
+# Phase 8L smoke (warning-only candidate; NO golden, NO mask in this phase).
+# Exercises the Table tab after committing a simple plottable function. Unlike the
+# Graph tab (Phase 8I, whose first replot is deferred), the Table tab renders
+# SYNCHRONOUSLY: switchTab(Tab::TABLE) un-hides the sticky header + scrollable panel,
+# picks the first valid function, and calls rebuildTable() right away
+# (GrapherApp.cpp:812-821, rebuildTable GrapherApp.cpp:2022-2092). So `key table`
+# alone populates the table — no flush key is needed.
+#
+# The committed function y=x is required because GraphModel only treats an
+# expression as a valid function if it contains "=" (getExprRHS, GraphModel.cpp:
+# 28-36); bare "x" commits invalid and the table's f-column would show "--".
+#
+# What this captures: the Table tab on its default window — a sticky header row
+# ("x" and "f1(x)", GrapherApp.cpp:2050-2058) over a zebra-striped value table whose
+# x column starts at _tblStart=-5 with step 1 and whose f1(x) column is the evaluated
+# y=x value (rebuildTable GrapherApp.cpp:2070-2086). All cells are pure numbers (%.4g
+# / %.6g / "--") and the headers are space-free, so the Table tab has NO stix_math_18
+# no-space tofu — no GrapherApp label change was needed in this phase.
+#
+# Determinism: run1-vs-run2 from fresh launches is byte-identical (the numeric table
+# body is fully deterministic on the same binary). As with every emulator screen, the
+# only wall-clock-volatile region is the StatusBar clock (HH:MM).
+#
+# All key tokens are already scriptable (NativeHal scriptNameToKeyCode: down, enter,
+# y, =, x, table) — no NativeHal change is required.
+#
+# Timing notes (deterministic, step-ms 16):
+#   * 200 frames -> splash done; launcher.
+#   *  60 frames -> Grapher load + fade settles.
+#   *   6 keys   -> commit y=x (down, enter, y, =, x, enter).
+#   *  80 frames -> expression committed/settled.
+#   *   1 key    -> table (switchTab(Tab::TABLE) -> synchronous rebuildTable()).
+#   * 150 frames -> table render + screen settles.
+#
+# Run:
+#   program --headless --deterministic --script tests/emulator/scripts/grapher_table_smoke.numos \
+#           --frames 800 --screenshot out/grapher_table_smoke.ppm --quiet
+# Exit codes: 0 ok · 2 script/parse error · 3 screenshot write error · 4 assertion failure.
+
+log "grapher_table_smoke: waiting for launcher"
+wait 200
+
+# Open Grapher (emulator launchApp id 1 — same id as the launcher's Grapher card).
+open_app Grapher
+wait 60
+
+# Commit the plottable function y=x into the first slot. Sequence:
+#   down  : TAB_BAR -> CONTENT (Add row, _numFuncs=0)
+#   enter : addFunction() -> startEditing() slot 0
+#   y = x : insertVariable('y'), insertVariable('='), insertVariable('x')
+#   enter : commit -> stopEditing(); function parsed and marked valid
+key down
+key enter
+key y
+key =
+key x
+key enter
+wait 80
+
+# Switch to the Table tab (global shortcut -> switchTab(Tab::TABLE) -> rebuildTable()).
+key table
+wait 150
+
+# Screenshot FIRST: the deferred capture happens on this frame, before the assert
+# runs on a later frame, so the artifact is produced even if the assertion fails.
+screenshot out/grapher_table_smoke.ppm
+log "grapher_table_smoke: screenshot captured"
+
+assert_app Grapher
+log "grapher_table_smoke: assertion passed (Grapher active, Table tab)"
