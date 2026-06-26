@@ -1463,7 +1463,22 @@ void GrapherApp::loadNextTemplate() {
     lv_obj_set_pos(_tplCanvas[i].obj(), 4, 1);
     _tplCanvas[i].setExpression(tplRow, nullptr);
     tplRow->calculateLayout(_tplCanvas[i].normalMetrics());
-    _tplCanvas[i].invalidate();
+
+    // Preview-only height guard: a function-call template (sin(x)/cos(x)) lays out
+    // ~46px tall — its delimiters far exceed this ~20px preview row — and MathCanvas
+    // renders at natural size, vertically centered, so the VPAM canvas would clip it
+    // to an unreadable sliver/dot. When the rendered math is more than ~2x the preview
+    // row height, fall back to a clean lv_font_montserrat_14 text label of the template
+    // instead (modal preview only). Polynomial/fraction rows that fit (h <= ~33px) keep
+    // their VPAM math preview unchanged. This touches no renderer/MathAST code.
+    if (tplRow->layout().height() > 2 * (_tplRowH - 2)) {
+        _tplCanvas[i].destroy();
+        _tplAST[i].reset();
+        makeLabel(_tplRows[i], 6, (_tplRowH - 14) / 2,
+                  TEMPLATES[i].text, 0x000000, &lv_font_montserrat_14);
+    } else {
+        _tplCanvas[i].invalidate();
+    }
 
     _tplLoadNext++;
 }
