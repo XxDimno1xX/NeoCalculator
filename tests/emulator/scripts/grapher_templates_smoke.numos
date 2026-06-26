@@ -1,0 +1,68 @@
+# grapher_templates_smoke.numos — open Grapher, start editing an empty first slot,
+# open the Templates modal, screenshot it, and ASSERT Grapher is active.
+#
+# Phase 8P smoke (warning-only candidate; NO golden, NO mask in this phase).
+# Exercises Grapher's Templates modal — the last major uncaptured Grapher surface.
+#
+# Flow (all verified in src/apps/GrapherApp.cpp):
+#   * down  : TAB_BAR -> CONTENT; with _numFuncs=0 the selected row is the "Add an
+#             element" row (_exprIdx==_numFuncs).
+#   * enter : addFunction() -> startEditing() slot 0 (EDITING mode, empty AST).
+#   * right : handleExprEdit RIGHT on an EMPTY expression opens the Templates modal
+#             (GrapherApp.cpp:2263-2270 -> showTemplates(), GrapherApp.cpp:1390-1437).
+#             RIGHT only opens templates while the slot AST is the single Empty node,
+#             so this MUST run before any character is typed.
+#   * showTemplates() draws the modal title "Templates" + 6 row shells, highlights the
+#     first row, and starts a lazy AST loader (tplLoadTimerCb every TPL_LOAD_INTERVAL_MS
+#     = 30ms, GrapherApp.cpp:1436/1444-1469) that fills one VPAM math preview per tick.
+#     In --deterministic mode that timer fires by frame index, so after a generous wait
+#     all six previews are loaded and the frame is stable / byte-identical run-to-run.
+#
+# Tofu: the modal is already tofu-free — the only plain label is the single-word title
+# "Templates" (GrapherApp.cpp:1412, no space) and the rows render the template .text as
+# VPAM math previews (GrapherApp.cpp:1457-1466), not plain prose; the bottom editor hint
+# is already lv_font_montserrat_14 (Phase 8J). No GrapherApp label change was needed.
+# (The sin(x)/cos(x) previews render small — a VPAM math-renderer behavior, not tofu and
+# out of scope for this phase.)
+#
+# Determinism: run1-vs-run2 from fresh launches is byte-identical. The only
+# wall-clock-volatile region is the StatusBar clock (HH:MM).
+#
+# All key tokens are already scriptable (down, enter, right) — no NativeHal change.
+#
+# Timing notes (deterministic, step-ms 16):
+#   * 200 frames -> splash done; launcher.
+#   *  60 frames -> Grapher load + fade settles.
+#   * down,enter -> start editing the empty first slot.
+#   *  40 frames -> editing UI settles.
+#   * right      -> open the Templates modal + start the lazy AST loader.
+#   * 150 frames -> all 6 lazy template previews loaded + modal settles.
+#
+# Run:
+#   program --headless --deterministic --script tests/emulator/scripts/grapher_templates_smoke.numos \
+#           --frames 800 --screenshot out/grapher_templates_smoke.ppm --quiet
+# Exit codes: 0 ok · 2 script/parse error · 3 screenshot write error · 4 assertion failure.
+
+log "grapher_templates_smoke: waiting for launcher"
+wait 200
+
+# Open Grapher (emulator launchApp id 1 — same id as the launcher's Grapher card).
+open_app Grapher
+wait 60
+
+# Start editing the empty first slot (down -> Add row, enter -> addFunction/startEditing).
+key down
+key enter
+wait 40
+
+# Open the Templates modal: RIGHT on the still-empty expression -> showTemplates().
+key right
+wait 150
+
+# Screenshot FIRST: the deferred capture happens on this frame, before the assert
+# runs on a later frame, so the artifact is produced even if the assertion fails.
+screenshot out/grapher_templates_smoke.ppm
+log "grapher_templates_smoke: screenshot captured"
+
+assert_app Grapher
+log "grapher_templates_smoke: assertion passed (Grapher active, Templates modal)"

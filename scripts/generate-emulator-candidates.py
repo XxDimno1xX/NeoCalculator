@@ -110,6 +110,14 @@ CANDIDATES = [
     # async POI timer is frame-deterministic). No golden is blessed here — the compare
     # step warns (not fails) when a golden is absent.
     ("grapher_trace_smoke", "tests/emulator/scripts/grapher_trace_smoke.numos", 800),
+    # Phase 8P: Templates modal — grapher_templates_smoke starts editing an empty first
+    # slot and presses `right` to open the Templates modal (RIGHT-on-empty ->
+    # showTemplates()), which lazily fills six VPAM math previews. It asserts the active
+    # app name (exit 4 -> FAIL here). The modal is tofu-free (single-word title + VPAM
+    # math previews; no plain-label change needed). Run1-vs-run2 is byte-identical (the
+    # lazy template-AST load timer is frame-deterministic). No golden is blessed here —
+    # the compare step warns (not fails) when a golden is absent.
+    ("grapher_templates_smoke", "tests/emulator/scripts/grapher_templates_smoke.numos", 800),
 ]
 
 
