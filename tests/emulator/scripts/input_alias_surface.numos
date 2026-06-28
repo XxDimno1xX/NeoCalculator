@@ -1,0 +1,72 @@
+# input_alias_surface.numos — Phase 9A input-parity regression guard (golden-free).
+#
+# Purpose: prove that the WHOLE .numos script-token vocabulary still PARSES and
+# DISPATCHES. loadScript() validates every `key NAME` up front and exits 2 on the
+# first unknown token (scriptNameToKeyCode -> KeyCode::NONE, NativeHal.cpp:1306-1307),
+# so if any alias is ever renamed/removed/misspelled this script fails at LOAD before
+# running a single frame. It is the canary for the alias map edited in this phase.
+#
+# This script makes NO golden claim, takes NO screenshot, and opens NO app. It runs
+# entirely at the LAUNCHER (MENU mode). None of the tokens below map to an LVGL
+# navigation key (no up/down/left/right/enter), so in the MENU branch each is pushed
+# into LvglKeypad with no LV_KEY mapping (LvglKeypad.cpp:48-53) and is a harmless
+# no-op: focus never moves and no app launches. The final `assert_app Menu` therefore
+# holds and emits the "PASS - " marker the CI input-parity step greps for.
+#
+# Coverage = every spelled alias group in scriptNameToKeyCode (NativeHal.cpp:384):
+#   * Phase 9A additions:   logbase, log_n (-> LOG_BASE), zoom (-> ZOOM)
+#   * Phase 8B aliases:     exe, table, f1..f5, preans
+#   * app/var/const tokens: ans, graph, sto, sqrt, sin, cos, tan, ln, log, pi, e,
+#                           neg, negate, frac, dot, sd, freeeq, shift, alpha
+# (Symbols + - * / ^ . ( ) = and bare digits are exercised by the calc_* suite.)
+#
+# NOTE: `key exe`, `key table`, `key f1..f5`, `key graph`, `key zoom`, `key logbase`
+# resolve to REAL existing KeyCodes; whether a given APP acts on them is app logic and
+# out of scope here — this test only asserts the emulator can NAME and DISPATCH them.
+#
+# Run:
+#   program --headless --deterministic --script tests/emulator/scripts/input_alias_surface.numos \
+#           --frames 400 --quiet
+# Exit codes: 0 ok · 2 script/parse error (an alias went missing) · 4 assertion failure.
+
+log "input_alias_surface: validating script-alias parse + dispatch at launcher"
+wait 200
+
+# Phase 9A additions (must resolve to LOG_BASE / ZOOM — existing KeyCodes).
+key logbase
+key log_n
+key zoom
+
+# Phase 8B + app/var/const alias surface (all map to existing KeyCodes).
+key ans
+key preans
+key exe
+key table
+key graph
+key f1
+key f2
+key f3
+key f4
+key f5
+key sto
+key shift
+key alpha
+key sqrt
+key sin
+key cos
+key tan
+key ln
+key log
+key pi
+key e
+key neg
+key negate
+key frac
+key dot
+key sd
+key freeeq
+wait 20
+
+# Still at the launcher: no token above is an LVGL nav key, so nothing launched.
+assert_app Menu
+log "input_alias_surface: PASS - all alias tokens parsed and dispatched (still at Menu)"

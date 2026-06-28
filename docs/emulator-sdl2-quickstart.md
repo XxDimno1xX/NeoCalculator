@@ -796,7 +796,7 @@ CalculationApp every mapped key is forwarded.
 | `Tab` | ALPHA | `l` `g` `r` | LN / LOG / SQRT |
 | `Insert` | STO (Store) | `p` `e` | π / e |
 | `f` / `F5` / `=` | FREE_EQ (S⇔D) | `x` `y` | VAR_X / VAR_Y |
-| `n` | NEGATE | | |
+| `n` | NEGATE | `a` | ANS *(Phase 9A)* |
 
 Notes:
 - **SHIFT / ALPHA / STO** are resolved by `KeyboardManager` inside
@@ -806,6 +806,63 @@ Notes:
   matching the hardware keyboard driver; it is distinct from a fresh PRESS.
 - Unmapped keys are logged as `[KEY] sin-mapear SDL=<name>` unless `--quiet`.
 - This is **not** the full hardware 5×10 matrix; it is a direct desktop keymap.
+- `=` toggles the **S⇔D** display form (FREE_EQ); it does **not** evaluate. Use
+  `Enter` / KP Enter to evaluate. (Both maps agree: `=`→FREE_EQ.)
+
+### Input parity: live SDL vs `.numos` script vs SerialBridge (Phase 9A)
+
+The emulator and firmware expose **three independent input vocabularies**, all
+resolving to the same `KeyCode` enum. They are intentionally **not** 1:1 — each is
+shaped by its medium:
+
+| Surface | Where | Style | Notes |
+|:--|:--|:--|:--|
+| **Live SDL** | `mapSdlToKeyCode` ([NativeHal.cpp:279](../src/hal/NativeHal.cpp#L279)) | real-keyboard keysyms; letters for functions (`s`=SIN, `c`=COS, `g`=LOG…) | interactive window only |
+| **`.numos` script** | `scriptNameToKeyCode` ([NativeHal.cpp:384](../src/hal/NativeHal.cpp#L384)) | spelled names (`sin`, `cos`, `graph`, `ans`…) + symbols | the **test** vocabulary; widest coverage |
+| **SerialBridge** | `processChar` ([SerialBridge.cpp:108](../src/input/SerialBridge.cpp#L108)) | firmware serial-monitor REPL: `w/a/s/d` nav, `c`=AC, `g`=GRAPH, line-buffered | device bring-up only; **not** emulator input |
+
+Because SerialBridge has no arrow keys it overloads letters very differently from
+the SDL map (e.g. `c`=AC vs SDL `c`=COS, `s`=DOWN vs SDL `s`=SIN, `g`=GRAPH vs SDL
+`g`=LOG, `t`=SIN vs SDL `t`=TAN). **This divergence is by design** — do not assume a
+shared mnemonic across surfaces.
+
+**Phase 9A additions** (new names → existing `KeyCode`s; no enum changes):
+
+- Script `logbase` / `log_n` → `LOG_BASE` — closes the only `CalculationApp`-handled
+  key ([CalculationApp.cpp:390]) that was previously unreachable by **both** maps.
+- Script `zoom` → `ZOOM` — Grapher zoom-in ([GrapherApp.cpp:2440]); previously only
+  reachable via the shared `+`/ADD case, with no dedicated token.
+- Live SDL `a` → `ANS` — the one live-input gap with no workaround (recall last
+  result). `GRAPH`/`TABLE` already have the tab-bar `←`/`→` workaround interactively.
+
+**Known input limitations (deferred):**
+
+- **`GRAPH`, `TABLE`, `PREANS`, `EXE`, `F1`–`F4` have no live-SDL key** — they are
+  reachable only via `.numos` script names. Interactively, switch Grapher tabs with
+  the tab-bar arrows; recall Ans with `a`. (PreAns is script-only.)
+- **`SDLK_F5` → `FREE_EQ`**, but script `f5` → `KeyCode::F5` — the physical F5 key
+  and `key f5` differ; a known, intentional asymmetry.
+- **Menu arrow navigation differs from hardware.** In the emulator, launcher arrows
+  go through LVGL's *linear* group order ([NativeHal.cpp:490](../src/hal/NativeHal.cpp#L490));
+  firmware uses `MainMenu::moveFocusByDelta` *2D-grid* navigation with wrap
+  ([SystemApp.cpp:677], [MainMenu.cpp:151]). The same arrow sequence can land on a
+  different card. Scripts avoid this by launching apps with `open_app`. **Aligning
+  the emulator menu nav model to hardware is the top Phase 9B item.**
+- `NEGATE` (SDL `n` / script `neg`/`negate`) and `EXE` (script `exe`) dispatch to
+  apps that have no handler for them (silent no-op in CalculationApp); use `-`/`sub`
+  for unary minus and `enter` to evaluate.
+
+**Phase 9A input-parity scripts** (golden-free; gated by CI's *Input parity smoke*
+step, never by the golden compare):
+
+- `input_alias_surface.numos` — fires every script alias (incl. the new
+  `logbase`/`log_n`/`zoom`) at the launcher; an unknown/renamed token fails the
+  load (`exit 2`). The canary for the alias map.
+- `calc_input_extended.numos` — exact-integer Calculation smoke covering `SQRT`
+  (`√9 == 3`) and `DEL`/backspace (`2 + 5 [DEL] 3 == 5`), neither covered by the
+  existing `calc_*` scripts.
+- `grapher_input_navigation.numos` — integrated `graph` → `ac` → `table` → `ac`
+  tab navigation; asserts Grapher stays active through it.
 
 ---
 

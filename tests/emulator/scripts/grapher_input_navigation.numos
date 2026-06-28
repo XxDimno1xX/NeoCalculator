@@ -1,0 +1,66 @@
+# grapher_input_navigation.numos — Phase 9A golden-free Grapher input/navigation smoke.
+#
+# Existing grapher_*.numos scripts each drive ONE surface and then screenshot it. This
+# script instead exercises an INTEGRATED tab-navigation sequence with NO screenshot and
+# asserts only that Grapher stays the active app through it — a behavioral parity check
+# for the GRAPH / TABLE / AC keys (all reachable via scriptNameToKeyCode) routed through
+# the GRAPHER dispatch branch (NativeHal.cpp:610-626), where only MODE returns to the
+# launcher and every other key (incl. AC) goes to GrapherApp::handleKey.
+#
+# Flow (all keys already scriptable; all verified in src/apps/GrapherApp.cpp):
+#   * down,enter,x,enter : commit the function x into slot 0 on the Expressions tab
+#                          (same proven entry flow as grapher_expr_smoke.numos).
+#   * graph              : switch to the Graph tab — lazily creates the Kandinsky
+#                          panel (createGraphPanel) and enters TRACE mode with the
+#                          first replot deferred (GrapherApp.cpp:778-781).
+#   * ac                 : TRACE -> NAVIGATE without moving the viewport
+#                          (GrapherApp.cpp:2543-2556); does NOT exit the app.
+#   * table              : switch to the Table tab -> synchronous rebuildTable()
+#                          (GrapherApp.cpp:812-821).
+#   * ac                 : Table-tab AC retreats the internal focus (not MODE), so
+#                          Grapher remains active.
+# Verified end-to-end: assert_app Grapher PASSES (exit 0); AC never falls through to
+# returnToMenu (only MODE does, NativeHal.cpp:614).
+#
+# NO screenshot, NO golden, NO mask, and NOT in generate-emulator-candidates.py's
+# CANDIDATES list — produces no visual artifact. assert_app is the only state accessor
+# Grapher exposes to the script harness, so it is the sole assertion (no semantic graph
+# state accessor exists; pan/zoom/value asserts would need pixels — out of scope).
+#
+# Run:
+#   program --headless --deterministic --script tests/emulator/scripts/grapher_input_navigation.numos \
+#           --frames 900 --quiet
+# Exit codes: 0 ok · 2 script/parse error · 4 assertion failure.
+
+log "grapher_input_navigation: waiting for launcher"
+wait 200
+
+# Open Grapher (emulator launchApp id 1 — same id as the launcher's Grapher card).
+open_app Grapher
+wait 60
+
+# Commit the function x into slot 0 (proven Expressions-tab entry flow).
+key down
+key enter
+key x
+key enter
+wait 80
+
+# Graph tab (lazy Kandinsky panel; TRACE mode; first replot deferred).
+key graph
+wait 120
+
+# AC: TRACE -> NAVIGATE (no viewport change; does NOT exit the app).
+key ac
+wait 30
+
+# Table tab (synchronous rebuildTable).
+key table
+wait 120
+
+# AC: Table-tab focus retreat (still inside Grapher, not MODE).
+key ac
+wait 30
+
+assert_app Grapher
+log "grapher_input_navigation: PASS - Grapher active through graph/ac/table/ac nav"

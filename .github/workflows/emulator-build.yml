@@ -363,6 +363,58 @@ jobs:
           path: out/semantic_8c/
           if-no-files-found: ignore
 
+      # Input parity smoke (Phase 9A) — golden-free.
+      #
+      # Same assert-only contract as the Phase 8C suite above (run headless +
+      # deterministic, require exit 0, at least one "PASS - " marker, and NO
+      # "FAIL - " marker), and explicitly SEPARATE from the visual candidate/golden
+      # flow below (these scripts are NOT in generate-emulator-candidates.py's
+      # CANDIDATES list and take no screenshot). Runs the three input-parity scripts
+      # added in Phase 9A. input_alias_surface also gates the script-alias map: an
+      # unknown/renamed token makes loadScript exit 2 (parse error), failing here.
+      - name: Input parity smoke (headless deterministic, Phase 9A)
+        run: |
+          set -euo pipefail
+          BIN=.pio/build/emulator_pc/program
+          mkdir -p out/input_9a
+
+          run_input() {
+            script="$1"
+            name="$(basename "$script" .numos)"
+            log="out/input_9a/${name}.log"
+            echo "=== ${name} ==="
+            rc=0
+            SDL_VIDEODRIVER=dummy timeout 60s "$BIN" \
+              --headless --deterministic --script "$script" \
+              --frames 1400 --quiet > "$log" 2>&1 || rc=$?
+            cat "$log"
+            if [ "$rc" -ne 0 ]; then
+              echo "::error::input parity smoke FAILED for ${name} (exit $rc)"
+              return 1
+            fi
+            if ! grep -q "PASS - " "$log"; then
+              echo "::error::input parity smoke: no PASS marker for ${name}"
+              return 1
+            fi
+            if grep -q "FAIL - " "$log"; then
+              echo "::error::input parity smoke: FAIL marker present for ${name}"
+              return 1
+            fi
+          }
+
+          run_input tests/emulator/scripts/input_alias_surface.numos
+          run_input tests/emulator/scripts/calc_input_extended.numos
+          run_input tests/emulator/scripts/grapher_input_navigation.numos
+          echo "OK: 3 Phase 9A input-parity scripts passed (alias surface + SQRT/DEL calc + Grapher nav, NO golden image)."
+
+      - name: Upload Phase 9A input parity logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: numos-emulator-input-9a
+          path: out/input_9a/
+          if-no-files-found: ignore
+
       # ---------------------------------------------------------------------
       # Candidate screenshot generation + golden comparison (Phase 4B-A).
       #

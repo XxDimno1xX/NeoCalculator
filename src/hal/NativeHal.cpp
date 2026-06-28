@@ -56,8 +56,15 @@
  *   e              → CONST_E
  *   x              → VAR_X
  *   y              → VAR_Y
+ *   a              → ANS  (Phase 9A: recuperar ultimo resultado)
  *   f / F5 / =     → FREE_EQ  (S⇔D)
  *   n              → NEGATE
+ *
+ * Notas Phase 9A (solo emulador, sin impacto en firmware):
+ *   · SDL a → ANS (unico hueco de entrada en vivo sin alternativa).
+ *   · Tokens de script nuevos: logbase/log_n → LOG_BASE, zoom → ZOOM (KeyCodes
+ *     existentes; cierran huecos de alcanzabilidad). Ver scriptNameToKeyCode y
+ *     docs/emulator-sdl2-quickstart.md (tabla de teclas + limitaciones).
  *
  * Notas Phase 3A (solo emulador, sin impacto en firmware):
  *   · SDL_KEYDOWN → PRESS/REPEAT, SDL_KEYUP → RELEASE (antes solo KEYDOWN).
@@ -349,6 +356,13 @@ static KeyCode mapSdlToKeyCode(SDL_Keycode sym)
         case SDLK_x:            return KeyCode::VAR_X;
         case SDLK_y:            return KeyCode::VAR_Y;
 
+        // Ans (Phase 9A). 'a' = Ans (ultimo resultado). En vivo era el unico hueco
+        // SIN alternativa: GRAPH/TABLE se alcanzan con las flechas de la barra de
+        // pestanas, pero recuperar Ans no tenia tecla SDL (solo el token de script
+        // "ans"). SDLK_a estaba sin mapear. KeyCode existente (KeyCodes.h:91); no se
+        // anaden valores al enum. PreAns sigue siendo solo-script (ver doc).
+        case SDLK_a:            return KeyCode::ANS;
+
         // S⇔D y especiales
         case SDLK_f:
         case SDLK_F5:
@@ -468,6 +482,17 @@ static KeyCode scriptNameToKeyCode(const std::string& raw)
     if (n == "f3")                            return KeyCode::F3;      // KeyCodes.h:44
     if (n == "f4")                            return KeyCode::F4;      // KeyCodes.h:45
     if (n == "f5")                            return KeyCode::F5;      // KeyCodes.h:80
+
+    // Phase 9A: aliases hacia KeyCodes que YA existen en KeyCodes.h y que un
+    // handler de app SI consume, pero que ningun nombre de script alcanzaba aun.
+    // No anaden ni reordenan valores del enum; misma politica que el bloque 8B.
+    //   · log_n/logbase: LOG_BASE lo gestiona CalculationApp::insertLogBase
+    //     (CalculationApp.cpp:390) pero NO estaba en ningun mapa del emulador
+    //     (ni SDL ni script) -> era inalcanzable. Cierra ese hueco de paridad.
+    //   · zoom: ZOOM lo gestiona GrapherApp (zoom-in, GrapherApp.cpp:2440); solo
+    //     era alcanzable por el caso compartido de ADD ("+") -> ahora tiene token.
+    if (n == "logbase" || n == "log_n")       return KeyCode::LOG_BASE; // KeyCodes.h:86
+    if (n == "zoom")                          return KeyCode::ZOOM;     // KeyCodes.h:62
 
     return KeyCode::NONE;
 }

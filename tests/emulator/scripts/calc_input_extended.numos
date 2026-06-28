@@ -1,0 +1,59 @@
+# calc_input_extended.numos — Phase 9A golden-free Calculation semantic test.
+#
+# Closes two CalculationApp key-coverage gaps that NO existing calc_*.numos script
+# exercises, both kept strictly in the small-integer exact domain (no decimals,
+# irrational radicals, pi/e or Giac), so the asserts are deterministic:
+#
+#   (1) SQRT (insertRoot, CalculationApp.cpp:349) — sqrt of a PERFECT SQUARE.
+#       sqrt(9) evaluates to the exact integer 3 (verified: assert_result == '3'),
+#       not a float, so it is safe for an exact assert. RIGHT exits the radical
+#       group before ENTER (calc .numos input quirk: RIGHT leaves parens/fractions/
+#       roots; see MEMORY calc-numos-input-quirks).
+#
+#   (2) DEL / backspace mid-entry (_cursor.backspace, CalculationApp.cpp:468) — type
+#       "2 + 5", DEL removes the trailing 5, then "3" -> "2 + 3" -> 5. Exercises the
+#       editing path that the digit/operator-only scripts never touch.
+#
+# Between the two evaluations: AC. clearResult() keeps the committed expression
+# (MEMORY calc-numos-input-quirks: "AC required between evals"), so AC fully resets
+# the editor before the second expression is typed.
+#
+# NO screenshot, NO golden, NO mask. Pure computed-value assertions. Not in the
+# generate-emulator-candidates.py CANDIDATES list, so it produces no visual artifact.
+#
+# Run:
+#   program --headless --deterministic --script tests/emulator/scripts/calc_input_extended.numos \
+#           --frames 1400 --quiet
+# Exit codes: 0 ok · 2 script/parse error · 4 assertion failure.
+
+log "calc_input_extended: waiting for launcher"
+wait 200
+open_app Calculation
+wait 60
+
+# (1) sqrt(9) -> exact integer 3. sqrt, 9, RIGHT (exit radical), ENTER.
+key sqrt
+key 9
+key right
+key enter
+wait 120
+assert_app Calculation
+assert_no_error
+assert_result 3
+log "calc_input_extended: PASS - sqrt(9) == 3 (SQRT covered)"
+
+# Reset editor (clearResult keeps the expression; AC fully clears).
+key ac
+wait 30
+
+# (2) 2 + 5, DEL (drop the 5), 3, ENTER -> 2 + 3 == 5. Covers DEL/backspace.
+key 2
+key add
+key 5
+key del
+key 3
+key enter
+wait 120
+assert_no_error
+assert_result 5
+log "calc_input_extended: PASS - 2+5 [DEL] 3 == 5 (DEL/backspace covered)"
