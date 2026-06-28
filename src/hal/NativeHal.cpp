@@ -513,10 +513,34 @@ static void dispatchKey(KeyCode kc, KeyAction action, bool isDown)
             break;
 
         case AppMode::MENU:
-            // El indev LVGL (gridnav) necesita un par PRESS+RELEASE para
-            // disparar CLICKED; lo sintetizamos en el down-edge. El up-edge no
-            // añade nada aqui (por eso solo actuamos en isDown).
+            // Solo actuamos en el down-edge (el up-edge de una flecha NO debe
+            // mover de nuevo el foco, y para el resto de teclas el par
+            // PRESS+RELEASE que dispara CLICKED se sintetiza aqui mismo).
             if (isDown) {
+                // ── Phase 9B: paridad de navegacion con el firmware ──────────
+                // Las flechas NO van por la navegacion LINEAL de grupo de LVGL;
+                // se enrutan al MISMO modelo 2D de rejilla que usa el firmware en
+                // SystemApp::handleKeyMenu -> MainMenu::moveFocusByDelta (cols=3,
+                // wrap H/V, clamp de ultima fila; src/ui/MainMenu.cpp:151). El
+                // mapeo delta es identico al del firmware:
+                //   LEFT (-1,0) · RIGHT (+1,0) · UP (0,-1) · DOWN (0,+1)
+                // moveFocusByDelta() llama a lv_group_focus_obj(), asi que la
+                // tarjeta enfocada queda fijada en el grupo: un ENTER POSTERIOR
+                // (que sigue por el camino LVGL de abajo) dispara CLICKED sobre
+                // ESA tarjeta y lanza su app — exactamente como en el firmware.
+                if (g_menu && (kc == KeyCode::UP   || kc == KeyCode::DOWN ||
+                               kc == KeyCode::LEFT || kc == KeyCode::RIGHT)) {
+                    switch (kc) {
+                        case KeyCode::LEFT:  g_menu->moveFocusByDelta(-1,  0); break;
+                        case KeyCode::RIGHT: g_menu->moveFocusByDelta(+1,  0); break;
+                        case KeyCode::UP:    g_menu->moveFocusByDelta( 0, -1); break;
+                        case KeyCode::DOWN:  g_menu->moveFocusByDelta( 0, +1); break;
+                        default: break;   // inalcanzable (filtrado arriba)
+                    }
+                    break;
+                }
+                // El resto de teclas (ENTER/AC/DEL/...) mantienen el camino LVGL:
+                // el indev necesita un par PRESS+RELEASE para disparar CLICKED.
                 LvglKeypad::pushKey(kc, true);    // PRESS
                 LvglKeypad::pushKey(kc, false);   // RELEASE (dispara CLICKED)
             }
@@ -1193,7 +1217,12 @@ enum class ScriptCmdType : uint8_t {
     AssertNoError,         // assert_no_error             (resultado sin error)
     // Phase 8B: aserciones adicionales (NativeHal-only, sin OCR, sin pixeles).
     AssertError,           // assert_error [TEXT]   (resultado con error; TEXT subcadena opcional en strArg)
-    AssertVariable         // assert_variable NAME VALUE  (var como char en waitN; VALUE esperado en strArg)
+    AssertVariable,        // assert_variable NAME VALUE  (var como char en waitN; VALUE esperado en strArg)
+    // Phase 9B: asercion de foco del launcher (NativeHal-only). Comprueba que la
+    // tarjeta enfocada del Main Menu coincide con la esperada, validando la
+    // paridad de navegacion 2D con el firmware. El id de tarjeta resuelto se
+    // guarda en waitN; strArg conserva el token original para el diagnostico.
+    AssertMenuFocus        // assert_menu_focus NAME|ID
 };
 
 struct ScriptCmd {
@@ -1428,6 +1457,22 @@ static bool loadScript(const char* path)
             sc.waitN  = static_cast<long>(static_cast<unsigned char>(varCh));
             sc.strArg = rest;
         }
+        else if (lc == "assert_menu_focus") {
+            // Phase 9B. Un unico token: NOMBRE de tarjeta (sin espacios, case-
+            // insensitive) o id decimal. Se resuelve AL PARSEAR contra la tabla
+            // real APPS[] del launcher (MainMenu::debugResolveCardToken); un token
+            // desconocido / fuera de rango falla la carga con exit 2, igual que
+            // un assert_app invalido.
+            std::string name, extra;
+            if (!(iss >> name)) return scriptErr(path, lineNo, "assert_menu_focus requiere un NOMBRE o id de tarjeta");
+            if (iss >> extra)   return scriptErr(path, lineNo, "assert_menu_focus: demasiados argumentos");
+            int cardId = MainMenu::debugResolveCardToken(name.c_str());
+            if (cardId < 0) return scriptErr(path, lineNo,
+                "assert_menu_focus: tarjeta desconocida (usa el NOMBRE de una tarjeta del launcher o su id 0..N-1)");
+            sc.type   = ScriptCmdType::AssertMenuFocus;
+            sc.waitN  = cardId;     // id resuelto
+            sc.strArg = name;       // token original, solo para el diagnostico
+        }
         else {
             return scriptErr(path, lineNo, "comando desconocido");
         }
@@ -1635,6 +1680,34 @@ static void scriptStepBegin()
             else
                 assertFail(sc.line, "assert_variable " + std::string(label) + " esperaba '" +
                                     sc.strArg + "' pero actual='" + actual + "'");
+            break;
+        }
+
+        // ── Phase 9B: foco del launcher (NativeHal-only) ─────────────────
+        case ScriptCmdType::AssertMenuFocus: {
+            // Solo tiene sentido en el launcher (MENU). Fuera de el — o sin
+            // instancia de menu — es un fallo de asercion (exit 4), no un no-op.
+            if (g_mode != AppMode::MENU || !g_menu) {
+                assertFail(sc.line, "assert_menu_focus requiere el launcher (Menu) activo "
+                                    "(app actual: '" + std::string(activeAppName()) + "')");
+                break;
+            }
+            const int expectId = static_cast<int>(sc.waitN);
+            const int actualId = g_menu->debugFocusedCardId();
+            // Nombres canonicos para el diagnostico (nunca punteros internos).
+            const char* expectName = MainMenu::debugCardNameById(expectId);
+            const char* actualName = MainMenu::debugCardNameById(actualId);
+            if (actualId == expectId) {
+                assertPass(sc.line, "assert_menu_focus " + sc.strArg + " (id " +
+                                    std::to_string(expectId) + " '" +
+                                    (expectName ? expectName : "?") + "')");
+            } else {
+                assertFail(sc.line, "assert_menu_focus esperaba '" + sc.strArg + "' (id " +
+                                    std::to_string(expectId) + " '" +
+                                    (expectName ? expectName : "?") + "') pero el foco esta en id " +
+                                    std::to_string(actualId) + " '" +
+                                    (actualName ? actualName : "(ninguno)") + "'");
+            }
             break;
         }
     }

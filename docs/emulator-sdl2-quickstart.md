@@ -262,6 +262,7 @@ contain spaces.
 | `assert_result TEXT` | (Phase 4B-C) Assert CalculationApp's *computed* result equals `TEXT` exactly (e.g. `3`, `5/6`). |
 | `assert_result_contains TEXT` | (Phase 4B-C) Like `assert_result` but a substring match. |
 | `assert_no_error` | (Phase 4B-C) Assert the last evaluated result has no error flag. |
+| `assert_menu_focus NAME\|ID` | (Phase 9B) Assert the **launcher** card currently focused is `NAME` (a card name, case- and space-insensitive — e.g. `Grapher`, `fluid2d`) or a decimal card `ID` (`0..N-1`). Only meaningful in MENU mode (fails otherwise). Reads the focus via an emulator-only read-only accessor; unknown name/out-of-range id is a **parse** error (`exit 2`). See [Menu navigation parity](#menu-navigation-parity-phase-9b). |
 
 **Key names** map onto existing calculator `KeyCode`s (no parallel key system):
 
@@ -304,7 +305,7 @@ argument points; the bundled scripts write under `out/` (git-ignored). PPM P6,
 | Condition | Exit |
 |:--|:--|
 | Success (all commands ran; any assertions passed) | `0` |
-| Unknown command, invalid key name, missing argument, negative `wait`, unknown `assert_app` name, unreadable script file | `2` |
+| Unknown command, invalid key name, missing argument, negative `wait`, unknown `assert_app` name, unknown/out-of-range `assert_menu_focus` card, unreadable script file | `2` |
 | `screenshot` write failure at run time (bad path / disk full) | `3` |
 | Assertion failure (`assert_*`) at run time (Phase 4B-C) | `4` |
 
@@ -842,12 +843,12 @@ shared mnemonic across surfaces.
   the tab-bar arrows; recall Ans with `a`. (PreAns is script-only.)
 - **`SDLK_F5` → `FREE_EQ`**, but script `f5` → `KeyCode::F5` — the physical F5 key
   and `key f5` differ; a known, intentional asymmetry.
-- **Menu arrow navigation differs from hardware.** In the emulator, launcher arrows
-  go through LVGL's *linear* group order ([NativeHal.cpp:490](../src/hal/NativeHal.cpp#L490));
-  firmware uses `MainMenu::moveFocusByDelta` *2D-grid* navigation with wrap
-  ([SystemApp.cpp:677], [MainMenu.cpp:151]). The same arrow sequence can land on a
-  different card. Scripts avoid this by launching apps with `open_app`. **Aligning
-  the emulator menu nav model to hardware is the top Phase 9B item.**
+- ~~**Menu arrow navigation differs from hardware.**~~ **Resolved in Phase 9B.**
+  Emulator launcher arrows now route through the same `MainMenu::moveFocusByDelta`
+  *2D-grid* model the firmware uses ([MainMenu.cpp:151](../src/ui/MainMenu.cpp#L151)),
+  not LVGL's linear group order. See [Menu navigation parity](#menu-navigation-parity-phase-9b).
+  (`open_app` remains the recommended way for *app* smokes to reach a specific app
+  deterministically, independent of grid layout.)
 - `NEGATE` (SDL `n` / script `neg`/`negate`) and `EXE` (script `exe`) dispatch to
   apps that have no handler for them (silent no-op in CalculationApp); use `-`/`sub`
   for unary minus and `enter` to evaluate.
@@ -863,6 +864,54 @@ step, never by the golden compare):
   existing `calc_*` scripts.
 - `grapher_input_navigation.numos` — integrated `graph` → `ac` → `table` → `ac`
   tab navigation; asserts Grapher stays active through it.
+
+### Menu navigation parity (Phase 9B)
+
+Phase 9B closes the last Phase 9A input gap: **the emulator launcher now navigates
+the Main Menu with the exact same 2D-grid focus model as the firmware**, instead of
+LVGL's linear group order.
+
+**What changed.** In the emulator MENU branch of `dispatchKey`
+([`NativeHal.cpp`](../src/hal/NativeHal.cpp)), the four arrow keys are now routed to
+`MainMenu::moveFocusByDelta(dCol, dRow)` — the *same* call the firmware makes in
+`SystemApp::handleKeyMenu` ([`MainMenu.cpp:151`](../src/ui/MainMenu.cpp#L151)) — with
+the identical mapping:
+
+| Arrow | `moveFocusByDelta` | Arrow | `moveFocusByDelta` |
+|:--|:--|:--|:--|
+| `LEFT` | `(-1, 0)` | `RIGHT` | `(+1, 0)` |
+| `UP` | `(0, -1)` | `DOWN` | `(0, +1)` |
+
+The grid is **3 columns** with horizontal/vertical wrap and last-row clamping;
+`col = id%3`, `row = id/3`, `maxRow = (APP_COUNT-1)/3`. So e.g. `DOWN` from card 0
+moves to card **3** (one row down, same column), where the old linear order would
+have moved to card 1. Only the down-edge (`PRESS`/`REPEAT`) moves focus — the arrow
+`RELEASE` does not. **ENTER is unchanged**: it still goes through the LVGL keypad
+path, and because `moveFocusByDelta` sets the LVGL group focus, a subsequent ENTER
+fires `LV_EVENT_CLICKED` on the focused card and launches it — exactly as the
+firmware does.
+
+This is **emulator-only**: the firmware already used `moveFocusByDelta`, and the
+read accessor below is excised from the device build (`#ifdef NATIVE_SIM`).
+
+**`assert_menu_focus NAME|ID`.** A golden-free assertion (see the syntax table
+above) that checks which launcher card is focused, via the emulator-only read-only
+accessor `MainMenu::debugFocusedCardId()` (guarded by `#ifdef NATIVE_SIM`, so the
+firmware is untouched). The token is a card **name** (case- and space-insensitive,
+so `Fluid 2D` is written `fluid2d`) or a decimal **id** (`0..N-1`); an unknown name
+or out-of-range id fails the script **load** (`exit 2`), and a focus mismatch — or
+running it outside MENU mode — fails at run time (`exit 4`). The accessor resolves
+tokens against the real `APPS[]` table, so names never drift from the launcher.
+
+**Phase 9B menu-parity scripts** (golden-free; same assert-only CI contract as the
+Phase 9A scripts — exit 0, ≥1 `PASS -`, no `FAIL -`; no screenshot, not in the
+candidate list):
+
+- `menu_nav_parity.numos` — an arrow tour (`right`/`down`/`left`/`up` + a vertical
+  wrap) asserting the exact focused card at each step (`0→1→2→5→4→1→0→18→0`); a
+  linear-nav regression would land on different cards and fail.
+- `menu_enter_launch.numos` — focus the Grapher card by arrow, press ENTER, and
+  `assert_app Grapher`: proves grid navigation and card activation stay in sync.
 
 ---
 

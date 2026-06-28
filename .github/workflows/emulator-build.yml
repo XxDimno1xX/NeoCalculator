@@ -415,6 +415,59 @@ jobs:
           path: out/input_9a/
           if-no-files-found: ignore
 
+      # Menu navigation parity smoke (Phase 9B) — golden-free.
+      #
+      # Same assert-only contract as the Phase 8C / 9A suites above (run headless +
+      # deterministic, require exit 0, at least one "PASS - " marker, and NO
+      # "FAIL - " marker), and explicitly SEPARATE from the visual candidate/golden
+      # flow below (these scripts take NO screenshot and are NOT in
+      # generate-emulator-candidates.py's CANDIDATES list). They prove the emulator
+      # launcher arrows follow the firmware's MainMenu::moveFocusByDelta 2D grid
+      # (not LVGL's linear group order) and that ENTER launches the focused card.
+      # menu_nav_parity also guards the new assert_menu_focus command: a focus
+      # mismatch exits 4, an unknown card token exits 2 (parse) — either fails here.
+      - name: Menu navigation parity smoke (headless deterministic, Phase 9B)
+        run: |
+          set -euo pipefail
+          BIN=.pio/build/emulator_pc/program
+          mkdir -p out/menu_9b
+
+          run_menu() {
+            script="$1"
+            name="$(basename "$script" .numos)"
+            log="out/menu_9b/${name}.log"
+            echo "=== ${name} ==="
+            rc=0
+            SDL_VIDEODRIVER=dummy timeout 60s "$BIN" \
+              --headless --deterministic --script "$script" \
+              --frames 1400 --quiet > "$log" 2>&1 || rc=$?
+            cat "$log"
+            if [ "$rc" -ne 0 ]; then
+              echo "::error::menu parity smoke FAILED for ${name} (exit $rc)"
+              return 1
+            fi
+            if ! grep -q "PASS - " "$log"; then
+              echo "::error::menu parity smoke: no PASS marker for ${name}"
+              return 1
+            fi
+            if grep -q "FAIL - " "$log"; then
+              echo "::error::menu parity smoke: FAIL marker present for ${name}"
+              return 1
+            fi
+          }
+
+          run_menu tests/emulator/scripts/menu_nav_parity.numos
+          run_menu tests/emulator/scripts/menu_enter_launch.numos
+          echo "OK: 2 Phase 9B menu-parity scripts passed (2D-grid focus + ENTER launch, NO golden image)."
+
+      - name: Upload Phase 9B menu parity logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: numos-emulator-menu-9b
+          path: out/menu_9b/
+          if-no-files-found: ignore
+
       # ---------------------------------------------------------------------
       # Candidate screenshot generation + golden comparison (Phase 4B-A).
       #

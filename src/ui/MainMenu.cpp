@@ -44,6 +44,14 @@
 #include "MainMenu.h"
 #include "../display/DisplayDriver.h"
 
+#ifdef NATIVE_SIM
+// Only the Phase 9B native-only debug accessors below need these; the firmware
+// build (NATIVE_SIM undefined) pulls in nothing extra.
+#include <string>
+#include <cctype>
+#include <cstdlib>
+#endif
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Layout constants
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -207,6 +215,63 @@ int MainMenu::focusedCardId() const {
     if (!focused) return -1;
     return static_cast<int>(reinterpret_cast<intptr_t>(lv_obj_get_user_data(focused)));
 }
+
+#ifdef NATIVE_SIM
+// ═══════════════════════════════════════════════════════════════════════════════
+// Native-only read-only debug accessors (Phase 9B menu-nav parity).
+//
+// Excised from the firmware: NATIVE_SIM is defined only by [env:emulator_pc]
+// (platformio.ini), so on the device these definitions do not exist. They read
+// the SAME APPS[]/APP_COUNT table the launcher renders, so a `.numos`
+// `assert_menu_focus` token always resolves against the real card set — no
+// duplicated name list to drift. See MainMenu.h for the contract.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Lowercase + strip spaces, so a single whitespace-delimited script token can
+// match multi-word card names ("Fluid 2D" -> "fluid2d", "Neural Lab" ->
+// "neurallab"). Script tokens never contain spaces (the parser reads one token),
+// so the only way to name those cards is the space-free spelling — which this
+// normalisation accepts on both sides.
+static std::string menuNormalizeToken(const char* s) {
+    std::string out;
+    for (const char* p = s; p && *p; ++p) {
+        unsigned char c = static_cast<unsigned char>(*p);
+        if (c == ' ' || c == '\t') continue;
+        out += static_cast<char>(std::tolower(c));
+    }
+    return out;
+}
+
+int MainMenu::debugResolveCardToken(const char* token) {
+    if (!token || !*token) return -1;
+
+    // Non-negative decimal id (e.g. "5"): accept only if it is a real card.
+    bool allDigits = true;
+    for (const char* p = token; *p; ++p) {
+        if (*p < '0' || *p > '9') { allDigits = false; break; }
+    }
+    if (allDigits) {
+        long id = std::strtol(token, nullptr, 10);
+        if (id >= 0 && id < APP_COUNT) return static_cast<int>(id);
+        return -1;
+    }
+
+    // Card name (case- and space-insensitive) against the real APPS[] table.
+    const std::string want = menuNormalizeToken(token);
+    if (want.empty()) return -1;
+    for (int i = 0; i < APP_COUNT; ++i) {
+        if (menuNormalizeToken(APPS[i].name) == want) return APPS[i].id;
+    }
+    return -1;
+}
+
+const char* MainMenu::debugCardNameById(int id) {
+    for (int i = 0; i < APP_COUNT; ++i) {
+        if (APPS[i].id == id) return APPS[i].name;
+    }
+    return nullptr;
+}
+#endif  // NATIVE_SIM
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // create()

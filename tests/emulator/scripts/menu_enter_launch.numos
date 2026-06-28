@@ -1,0 +1,38 @@
+# menu_enter_launch.numos — Phase 9B Main Menu ENTER-launch parity (golden-free).
+#
+# Companion to menu_nav_parity.numos. That script proves arrow focus moves match
+# the firmware 2D grid; THIS one proves the other half of the contract: after
+# grid navigation, pressing ENTER still launches the card that is currently
+# FOCUSED (not whatever LVGL's linear order would have selected). It is the
+# end-to-end check that navigation + activation compose correctly.
+#
+# Why it matters: the Phase 9B dispatch change routes launcher arrows through
+# MainMenu::moveFocusByDelta (which calls lv_group_focus_obj), while ENTER keeps
+# going through the existing LVGL keypad path (NativeHal.cpp dispatchKey MENU
+# branch). If those two ever desynced, ENTER would click the wrong card. Here we
+# RIGHT once (focus Calculation id0 -> Grapher id1), confirm the focus, then
+# ENTER and assert Grapher actually opened.
+#
+# Grapher is launchApp id 1 in the emulator — the same id as the launcher's
+# Grapher card — so a correct focus+ENTER lands in GrapherApp.
+#
+# Run:
+#   program --headless --deterministic --script tests/emulator/scripts/menu_enter_launch.numos \
+#           --frames 600 --quiet
+# Exit codes: 0 ok · 2 script/parse error · 4 assertion failure.
+
+log "menu_enter_launch: waiting for splash -> launcher"
+wait 200
+
+# Start on Calculation (id 0), step RIGHT to focus Grapher (id 1).
+assert_menu_focus Calculation
+key right
+assert_menu_focus Grapher
+
+# ENTER activates the FOCUSED card via LVGL CLICKED -> onCardEvent -> launchApp(1).
+key enter
+wait 120
+
+# If focus and activation are in sync, the active app is now Grapher.
+assert_app Grapher
+log "menu_enter_launch: PASS - ENTER launched the focused Grapher card"

@@ -1,0 +1,70 @@
+# menu_nav_parity.numos — Phase 9B Main Menu navigation-parity smoke (golden-free).
+#
+# Purpose: prove the emulator launcher arrows now follow the SAME 2D-grid focus
+# model as the firmware (SystemApp::handleKeyMenu -> MainMenu::moveFocusByDelta,
+# src/ui/MainMenu.cpp:151) instead of LVGL's linear group order. Each `key`
+# below moves the launcher focus; the matching `assert_menu_focus` checks the
+# focused card via the native-only read-only accessor MainMenu::debugFocusedCardId
+# (guarded by #ifdef NATIVE_SIM, so it is firmware-neutral). No screenshot, no
+# golden, no app launch — this is a behavioral assertion only.
+#
+# Grid (emulator APP_COUNT=20, cols=3; NUMOS_MATH_VISUAL_VERIFY is firmware-
+# validate-only, not emulator_pc — so no id-20 card here):
+#   row0:  0 Calculation   1 Grapher       2 Equations
+#   row1:  3 Calculus      4 Statistics    5 Probability
+#   row2:  6 Regression    7 Sequences     8 Python
+#   row3:  9 Matrices     10 Settings     11 Chemistry
+#   row4: 12 Bridge       13 Circuit      14 Fluid 2D
+#   row5: 15 ParticleLab  16 Neural Lab   17 OpticsLab
+#   row6: 18 NeoLang      19 Fractals
+#   maxRow = (20-1)/3 = 6  ·  col = id%3  ·  row = id/3
+#
+# Every expected id below is hand-derived from moveFocusByDelta's wrap/clamp math
+# and is exactly what the firmware would compute. A LINEAR LVGL nav would land on
+# different cards (e.g. DOWN from id0 would give id1, not id3) — that is the gap
+# this script guards against.
+#
+# Run:
+#   program --headless --deterministic --script tests/emulator/scripts/menu_nav_parity.numos \
+#           --frames 400 --quiet
+# Exit codes: 0 ok · 2 script/parse error · 4 assertion failure.
+
+log "menu_nav_parity: waiting for splash -> launcher"
+wait 200
+
+# Initial focus is the first card (Calculation, id 0) set in MainMenu::create().
+assert_menu_focus Calculation
+
+# RIGHT across the top row: 0 -> 1 -> 2.
+key right
+assert_menu_focus Grapher
+key right
+assert_menu_focus Equations
+
+# DOWN one row keeps the column (stride 3): 2 -> 5. Linear nav would give 3.
+key down
+assert_menu_focus Probability
+
+# LEFT within the row: 5 -> 4.
+key left
+assert_menu_focus Statistics
+
+# UP one row keeps the column: 4 -> 1.
+key up
+assert_menu_focus Grapher
+
+# LEFT to the row start: 1 -> 0.
+key left
+assert_menu_focus Calculation
+
+# UP from the top row wraps vertically to the bottom (col 0 -> maxRow*3 = 18).
+key up
+assert_menu_focus NeoLang
+
+# DOWN from the bottom wraps back to the top (row 7 > maxRow -> row 0): 18 -> 0.
+key down
+assert_menu_focus Calculation
+
+# Navigation alone must never leave the launcher (no card was activated).
+assert_app Menu
+log "menu_nav_parity: PASS - emulator arrows match firmware moveFocusByDelta 2D grid"

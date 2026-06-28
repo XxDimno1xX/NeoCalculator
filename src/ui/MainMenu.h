@@ -55,6 +55,29 @@ public:
     lv_group_t* group()  const { return _group; }
     lv_obj_t*   screen() const { return _screen; }
 
+#ifdef NATIVE_SIM
+    // ── Native-only read-only debug accessors (Phase 9B menu-nav parity) ──
+    // Compiled ONLY into the SDL2 emulator: NATIVE_SIM is defined exclusively by
+    // [env:emulator_pc] (platformio.ini), so the firmware preprocessor strips this
+    // whole block — the device build, its symbols, and its binary are unchanged.
+    // They expose just enough of the focus model for a `.numos` `assert_menu_focus`
+    // check WITHOUT reading pixels or leaking internal LVGL pointers. Strictly
+    // read-only: there is deliberately no mutation surface here.
+    //
+    //   * debugFocusedCardId()    — id of the currently focused card, or -1 if none
+    //                               (thin wrapper over the private focusedCardId()).
+    //   * debugResolveCardToken() — map a script token (a card NAME, case- and
+    //                               space-insensitive, OR a non-negative decimal id)
+    //                               to a card id in [0, APP_COUNT); -1 if unknown or
+    //                               out of range. The real APPS[] table is the single
+    //                               source of truth, so names never drift.
+    //   * debugCardNameById()     — canonical card name for an id, or nullptr if the
+    //                               id is out of range (for friendly diagnostics).
+    int                debugFocusedCardId() const { return focusedCardId(); }
+    static int         debugResolveCardToken(const char* token);
+    static const char* debugCardNameById(int id);
+#endif
+
 private:
     // ── App descriptor ───────────────────────────────────────────────────
     struct AppEntry {
