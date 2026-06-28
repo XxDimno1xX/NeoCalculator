@@ -8,7 +8,7 @@ tolerate *one known, justified* class of non-deterministic pixels — the Status
 `statistics_data_smoke`, `probability_edit_smoke`, `sequences_smoke`,
 `sequences_edit_smoke`, `regression_smoke`, `regression_data_smoke`,
 `grapher_smoke`, `grapher_expr_smoke`, `grapher_graph_smoke`, `grapher_table_smoke`,
-`grapher_trace_smoke`)
+`grapher_trace_smoke`, `grapher_templates_smoke`)
 — without weakening byte-comparison anywhere else. **Any future StatusBar app screen
 reuses this same shared clock rect**; a screen with no StatusBar (e.g.
 `launcher_smoke`) carries no mask and is gated byte-for-byte.
