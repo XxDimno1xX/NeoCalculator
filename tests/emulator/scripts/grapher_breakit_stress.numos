@@ -1,0 +1,64 @@
+# grapher_breakit_stress.numos — Phase 10D. Adversarial survival test. Enters an
+# inequality, then hammers the grapher: rapid tab hops, zoom-in/out extremes, pan
+# spam, repeated trace/AC, Home→launcher→reopen. Asserts the grapher survives
+# (still active, no crash/hang). Warning-only; not a pixel assertion.
+log "breakit: start"
+wait 200
+open_app Grapher
+wait 40
+key down
+key enter
+key x
+key ^
+key 2
+key right
+key +
+key y
+key ^
+key 2
+key right
+key lt
+key 1
+key enter
+wait 40
+key graph
+wait 20
+key table
+wait 20
+key graph
+wait 20
+key zoom
+key zoom
+key zoom
+key zoom
+key zoom
+wait 15
+key sub
+key sub
+key sub
+key sub
+key sub
+key sub
+wait 15
+key left
+key left
+key right
+key up
+key down
+wait 15
+key enter
+key enter
+key ac
+key ac
+wait 15
+key table
+wait 15
+key home
+wait 80
+open_app Grapher
+wait 60
+key graph
+wait 80
+screenshot out/grapher_breakit_stress.ppm
+assert_app Grapher
+log "breakit: survived"

@@ -1,0 +1,16 @@
+# calc_logbase_smoke.numos — Phase 10B. Render log_2(8) in CalculationApp to
+# confirm the subscript base AND the argument parentheses render with clean
+# delimiters (= 3). Warning-only (no golden).
+log "calc logbase: start"
+wait 200
+open_app Calc
+wait 60
+key logbase
+key 2
+key right
+key 8
+key enter
+wait 100
+screenshot out/calc_log2_8.ppm
+assert_app Calculation
+log "calc logbase: log_2(8) rendered"

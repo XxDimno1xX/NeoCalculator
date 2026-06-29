@@ -1,0 +1,26 @@
+# grapher_explicit_parabola_smoke.numos — Phase 10B regression. Confirm the
+# EXPLICIT y=x^2 still routes to the fast single-valued adaptive sampler after
+# the implicit-equation classifier was added (LHS "y", RHS has no y → explicit).
+# Warning-only (screenshot, no golden).
+log "explicit parabola: start"
+wait 200
+open_app Grapher
+wait 60
+key down
+key enter
+# Type "y=x^2"
+key y
+key =
+key x
+key ^
+key 2
+key enter
+wait 80
+key graph
+wait 80
+key ac
+key 0
+wait 150
+screenshot out/grapher_explicit_parabola_smoke.ppm
+assert_app Grapher
+log "explicit parabola: y=x^2 plotted"

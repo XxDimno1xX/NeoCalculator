@@ -4,6 +4,42 @@ How to build and run the **native desktop emulator** (`pio run -e emulator_pc`) 
 Windows and Linux. This is a desktop *port* of NumOS (the real LVGL/UI/math code
 compiled against an SDL2 desktop HAL) — **not** a cycle-accurate ESP32 emulator.
 
+---
+
+## Do I need an ESP32-S3?
+
+**No — not for the desktop emulator.** The emulator runs entirely on your computer
+(Windows, Linux, or macOS). You only need a real ESP32-S3 board if you want to
+*flash* NumOS onto physical calculator hardware.
+
+| What you want to do | Build target | ESP32-S3 board needed? |
+|:--|:--|:--:|
+| Run NumOS **on your PC** (the emulator) | `emulator_pc` | **No** |
+| **Flash** NumOS onto a real calculator | `esp32s3_n16r8` (and the other `esp32s3_*` targets) | Yes |
+
+The ESP32 targets are **firmware builds only** — they compile the image that runs
+on the chip. They are completely separate from the emulator, so the firmware can
+build perfectly fine even when the emulator doesn't (and the other way around).
+
+So the **one** command you need to build the desktop emulator is:
+
+```bash
+pio run -e emulator_pc
+```
+
+> **Always include `-e emulator_pc`.** If you run a bare `pio run` with no `-e`,
+> PlatformIO builds **every** environment in the project — that's all five ESP32
+> firmware targets *plus* the emulator. It still works, but it's much slower and
+> compiles a lot of things you don't need just to try the emulator on your PC.
+
+> **Seeing the ESP32 builds pass but `emulator_pc FAILED`?** That mismatch looks
+> alarming but is common and expected — the firmware and the emulator are built
+> independently, and the emulator just needs one extra desktop dependency (SDL2).
+> Jump straight to
+> [Troubleshooting the emulator build](#troubleshooting-the-emulator-build).
+
+---
+
 This quickstart covers **Phase 2** (reproducible, portable build & run with no
 machine-specific SDL2 paths), **Phase 3A** (stable 320×240 logical scaling,
 key press/release, and a headless auto-exit mode for CI — see
@@ -130,6 +166,70 @@ The run script locates the binary, sanity-checks the SDL2 runtime (`ldd` /
 ### macOS
 Untested/future. `brew install sdl2` provides `pkg-config`/`sdl2-config`, so the
 same discovery path *should* apply; no macOS guarantee is made.
+
+---
+
+## Troubleshooting the emulator build
+
+### "The ESP32 builds succeeded but `emulator_pc` failed"
+
+This is the most common beginner snag, and it does **not** mean anything is wrong
+with your ESP32 setup. The firmware targets and the emulator are built completely
+separately, so the emulator can fail on its own — almost always because the
+desktop graphics library **SDL2** is missing or can't be found.
+
+Two things that trip people up:
+
+- **Read the error *above* the summary, not the summary line.** When PlatformIO
+  finishes it prints a results table that ends with something like
+  `emulator_pc   FAILED`. That last line only tells you *that* it failed — the
+  lines explaining *why* are the compiler/linker errors printed **above** the
+  table. Scroll up and look for the first message containing `error:`. That is the
+  useful part.
+- **On Windows, this is almost always an SDL2 setup or path problem** — either the
+  SDL2 development package isn't where the build looks for it, or `SDL2.dll` can't
+  be found when the emulator runs. See [Windows](#windows) for how to install SDL2
+  and point the build at it, and
+  [How SDL2 is discovered](#how-sdl2-is-discovered-no-hardcoded-paths) for the
+  exact search order.
+
+### First, capture the full error
+
+Build just the emulator, on its own, in **verbose** mode, and keep all of the
+output:
+
+```bash
+pio run -e emulator_pc -v
+```
+
+The `-v` flag makes PlatformIO print the exact compiler/linker commands and their
+full error text — that's what's actually needed to tell what went wrong.
+
+It also helps to run the dependency checker, which reports whether SDL2 is visible
+to the build:
+
+```bash
+python scripts/check-emulator-deps.py
+```
+
+### What to paste into a GitHub issue
+
+If you're still stuck, please open an issue (or comment on yours) with **all** of
+the following — it lets us help on the first reply instead of asking back and
+forth:
+
+1. **Your operating system** — e.g. "Windows 11", "Ubuntu 24.04".
+2. **The exact command you ran** — e.g. `pio run -e emulator_pc -v`.
+3. **The full `emulator_pc` error output** — the compiler/linker errors from
+   *above* the summary table, not just the final `emulator_pc FAILED` line. Copy
+   the whole block; the first `error:` line is the most important.
+4. **Whether SDL2 is installed and on your PATH** — on Windows, where you put the
+   SDL2 development package and whether `SDL2.dll` sits next to the emulator
+   executable or is on `PATH`; on Linux, whether `libsdl2-dev` is installed.
+
+> We can't promise a specific fix until we can see your actual `emulator_pc` error.
+> The exact failure message is what tells us which dependency to point you at — so
+> the full error from step 3 is the single most useful thing you can share.
 
 ---
 
@@ -801,6 +901,31 @@ CalculationApp every mapped key is forwarded.
 | `F5` / `=` | FREE_EQ (S⇔D) | `n` | NEGATE |
 | `a` | ANS *(Phase 9A)* | | |
 
+**Layout-aware symbol typing (Phase 10B).** Digits and the math symbols
+`0–9 + - * / ^ = ( ) .` are taken from **`SDL_TEXTINPUT`**, i.e. the character the
+**OS keyboard layout** actually produces — *after* it has applied SHIFT / AltGr /
+dead keys — rather than from the raw keysym. So you type symbols **naturally for
+your own layout**: on a Spanish keyboard `Shift`+`+` gives `*`, `Shift`+`8/9/0`
+give `( ) =`, `Shift`+`7` gives `/`; on a US keyboard the US shifted symbols apply.
+The emulator never *fakes* SHIFT — it just inserts whatever your keyboard emits.
+`mapTextChar` ([NativeHal.cpp](../src/hal/NativeHal.cpp)) maps that character to the
+calculator key:
+
+| Typed char | KeyCode | | Typed char | KeyCode |
+|:--|:--|:--|:--|:--|
+| `0`–`9` | NUM_0..NUM_9 | | `=` | FREE_EQ (S⇔D; inserts `=` in the Grapher editor) |
+| `+` `-` `*` `/` | ADD / SUB / MUL / DIV | | `(` `)` | LPAREN / RPAREN |
+| `^` | POW | | `.` | DOT |
+
+Because these now arrive via text input, their **keysyms are no longer mapped in
+`mapSdlToKeyCode`** (mapping both would double-insert: `KEYDOWN` *and* `TEXTINPUT`).
+`mapSdlToKeyCode` (the `KEYDOWN` path) keeps only navigation, control, modifiers
+(`Shift`→`SHIFT`, `Tab`→`ALPHA`, `Insert`→`STO`), `F5`→FREE_EQ, and the **letter**
+shortcuts (`s`=SIN, `p`=POW, `f`=fraction, `x`/`y`=vars, …) — letters never go
+through text input (their `TEXTINPUT` char maps to nothing, so no duplication).
+This is **live-SDL only**; the `.numos` script vocabulary (`scriptNameToKeyCode`)
+is untouched, so every test and golden is unaffected.
+
 Notes:
 - **SHIFT / ALPHA / STO** are resolved by `KeyboardManager` inside
   CalculationApp (they do nothing in the launcher). `Insert`→STO is new in
@@ -964,6 +1089,78 @@ per-script `timeout` (nonzero exit → fail), a broken fix trips an assertion
 Phase 9D/9E/9F render changes (fixed active-tab pill clipping; templates modal now
 lists the real plottable expressions). Each reuses its existing clock-only mask
 (`4,6,37,13`) **unchanged** — no new masks, no broadened masks, no source changes.
+
+### Phase 10B: implicit-equation plotting + delimiter polish
+
+Phase 10B teaches the Grapher to plot **implicit equations** F(x,y)=0 — relations the
+single-valued y=f(x) adaptive sampler cannot draw — and polishes the synthetic math
+delimiters. Both are **firmware** changes (shared code), visually confirmed in the
+emulator. **No golden or mask is promoted**; all 19 existing goldens still compare
+**IDENTICAL** (the showcase default `1 + 2/3 + x^2` has no parentheses, and the
+template-preview / panel delimiters render at a size that uses the bundled font glyph,
+not the vector fallback that was touched).
+
+- **Implicit classifier** ([`GraphModel::preCacheRPN`](../src/apps/GraphModel.cpp)).
+  An equation is **explicit** (fast sampler) only when one side is the bare variable
+  `y` and the other side has no `y` (so `y=x^2`, bare `x`/`2x`/`sin(x)`, and the y=
+  templates are unchanged). Everything else — `x=y^2`, `x^2+y^2=1`, `y=x^2+y^2` — is
+  **implicit**: the model compiles both sides and exposes the residual
+  `G(x,y) = lhs - rhs` via `evalImplicit` (evaluated with both `x` and `y`).
+- **Renderer** ([`GrapherApp::plotImplicit`](../src/apps/GrapherApp.cpp)). Marching
+  squares over a 3-px grid of `G` across the viewport draws the `G=0` contour into the
+  Kandinsky buffer via the new `GraphView::drawSegmentPx`; NaN-corner cells (domain
+  holes) are skipped. `evalAt` returns NAN for implicit slots, so trace/table/auto-fit
+  skip them cleanly.
+- **Delimiter polish** ([`drawStrokedDelimiter`](../src/ui/MathRenderer.cpp)). The
+  vector fallback for tall parentheses now uses a font-weight-matched stroke
+  (≈ emSize/8) so a synthetic `(` no longer reads lighter than the glyphs it wraps; the
+  arc stays a hook-free quadratic. Confirmed on `(2/3)^2` (showcase) and `sin(30)`
+  (CalculationApp).
+
+**Warning-only scripts** (assert + screenshot, **not** in the candidate/golden list):
+`grapher_implicit_circle_smoke` (`x^2+y^2=1`), `grapher_implicit_sideways_smoke`
+(`x=y^2`), `grapher_implicit_ycircle_smoke` (`y=x^2+y^2`),
+`grapher_explicit_parabola_smoke` (`y=x^2` regression), `math_showcase_delims_smoke`
+(tall parens), and `calc_delimiters_smoke` (`sin(30)`). Run any with
+`--headless --deterministic --script <path> --frames 1600 --quiet`.
+
+### Phase 10C: equal-aspect (square-grid) Grapher
+
+Phase 10C makes the Graph tab **aspect-ratio correct**: one unit in x equals one
+unit in y in screen pixels, so circles render as circles instead of horizontally
+stretched ovals. A **firmware** change (shared Grapher code), visually confirmed in
+the emulator. **No golden or mask is promoted.**
+
+- **Root cause.** [`GraphView`](../src/ui/GraphView.cpp) mapped each axis
+  independently — `x` px/unit = `320/(xMax-xMin)`, `y` px/unit = `143/(yMax-yMin)`
+  (`GRAPH_CANVAS_W=320`, `GRAPH_CANVAS_H=143`). With the default viewport that is
+  16 vs 10.2 px/unit, so a unit circle became a 1.57:1 ellipse.
+- **Fix.** New idempotent [`GrapherApp::normalizeAspect`](../src/apps/GrapherApp.cpp),
+  called once at the top of `replot()` before `_view.setViewport()`, equalizes the
+  world-units-per-pixel by **expanding the more-zoomed axis** about the current
+  centre (never crops). Because it mutates the canonical `_xMin..\_yMax` (the single
+  source of truth) and pan/zoom are ratio-preserving, **every** render — default,
+  pan, zoom, autofit, zoom-box, trace recenter — stays square, and all consumers
+  (trace cursor, POI markers, integral/tangent overlays, implicit contours, info
+  bar) follow automatically. `plotImplicit` and `GraphModel` are unchanged.
+- **Square grid cells + clean labels.** `drawGrid` and the axis tick-label callback
+  now share one world-step ([`GraphView::squareGridStep`](../src/ui/GraphView.cpp),
+  ~48 px target) for both axes, so grid cells are visually square and the numeric
+  labels sit on grid lines (the old Y labels used a denser step and overlapped).
+- **Trace/table on implicit curves fail gracefully** (no single y=f(x)): `evalAt`
+  returns NaN, so the trace dot hides and table cells are blank — no crash/hang
+  (`grapher_implicit_tabletrace_safe.numos`).
+
+**Expected stale goldens (do NOT promote):** only `grapher_graph_smoke` and
+`grapher_trace_smoke` — the two goldens that capture the graph canvas (grid+curve)
+— differ after this change; the other 17 goldens (incl. the Grapher Expressions /
+Table / Templates views and every non-Grapher screen) still compare **IDENTICAL**.
+
+**Warning-only scripts** (assert + screenshot, **not** in the candidate/golden
+list): `grapher_aspect_circle_smoke` (`x^2+y^2=1` → true circle),
+`grapher_aspect_small_circle_smoke` (`y=x^2+y^2`), `grapher_aspect_sideways_parabola_smoke`
+(`x=y^2`), `grapher_aspect_line_smoke` (`y=x` at 45° — the square-grid proof),
+`grapher_aspect_sin_smoke`, and `grapher_implicit_tabletrace_safe`.
 
 ---
 

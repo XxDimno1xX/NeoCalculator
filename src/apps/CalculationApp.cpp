@@ -528,8 +528,25 @@ void CalculationApp::evaluateExpression() {
     // Evaluar
     _lastResult  = _evaluator.evaluate(_rootRow);
     _hasResult   = true;
-    _showDecimal = false;
-    _resultMode  = vpam::ResultMode::Symbolic;
+
+    // ── Default display mode ────────────────────────────────────────────────
+    // Exact results (integers, small fractions, radicals, π/e multiples) stay in
+    // Symbolic form. But a transcendental or irrational-combination result comes
+    // back from the evaluator as a rational *approximation* with a large
+    // power-of-10 denominator (ExactVal::fromDouble truncates to ≤10 decimals),
+    // e.g. sin(30) → -9880316241/10000000000. Rendering that as a fraction is
+    // unreadable, so default those to the decimal (Periodic) form instead — the
+    // user can still toggle back to Symbolic with S⇔D. The raw ExactVal (and thus
+    // the emulator's assert_result probe) is unchanged; only the display differs.
+    constexpr int64_t kDecimalDenThreshold = 100000;  // 10^5
+    if (_lastResult.ok && _lastResult.isRational() &&
+        _lastResult.den >= kDecimalDenThreshold) {
+        _resultMode  = vpam::ResultMode::Periodic;
+        _showDecimal = true;
+    } else {
+        _resultMode  = vpam::ResultMode::Symbolic;
+        _showDecimal = false;
+    }
 
     // Guardar en Ans (rota Ans → PreAns)
     if (_lastResult.ok) {

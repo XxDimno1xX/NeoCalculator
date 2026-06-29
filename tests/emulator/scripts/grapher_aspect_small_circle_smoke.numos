@@ -1,0 +1,33 @@
+# grapher_aspect_small_circle_smoke.numos — Phase 10C. Plot y = x^2 + y^2, which
+# is the circle x^2 + (y-0.5)^2 = 0.25 (radius 0.5, centre (0,0.5)) tangent to the
+# x-axis at the origin. With equal-aspect rendering it must be a TRUE small circle
+# touching the origin, not a squashed oval. Warning-only (screenshot, no golden).
+log "aspect small circle: start"
+wait 200
+open_app Grapher
+wait 60
+key down
+key enter
+# Type "y=x^2+y^2"
+key y
+key =
+key x
+key ^
+key 2
+key right
+key +
+key y
+key ^
+key 2
+key enter
+wait 80
+key graph
+wait 80
+key ac
+key zoom
+key zoom
+key zoom
+wait 150
+screenshot out/grapher_aspect_small_circle_smoke.ppm
+assert_app Grapher
+log "aspect small circle: y=x^2+y^2 plotted"

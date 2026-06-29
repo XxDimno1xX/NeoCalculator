@@ -1,0 +1,16 @@
+# calc_delimiters_smoke.numos — Phase 10B. Render sin(30) in the real
+# CalculationApp to confirm normal-height delimiters (which use the bundled
+# stix_math parenthesis glyph directly, NOT the vector fallback) still look
+# clean alongside the polished tall-delimiter path. Warning-only (no golden).
+log "calc delimiters: start"
+wait 200
+open_app Calc
+wait 60
+key sin
+key 3
+key 0
+key enter
+wait 100
+screenshot out/calc_sin30.ppm
+assert_app Calculation
+log "calc delimiters: sin(30) rendered"

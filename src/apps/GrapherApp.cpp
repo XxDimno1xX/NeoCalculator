@@ -461,20 +461,6 @@ void GrapherApp::createExpressionsPanel() {
     refreshExprList();
 }
 
-// ── Nice step for grid lines (1, 2, 5 × 10^n) ─────────────────────────
-static float niceStep(float range, int maxTicks) {
-    float rough = range / maxTicks;
-    float mag = powf(10.0f, floorf(log10f(rough)));
-    float norm = rough / mag;
-    float nice;
-    if (norm < 1.5f)      nice = 1.0f;
-    else if (norm < 3.5f) nice = 2.0f;
-    else if (norm < 7.5f) nice = 5.0f;
-    else                  nice = 10.0f;
-    return nice * mag;
-}
-
-
 // ── Graph tick-label draw callback (DRAW_MAIN_END on _graphCanvas) ────────
 // Grid lines and axes are rasterized directly into _graphBuf in replot();
 // this callback only adds the numeric tick labels on top of the image.
@@ -505,7 +491,10 @@ static void graphTickLabelsCb(lv_event_t* e) {
     ldsc.font  = &stix_math_18;
 
     char buf[16];
-    float mainStep = niceStep(xRange, 8);
+    // Single shared step for BOTH axes (same one the grid rasterizer uses), so
+    // tick labels sit on grid lines and, with the equal-aspect viewport, do not
+    // pile up — previously the Y labels used a denser 6-tick step and overlapped.
+    const float mainStep = grapher::GraphView::squareGridStep(xRange / (float)aW);
     int32_t ay = toSY(0.0f);
 
     // X-axis tick labels
@@ -525,8 +514,8 @@ static void graphTickLabelsCb(lv_event_t* e) {
         lv_draw_label(layer, &ldsc, &la);
     }
 
-    // Y-axis tick labels
-    float yMainStep = niceStep(yRange, 6);
+    // Y-axis tick labels — SAME step as X (square grid → labels on grid lines).
+    const float yMainStep = mainStep;
     start = floorf(yMin / yMainStep) * yMainStep;
     for (float v = start; v <= yMax; v += yMainStep) {
         if (fabsf(v) < yMainStep * 0.01f) continue;
@@ -829,28 +818,34 @@ void GrapherApp::switchTab(Tab t) {
             Serial.println("[GRAPHER] graphPanel (lazy)...");
             createGraphPanel();
             Serial.println("[GRAPHER] graphPanel done");
-            // First creation: don't replot yet — wait for layout pass
             if (_panelGraph) {
                 lv_obj_remove_flag(_panelGraph, LV_OBJ_FLAG_HIDDEN);
-                _grMode = GrMode::TRACE;  // Default to TRACE for immediate interaction
-                // Pick first valid function for trace
-                _traceFn = -1;
-                for (int i = 0; i < _numFuncs; ++i) {
-                    if (_funcs[i].valid) { _traceFn = i; break; }
-                }
+                // Default to TRACE only when a single-valued y=f(x) exists; with
+                // only implicit/inequality slots start in PAN so the graph never
+                // auto-enters a dead trace (no "y=nan", and ENTER won't pop the
+                // Calculate menu on a non-traceable curve).
+                _traceFn = firstTraceableFunc(0, +1);
+                _grMode  = (_traceFn >= 0) ? GrMode::TRACE : GrMode::NAVIGATE;
                 _traceX = (_xMin + _xMax) / 2.0f;
                 _plotDirty = true;
                 _snappedToPOI = false;
                 _snappedPOIIdx = -1;
                 _snapEscapeCount = 0;
+                // Force the LVGL layout pass NOW so _graphArea has real dimensions,
+                // then plot the curve immediately. Without this the first entry to
+                // the Graph tab — including via the "Plot graph" button — shows an
+                // empty graph (just axes) until the user presses a key, because
+                // replot() bails while lv_obj_get_height(_graphArea) is still 0.
+                // The trace cursor/POIs are intentionally left to the first trace
+                // key (unchanged behaviour), so only the missing curve is fixed.
+                lv_obj_update_layout(_panelGraph);
+                replot();
             }
         } else {
             lv_obj_remove_flag(_panelGraph, LV_OBJ_FLAG_HIDDEN);
-            _grMode = GrMode::TRACE;
-            _traceFn = -1;
-            for (int i = 0; i < _numFuncs; ++i) {
-                if (_funcs[i].valid) { _traceFn = i; break; }
-            }
+            // See lazy-create branch above: trace only a single-valued y=f(x).
+            _traceFn = firstTraceableFunc(0, +1);
+            _grMode  = (_traceFn >= 0) ? GrMode::TRACE : GrMode::NAVIGATE;
             _traceX = (_xMin + _xMax) / 2.0f;
             _plotDirty = true;
             _snappedToPOI = false;
@@ -1634,6 +1629,13 @@ float GrapherApp::evalAt(int idx, float x) {
     return _model.evalAt(_funcs[idx], x);
 }
 
+int GrapherApp::firstTraceableFunc(int from, int dir) const {
+    for (int i = from; i >= 0 && i < _numFuncs; i += dir) {
+        if (_funcs[i].isExplicit() && _funcs[i].visible) return i;
+    }
+    return -1;
+}
+
 // ── Adaptive sampling helpers (Phase B: Kandinsky streaming) ──────────────
 
 // Recursively subdivide segment and stream directly to GraphView buffer.
@@ -1646,8 +1648,15 @@ void GrapherApp::adaptSegStream(int fi,
                                 int depth, uint32_t color)
 {
     static constexpr float ADAPT_THRESHOLD_PX = 2.0f;
+    // Discontinuity guard: a segment whose endpoints span more than 3× the visible
+    // y-range is almost certainly straddling an asymptote (tan, 1/x, log near 0)
+    // rather than a steep-but-continuous arc. Recursion isolates the jump into a
+    // tiny sub-segment which this test then drops, so the asymptote no longer
+    // smears as a solid vertical line while the real branches on either side draw.
+    const float yJump = (_yMax - _yMin) * 3.0f;
     if (depth >= ADAPT_DEPTH) {
-        _view.drawFunctionSegment(wx0, wy0, wx1, wy1, color);
+        if (std::fabs(wy1 - wy0) <= yJump)
+            _view.drawFunctionSegment(wx0, wy0, wx1, wy1, color);
         return;
     }
 
@@ -1667,7 +1676,8 @@ void GrapherApp::adaptSegStream(int fi,
         return;
     }
 
-    _view.drawFunctionSegment(wx0, wy0, wx1, wy1, color);
+    if (std::fabs(wy1 - wy0) <= yJump)
+        _view.drawFunctionSegment(wx0, wy0, wx1, wy1, color);
 }
 
 // Sample function fi adaptively, streaming directly to the GraphView buffer.
@@ -1695,9 +1705,172 @@ void GrapherApp::sampleFuncAdaptive(int fi, uint32_t color) {
     }
 }
 
+// ── Implicit-equation plotting (marching squares) ─────────────────────────
+//
+// For an implicit relation F(x,y)=0 (stored as G(x,y)=lhs-rhs), sample G on a
+// coarse pixel grid over the viewport, then run marching squares per cell to
+// draw the G=0 contour. This handles multi-valued curves the single-valued
+// adaptive sampler cannot: x=y^2 (sideways parabola), x^2+y^2=1 (circle),
+// y=x^2+y^2 (a circle), etc. Cells touching a NaN corner (domain holes) are
+// skipped so discontinuities don't smear.
+void GrapherApp::plotImplicit(int fi, uint32_t color) {
+    const int W = GRAPH_CANVAS_W;
+    const int H = GRAPH_CANVAS_H;
+    if (W < 2 || H < 2) return;
+
+    // Grid step in pixels: smaller = smoother contour, more evals. 3px keeps
+    // curves visually clean while bounding work to ~(W/3)·(H/3) evaluations.
+    constexpr int CELL = 3;
+    const int nx = W / CELL + 1;
+    const int ny = H / CELL + 1;
+
+    // Sample G at each grid node (node n maps to pixel n*CELL, clamped to edge).
+    std::vector<float> g((size_t)nx * (size_t)ny);
+    auto pxAt = [&](int i) { return (i == nx - 1) ? (W - 1) : (i * CELL); };
+    auto pyAt = [&](int j) { return (j == ny - 1) ? (H - 1) : (j * CELL); };
+
+    for (int j = 0; j < ny; ++j) {
+        const float wy = _view.screenToWorldY(pyAt(j));
+        for (int i = 0; i < nx; ++i) {
+            const float wx = _view.screenToWorldX(pxAt(i));
+            g[(size_t)j * nx + i] = _model.evalImplicit(_funcs[fi], wx, wy);
+        }
+        if ((j & 3) == 0) yield();
+    }
+
+    // Linear-interpolate the zero crossing on an edge between two node values.
+    auto cross = [](float va, float vb, int a, int b) -> int {
+        float denom = va - vb;
+        float t = (denom != 0.0f) ? (va / denom) : 0.5f;
+        if (t < 0.0f) t = 0.0f;
+        if (t > 1.0f) t = 1.0f;
+        return a + (int)((float)(b - a) * t + 0.5f);
+    };
+
+    // ── Inequality region shading setup ──────────────────────────────────
+    // For an inequality slot we shade the solution half (G≷0) with a 50 %
+    // stipple of a lightened function colour, then draw the same G=0 boundary
+    // on top. Whole-inside cells fill from the grid corners (no extra evals);
+    // boundary cells feather per-pixel so the shade meets the curve crisply.
+    const grapher::Relation rel = _funcs[fi].relation;
+    const bool inequality = _funcs[fi].isInequality();
+    uint32_t tint = color;
+    if (inequality) {
+        const uint32_t r = (color >> 16) & 0xFF, gc = (color >> 8) & 0xFF, b = color & 0xFF;
+        auto mix = [](uint32_t c) { return (uint32_t)(c + (255 - c) * 55 / 100); };  // 55% → white
+        tint = (mix(r) << 16) | (mix(gc) << 8) | mix(b);
+    }
+
+    for (int j = 0; j + 1 < ny; ++j) {
+        for (int i = 0; i + 1 < nx; ++i) {
+            const float v00 = g[(size_t)j * nx + i];           // top-left  (A)
+            const float v10 = g[(size_t)j * nx + i + 1];       // top-right (B)
+            const float v11 = g[(size_t)(j + 1) * nx + i + 1]; // bot-right (C)
+            const float v01 = g[(size_t)(j + 1) * nx + i];     // bot-left  (D)
+
+            const int x0 = pxAt(i),     x1 = pxAt(i + 1);
+            const int y0 = pyAt(j),     y1 = pyAt(j + 1);
+
+            if (inequality) {
+                const int inCount = (grapher::regionHolds(rel, v00) ? 1 : 0) +
+                                    (grapher::regionHolds(rel, v10) ? 1 : 0) +
+                                    (grapher::regionHolds(rel, v11) ? 1 : 0) +
+                                    (grapher::regionHolds(rel, v01) ? 1 : 0);
+                const bool anyNan = std::isnan(v00) || std::isnan(v10) ||
+                                    std::isnan(v11) || std::isnan(v01);
+                if (inCount == 4 && !anyNan) {
+                    _view.fillRectStipple(x0, y0, x1, y1, tint);
+                } else if (inCount > 0 || anyNan) {
+                    // Mixed / domain-edge cell: test each pixel of the cell.
+                    for (int py = y0; py <= y1; ++py) {
+                        const float wy = _view.screenToWorldY(py);
+                        for (int px = x0; px <= x1; ++px) {
+                            const float wx = _view.screenToWorldX(px);
+                            if (grapher::regionHolds(rel, _model.evalImplicit(_funcs[fi], wx, wy)))
+                                _view.plotPixelStipple(px, py, tint);
+                        }
+                    }
+                }
+            }
+
+            // Boundary (G=0 contour) — skip cells touching a domain hole so
+            // discontinuities don't smear.
+            if (std::isnan(v00) || std::isnan(v10) ||
+                std::isnan(v11) || std::isnan(v01)) continue;
+
+            // Inside = G < 0. Build the 4-bit marching-squares case index.
+            const int idx = (v00 < 0.0f ? 1 : 0) | (v10 < 0.0f ? 2 : 0) |
+                            (v11 < 0.0f ? 4 : 0) | (v01 < 0.0f ? 8 : 0);
+            if (idx == 0 || idx == 15) continue;  // wholly in/out → no contour
+
+            // Edge crossing points (only computed where signs differ).
+            const int tX = cross(v00, v10, x0, x1), tY = y0;   // top    edge A-B
+            const int rX = x1, rY = cross(v10, v11, y0, y1);   // right  edge B-C
+            const int bX = cross(v01, v11, x0, x1), bY = y1;   // bottom edge D-C
+            const int lX = x0, lY = cross(v00, v01, y0, y1);   // left   edge A-D
+
+            switch (idx) {
+                case 1: case 14: _view.drawSegmentPx(tX, tY, lX, lY, color); break; // T-L
+                case 2: case 13: _view.drawSegmentPx(tX, tY, rX, rY, color); break; // T-R
+                case 3: case 12: _view.drawSegmentPx(lX, lY, rX, rY, color); break; // L-R
+                case 4: case 11: _view.drawSegmentPx(rX, rY, bX, bY, color); break; // R-B
+                case 6: case 9:  _view.drawSegmentPx(tX, tY, bX, bY, color); break; // T-B
+                case 7: case 8:  _view.drawSegmentPx(lX, lY, bX, bY, color); break; // L-B
+                case 5:  // saddle: A,C inside
+                    _view.drawSegmentPx(tX, tY, lX, lY, color);
+                    _view.drawSegmentPx(rX, rY, bX, bY, color);
+                    break;
+                case 10: // saddle: B,D inside
+                    _view.drawSegmentPx(tX, tY, rX, rY, color);
+                    _view.drawSegmentPx(lX, lY, bX, bY, color);
+                    break;
+                default: break;
+            }
+        }
+        if ((j & 3) == 0) yield();
+    }
+}
+
+// Equal-aspect ("square grid") enforcement. The curve is rasterised into a
+// GRAPH_CANVAS_W x GRAPH_CANVAS_H (320 x 143) pixel buffer; squareness means the
+// world span per pixel is identical on both axes: (xMax-xMin)/W == (yMax-yMin)/H.
+// We equalize to the LARGER units-per-pixel — i.e. EXPAND the axis that is more
+// zoomed-in — about the current centre, so nothing that was visible is cropped.
+// Idempotent: on an already-square viewport every value is unchanged. Calling it
+// once at the top of replot() makes EVERY render square (default view, pan, zoom,
+// autofit, zoom-box, trace recenter) and keeps the canonical _xMin.._yMax the
+// single source of truth for the renderer, trace cursor, POI markers and infobar.
+void GrapherApp::normalizeAspect() {
+    const float W = static_cast<float>(GRAPH_CANVAS_W);
+    const float H = static_cast<float>(GRAPH_CANVAS_H);
+    const float xRange = _xMax - _xMin;
+    const float yRange = _yMax - _yMin;
+    // Guard degenerate/corrupt viewports (zero/negative span, NaN, inf): leave
+    // the viewport untouched rather than produce NaN/inf bounds. Not reachable
+    // from current call sites, but keeps the helper self-contained & robust.
+    if (!std::isfinite(xRange) || !std::isfinite(yRange) ||
+        xRange <= 0.0f || yRange <= 0.0f || W <= 0.0f || H <= 0.0f) return;
+
+    const float uppX = xRange / W;
+    const float uppY = yRange / H;
+    const float upp  = (uppX > uppY) ? uppX : uppY;   // larger units-per-pixel
+    const float cx = (_xMin + _xMax) * 0.5f;
+    const float cy = (_yMin + _yMax) * 0.5f;
+    const float halfX = upp * W * 0.5f;
+    const float halfY = upp * H * 0.5f;
+    _xMin = cx - halfX; _xMax = cx + halfX;
+    _yMin = cy - halfY; _yMax = cy + halfY;
+}
+
 void GrapherApp::replot() {
     if (!_plotDirty || !_graphArea || !_graphCanvas) return;
     _plotDirty = false;
+
+    // Equal aspect: square the canonical viewport BEFORE it reaches the renderer
+    // (and the trace/POI consumers, which read the same _xMin.._yMax). Done above
+    // the layout-readiness gate below so the canonical viewport is kept square on
+    // EVERY replot intent, even the early-out frame before the buffer is sized.
+    normalizeAspect();
 
     int areaH = lv_obj_get_height(_graphArea);
     if (areaH < 2 || !_graphBuf) return;  // Layout not yet computed or buffer missing
@@ -1712,7 +1885,11 @@ void GrapherApp::replot() {
 
     for (int f = 0; f < _numFuncs && f < MAX_FUNCS; ++f) {
         if (!_funcs[f].valid || !_funcs[f].visible) continue;
-        sampleFuncAdaptive(f, _funcs[f].color);
+        if (_funcs[f].implicit) {
+            plotImplicit(f, _funcs[f].color);
+        } else {
+            sampleFuncAdaptive(f, _funcs[f].color);
+        }
     }
 
     if (_shadingActive) {
@@ -1798,14 +1975,21 @@ void GrapherApp::drawTraceCursor() {
 void GrapherApp::updateInfoBar() {
     if (!_infoLabel) return;
     char buf[64];
-    if (_grMode == GrMode::TRACE && _traceFn >= 0 && _traceFn < _numFuncs) {
+    if (_grMode == GrMode::TRACE && _traceFn >= 0 && _traceFn < _numFuncs &&
+        _funcs[_traceFn].isExplicit()) {
         float y = evalAt(_traceFn, _traceX);
-        if (_snappedToPOI && _snappedPOIIdx >= 0 && _snappedPOIIdx < _numPOIs) {
+        if (std::isnan(y) || std::isinf(y)) {
+            // Off-domain (e.g. tan asymptote, log of negative): never show "nan".
+            snprintf(buf, sizeof(buf), "Trace: x=%.3f  y=---  (off domain)", (double)_traceX);
+        } else if (_snappedToPOI && _snappedPOIIdx >= 0 && _snappedPOIIdx < _numPOIs) {
             snprintf(buf, sizeof(buf), "Trace [%s]: x=%.3f  y=%.3f",
                      _pois[_snappedPOIIdx].label, (double)_traceX, (double)y);
         } else {
             snprintf(buf, sizeof(buf), "Trace: x=%.3f  y=%.3f", (double)_traceX, (double)y);
         }
+    } else if (_grMode == GrMode::TRACE) {
+        // Defensive: trace somehow active with no single-valued target.
+        snprintf(buf, sizeof(buf), "Trace n/a: implicit/inequality");
     } else {
         snprintf(buf, sizeof(buf), "x:[%.2g,%.2g] y:[%.2g,%.2g]  ENTER=trace",
                  (double)_xMin, (double)_xMax, (double)_yMin, (double)_yMax);
@@ -2416,6 +2600,13 @@ void GrapherApp::handleExprEdit(const KeyEvent& ev) {
         // VPAM renders '=' via NodeOperator with OpKind::Eq (MathClass::REL for TeX spacing).
         case KeyCode::FREE_EQ: cur.insertVariable('='); break;
 
+        // ── Inequality operators (Grapher inecuaciones) ──
+        // Inserted as a plain NodeVariable carrying the '<'/'>' glyph; serializeNode
+        // emits the char verbatim, GraphModel::preCacheRPN splits on it and shades
+        // the solution region. e.g. "x^2+y^2<1", "y>x^2".
+        case KeyCode::LESS:    cur.insertVariable('<'); break;
+        case KeyCode::GREATER: cur.insertVariable('>'); break;
+
         // ── Constants ──
         case KeyCode::CONST_PI: cur.insertConstant(ConstKind::Pi); break;
         case KeyCode::CONST_E:  cur.insertConstant(ConstKind::E);  break;
@@ -2475,23 +2666,29 @@ void GrapherApp::handleToolbar(const KeyEvent& ev) {
             replot();
             updateInfoBar();
             break;
-        case 3: // Trace (was Calculate)
+        case 3: { // Trace (was Calculate)
+            // Only single-valued y=f(x) slots are traceable. If the user has only
+            // implicit equations / inequalities loaded, refuse trace gracefully
+            // instead of silently tracing an invisible y=0 line (no "y=nan").
+            int tf = firstTraceableFunc(0, +1);
+            if (tf < 0) {
+                if (_infoLabel)
+                    lv_label_set_text(_infoLabel, "Trace n/a: no y=f(x) (implicit/inequality)");
+                break;
+            }
             _focus = Focus::CONTENT;
             _grMode = GrMode::TRACE;
             _traceX = (_xMin + _xMax) / 2.0f;
             _snappedToPOI = false;
             _snappedPOIIdx = -1;
             _snapEscapeCount = 0;
-            // Pick first valid function
-            _traceFn = -1;
-            for (int i = 0; i < _numFuncs; ++i) {
-                if (_funcs[i].valid) { _traceFn = i; break; }
-            }
+            _traceFn = tf;
             // Pre-compute POIs now that we have a target function
-            if (_traceFn >= 0) computePOIs(_traceFn);
+            computePOIs(_traceFn);
             drawTraceCursor();
             updateInfoBar();
             break;
+        }
         }
         break;
     default:
@@ -2529,17 +2726,21 @@ void GrapherApp::handleGraphNav(const KeyEvent& ev) {
         break;
     }
     case KeyCode::ENTER: {
-        // Toggle Trace Mode
+        // Toggle Trace Mode — only if a single-valued y=f(x) exists. With only
+        // implicit/inequality slots, stay in pan mode and say so (no "y=nan").
+        int tf = firstTraceableFunc(0, +1);
+        if (tf < 0) {
+            if (_infoLabel)
+                lv_label_set_text(_infoLabel, "Trace n/a: no y=f(x) (implicit/inequality)");
+            return;
+        }
         _grMode = GrMode::TRACE;
         _traceX = (_xMin + _xMax) / 2.0f;
         _snappedToPOI = false;
         _snappedPOIIdx = -1;
         _snapEscapeCount = 0;
-        _traceFn = -1;
-        for (int i = 0; i < _numFuncs; ++i) {
-            if (_funcs[i].valid) { _traceFn = i; break; }
-        }
-        if (_traceFn >= 0) computePOIs(_traceFn);
+        _traceFn = tf;
+        computePOIs(_traceFn);
         drawTraceCursor();
         updateInfoBar();
         return;
@@ -2600,11 +2801,10 @@ void GrapherApp::handleGraphTrace(const KeyEvent& ev) {
         didSyncViewport = true;
         break;
     }
-    case KeyCode::UP:
-        // Switch to next function (keep same X)
-        for (int i = _traceFn + 1; i < _numFuncs; ++i) {
-            if (_funcs[i].valid) { _traceFn = i; break; }
-        }
+    case KeyCode::UP: {
+        // Switch to next traceable function (keep same X); skip implicit/inequality.
+        int nf = firstTraceableFunc(_traceFn + 1, +1);
+        if (nf >= 0) _traceFn = nf;
         if (_traceFn >= 0) computePOIs(_traceFn);
         _snappedToPOI = false;
         _snappedPOIIdx = -1;
@@ -2615,11 +2815,11 @@ void GrapherApp::handleGraphTrace(const KeyEvent& ev) {
             replot();
         }
         break;
-    case KeyCode::DOWN:
-        // Switch to prev function (keep same X)
-        for (int i = _traceFn - 1; i >= 0; --i) {
-            if (_funcs[i].valid) { _traceFn = i; break; }
-        }
+    }
+    case KeyCode::DOWN: {
+        // Switch to prev traceable function (keep same X); skip implicit/inequality.
+        int pf = firstTraceableFunc(_traceFn - 1, -1);
+        if (pf >= 0) _traceFn = pf;
         if (_traceFn >= 0) computePOIs(_traceFn);
         _snappedToPOI = false;
         _snappedPOIIdx = -1;
@@ -2630,6 +2830,7 @@ void GrapherApp::handleGraphTrace(const KeyEvent& ev) {
             replot();
         }
         break;
+    }
     case KeyCode::ENTER:
         // Open floating calculate menu (NumWorks-style)
         openCalcMenu();

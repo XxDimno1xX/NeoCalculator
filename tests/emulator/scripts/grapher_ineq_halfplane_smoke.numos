@@ -1,0 +1,28 @@
+# grapher_ineq_halfplane_smoke.numos — Phase 10D. Plot the linear inequality
+# 2x+3>4+4y. lhs="2x+3" rhs="4+4y" (implicit multiplication 2x, 4y), G=2x-1-4y,
+# solution G>0 i.e. y<(2x-1)/4 — a shaded half-plane below the boundary line.
+# Proves multi-term linear inequalities with y on the right shade correctly.
+# Warning-only (no golden); NOT CI-gated.
+log "ineq halfplane: start"
+wait 200
+open_app Grapher
+wait 60
+key down
+key enter
+# Type "2x+3>4+4y"
+key 2
+key x
+key +
+key 3
+key gt
+key 4
+key +
+key 4
+key y
+key enter
+wait 80
+key graph
+wait 120
+screenshot out/grapher_ineq_halfplane_smoke.ppm
+assert_app Grapher
+log "ineq halfplane: 2x+3>4+4y shaded"

@@ -106,6 +106,14 @@ enum class KeyCode : uint8_t {
 
     // ── Funciones avanzadas ──
     FACT,        // Factorización en primos (SHIFT + botón asignado)
+
+    // ── Operadores relacionales de desigualdad (Grapher) ──
+    // '<' y '>' para graficar inecuaciones (x^2+y^2<1, y>x^2, …). Se insertan
+    // como NodeVariable en el editor VPAM y se serializan tal cual; GraphModel
+    // los detecta antes que '=' y sombrea la región solución. Añadidos al FINAL
+    // del enum para no desplazar ningún valor existente.
+    LESS,        // <
+    GREATER,     // >
 };
 
 // ── Mapeo de tecla numérica → valor de dígito ────────────────────────────

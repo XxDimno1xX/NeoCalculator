@@ -1,0 +1,34 @@
+# grapher_ineq_disk_smoke.numos — Phase 10D. Plot the INEQUALITY x^2+y^2<1 and
+# screenshot it. Proves the new inequality renderer shades the solution region
+# (interior of the unit disk, G=lhs-rhs<0) with a stipple tint and draws the
+# G=0 boundary on top. Warning-only (no golden); NOT CI-gated.
+log "ineq disk: start"
+wait 200
+open_app Grapher
+wait 60
+key down
+key enter
+# Type "x^2+y^2<1"
+key x
+key ^
+key 2
+key right
+key +
+key y
+key ^
+key 2
+key right
+key lt
+key 1
+key enter
+wait 80
+key graph
+wait 60
+# Pan->zoom 3x centered on origin so the disk fills the view.
+key zoom
+key zoom
+key zoom
+wait 120
+screenshot out/grapher_ineq_disk_smoke.ppm
+assert_app Grapher
+log "ineq disk: x^2+y^2<1 shaded"

@@ -1,0 +1,28 @@
+# grapher_ineq_parabola_smoke.numos — Phase 10D. Plot y>x^2: the region ABOVE the
+# parabola. lhs="y" rhs="x^2" so G=y-x^2 and the solution is G>0. Proves an
+# inequality with y on the left and a function on the right shades correctly.
+# Warning-only (no golden); NOT CI-gated.
+log "ineq parabola: start"
+wait 200
+open_app Grapher
+wait 60
+key down
+key enter
+# Type "y>x^2"
+key y
+key gt
+key x
+key ^
+key 2
+key right
+key enter
+wait 80
+key graph
+wait 60
+# Zoom in 2x so the vertex region is large.
+key zoom
+key zoom
+wait 120
+screenshot out/grapher_ineq_parabola_smoke.ppm
+assert_app Grapher
+log "ineq parabola: y>x^2 shaded"

@@ -142,7 +142,13 @@ static inline int16_t assembledDelimiterWidthPx(
     if (!table) return glyphFallbackPx;
 
     auto assembly = DelimiterAssembler::assemble(geom.height, *table, fm.emSize);
-    expandDelimiterGeometryToAssembly(geom, assembly);
+    // Only grow the delimiter to the assembly's minimum renderable height when the
+    // font actually has the assembly glyphs. With the stix_math subset (which omits
+    // them) the renderer draws a vector delimiter that scales to any height, so the
+    // delimiter should hug its content instead of ballooning to the assembly floor.
+    if (g_delimiterAssemblyRenderable) {
+        expandDelimiterGeometryToAssembly(geom, assembly);
+    }
 
     int16_t width = assembly.valid ? assembly.widthPx : glyphFallbackPx;
     return width < 2 ? 2 : width;
@@ -914,7 +920,13 @@ const char* NodeVariable::label() const {
         case 'x': return "x";
         case 'y': return "y";
         case 'z': return "z";
+        // Relational operators entered as variable glyphs in the Grapher (for
+        // equations / inequalities). Without these explicit cases '<' and '>'
+        // fell through to the default and rendered as a literal "?" in the
+        // expression rows (the bug Phase 10E fixes). '=' was already handled.
         case '=': return "=";
+        case '<': return "<";
+        case '>': return ">";
         default:  return "?";
     }
 }

@@ -1,0 +1,26 @@
+# grapher_aspect_sideways_parabola_smoke.numos — Phase 10C. Plot x = y^2, a
+# parabola opening to the RIGHT. Equal-aspect rendering must keep its geometry
+# correct (symmetric about the x-axis, vertex at origin). Warning-only.
+log "aspect sideways parabola: start"
+wait 200
+open_app Grapher
+wait 60
+key down
+key enter
+# Type "x=y^2"
+key x
+key =
+key y
+key ^
+key 2
+key enter
+wait 80
+key graph
+wait 80
+key ac
+key zoom
+key zoom
+wait 150
+screenshot out/grapher_aspect_sideways_parabola_smoke.ppm
+assert_app Grapher
+log "aspect sideways parabola: x=y^2 plotted"

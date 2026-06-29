@@ -12,6 +12,11 @@
 
 namespace vpam {
 
+// Default false: the bundled stix_math subset omits the delimiter assembly
+// glyphs, so delimiters hug their content and the renderer draws a vector
+// fallback. The renderer flips this true if it probes the assembly glyphs in.
+bool g_delimiterAssemblyRenderable = false;
+
 int16_t DelimiterAssembler::duToPxCeil(int16_t du, int16_t emSizePx) {
     const int32_t num = static_cast<int32_t>(du) * emSizePx + kStixMathUPM - 1;
     return static_cast<int16_t>(num / kStixMathUPM);

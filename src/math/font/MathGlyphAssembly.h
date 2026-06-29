@@ -25,6 +25,16 @@
 namespace vpam {
 
 // ════════════════════════════════════════════════════════════════════════════
+// Whether the active math font actually contains the extensible-delimiter
+// assembly glyphs (U+239B..U+23B3, etc.). The NumOS stix_math subset omits
+// them, so by default delimiters must NOT be inflated to the assembly's minimum
+// renderable height during layout (the renderer draws a vector fallback that
+// scales to the content height instead). The renderer probes the font once at
+// init and flips this to true only when the assembly glyphs are present.
+// ════════════════════════════════════════════════════════════════════════════
+extern bool g_delimiterAssemblyRenderable;
+
+// ════════════════════════════════════════════════════════════════════════════
 // DelimiterAssembler — Pure-static glyph assembly engine
 //
 // Designed for zero heap allocation: all results fit in stack-allocated

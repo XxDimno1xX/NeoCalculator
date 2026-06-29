@@ -1,0 +1,30 @@
+# grapher_ineq_exterior_smoke.numos — Phase 10D. Plot x^2+y^2>1: the solution is
+# the EXTERIOR of the unit circle (G=lhs-rhs>0). Proves the region direction flips
+# with the operator. Warning-only (no golden); NOT CI-gated.
+log "ineq exterior: start"
+wait 200
+open_app Grapher
+wait 60
+key down
+key enter
+key x
+key ^
+key 2
+key right
+key +
+key y
+key ^
+key 2
+key right
+key gt
+key 1
+key enter
+wait 80
+key graph
+wait 60
+key zoom
+key zoom
+wait 120
+screenshot out/grapher_ineq_exterior_smoke.ppm
+assert_app Grapher
+log "ineq exterior: x^2+y^2>1 shaded"

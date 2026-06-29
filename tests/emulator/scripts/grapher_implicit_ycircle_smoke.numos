@@ -1,0 +1,33 @@
+# grapher_implicit_ycircle_smoke.numos — Phase 10B. Plot the IMPLICIT equation
+# y = x^2 + y^2. The RHS references y, so although the LHS is "y" this is NOT an
+# explicit y=f(x): it is the circle x^2 + (y-0.5)^2 = 0.25 (radius 0.5, centre
+# (0, 0.5)). Proves the classifier sends "y = <expr with y>" to the implicit
+# renderer rather than the fast sampler. Warning-only (no golden).
+log "implicit y-circle: start"
+wait 200
+open_app Grapher
+wait 60
+key down
+key enter
+# Type "y=x^2+y^2"
+key y
+key =
+key x
+key ^
+key 2
+key right
+key +
+key y
+key ^
+key 2
+key enter
+wait 80
+key graph
+wait 80
+key zoom
+key zoom
+key zoom
+wait 150
+screenshot out/grapher_implicit_ycircle_smoke.ppm
+assert_app Grapher
+log "implicit y-circle: y=x^2+y^2 plotted"

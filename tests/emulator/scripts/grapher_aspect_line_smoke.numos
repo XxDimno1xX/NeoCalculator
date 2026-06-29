@@ -1,0 +1,31 @@
+# grapher_aspect_line_smoke.numos — Phase 10C. Plot y=x at the default (now
+# equal-aspect) view. On a square grid y=x must render at a visual 45 degrees,
+# which is the simplest proof that 1 unit in x equals 1 unit in y in pixels.
+# Also exercises trace (ENTER) on an explicit function without crashing.
+# Warning-only (screenshot, no golden).
+log "aspect line: start"
+wait 200
+open_app Grapher
+wait 60
+key down
+key enter
+key y
+key =
+key x
+key enter
+wait 80
+key graph
+wait 80
+# flush deferred first replot via a neutral nav key, then screenshot
+key ac
+key 0
+wait 120
+screenshot out/grapher_aspect_line_smoke.ppm
+# exercise trace on an explicit function (must not crash)
+key enter
+wait 20
+key right
+key right
+wait 40
+assert_app Grapher
+log "aspect line: y=x plotted + traced"

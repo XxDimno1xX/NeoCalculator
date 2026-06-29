@@ -75,6 +75,28 @@ public:
     /// and Bresenham rasterization directly to the buffer
     void drawFunctionSegment(float wx0, float wy0, float wx1, float wy1, uint32_t rgbColor);
 
+    /// Draw a line segment given in SCREEN (pixel) coordinates. Used by the
+    /// implicit-equation marching-squares renderer, which interpolates contour
+    /// crossings in pixel space. Clipped to the buffer.
+    void drawSegmentPx(int x0, int y0, int x1, int y1, uint32_t rgbColor);
+
+    /// Set one buffer pixel (screen coords) to rgbColor, bounds-checked.
+    void plotPixel(int x, int y, uint32_t rgbColor);
+
+    /// Inequality region shading. Fills the inclusive pixel rectangle
+    /// [x0..x1]×[y0..y1] with a 50 % checkerboard ("stipple") of rgbColor so the
+    /// grid/axes show through, NumWorks-style. The checkerboard parity is global
+    /// ((x+y)&1), so adjacent whole-cell fills and per-pixel fills tile seamlessly.
+    void fillRectStipple(int x0, int y0, int x1, int y1, uint32_t rgbColor);
+
+    /// Single stipple pixel honoring the same global parity as fillRectStipple;
+    /// used to feather inequality shading inside boundary cells.
+    void plotPixelStipple(int x, int y, uint32_t rgbColor);
+
+    /// Buffer dimensions in pixels (for callers that grid over the viewport).
+    int bufW() const { return _bufW; }
+    int bufH() const { return _bufH; }
+
     /// Rasterize function curve into buffer (sample-based adaptive curve)
     void drawFunctionCurve(const std::vector<float>& xSamples,
                            const std::vector<float>& ySamples,
@@ -96,6 +118,12 @@ public:
 
     /// Draw intersection marker: small circle + label at (xInt, yInt)
     void drawIntersectionMarker(float xInt, float yInt, uint32_t rgbColor);
+
+    /// Shared "nice" grid step (1/2/5 × 10^n) for a given world-units-per-pixel,
+    /// targeting ~48 px spacing. Used by BOTH the grid rasterizer (drawGrid) and
+    /// the on-screen tick labels (GrapherApp) so labels land exactly on grid lines
+    /// and — because the viewport is equal-aspect — cells stay visually square.
+    static float squareGridStep(float unitsPerPx);
 
     /// Utility: convert world coords to screen pixel coords
     int worldToScreenX(float wx) const;

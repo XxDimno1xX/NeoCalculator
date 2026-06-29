@@ -1,0 +1,44 @@
+# grapher_trace_domain_smoke.numos — Phase 10D. Trace robustness across domain
+# holes: f0 tan(x) (asymptotes), f1 ln(x) (undefined for x<=0). Traces tan near
+# the origin, switches to ln and traces into x<0. Proves the trace readout shows
+# "y=--- (off domain)" instead of a literal "nan" when the function is undefined,
+# and that asymptotes no longer smear as solid vertical lines. Warning-only.
+log "trace domain: start"
+wait 200
+open_app Grapher
+wait 60
+key down
+key enter
+key tan
+key x
+key right
+key enter
+wait 30
+key down
+key enter
+key ln
+key x
+key right
+key enter
+wait 60
+key graph
+wait 60
+key enter
+wait 20
+key left
+key left
+key left
+wait 20
+screenshot out/grapher_trace_domain_tan.ppm
+key up
+wait 20
+key left
+key left
+key left
+key left
+key left
+key left
+wait 20
+screenshot out/grapher_trace_domain_ln.ppm
+assert_app Grapher
+log "trace domain: off-domain handled"

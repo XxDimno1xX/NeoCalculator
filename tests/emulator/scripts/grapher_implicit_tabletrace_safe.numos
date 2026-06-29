@@ -1,0 +1,45 @@
+# grapher_implicit_tabletrace_safe.numos — Phase 10C. An implicit relation has no
+# single y=f(x), so trace/table can't evaluate it. This proves they FAIL GRACEFULLY
+# (no crash/hang): enter x^2+y^2=1, enter Trace on the Graph tab, switch to the
+# Table tab, then return HOME — all without hanging. Golden-free, assert-only.
+log "implicit table/trace safety: start"
+wait 200
+open_app Grapher
+wait 60
+key down
+key enter
+key x
+key ^
+key 2
+key right
+key +
+key y
+key ^
+key 2
+key right
+key =
+key 1
+key enter
+wait 80
+key graph
+wait 80
+# Trace mode on an implicit curve (evalAt returns NaN -> cursor hidden, no crash)
+key enter
+wait 20
+key right
+key right
+wait 20
+assert_app Grapher
+# Switch to the Table tab (implicit -> blank/NaN cells, must not crash)
+key table
+wait 80
+assert_app Grapher
+key down
+key down
+wait 40
+assert_app Grapher
+# Return to launcher and re-enter (deferred-teardown no-hang)
+key home
+wait 80
+assert_app Menu
+log "implicit table/trace safety: survived trace+table+home"

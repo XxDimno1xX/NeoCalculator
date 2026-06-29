@@ -1,0 +1,55 @@
+# grapher_mixed_relations_smoke.numos — Phase 10D. Three slots of different kinds
+# in one grapher: f0 sin(x) (explicit), f1 x^2+y^2=4 (implicit circle), f2
+# x^2+y^2<1 (inequality disk). Screenshots the layered Graph, then the Table.
+# Proves: (a) explicit curve + implicit contour + shaded inequality region all
+# render together; (b) the Table shows real values for the explicit column and a
+# graceful "--" for the implicit/inequality columns (never "nan"). Warning-only.
+log "mixed relations: start"
+wait 200
+open_app Grapher
+wait 60
+key down
+key enter
+key sin
+key x
+key right
+key enter
+wait 30
+key down
+key enter
+key x
+key ^
+key 2
+key right
+key +
+key y
+key ^
+key 2
+key right
+key =
+key 4
+key enter
+wait 30
+key down
+key enter
+key x
+key ^
+key 2
+key right
+key +
+key y
+key ^
+key 2
+key right
+key lt
+key 1
+key enter
+wait 60
+key graph
+wait 120
+screenshot out/grapher_mixed_relations_graph.ppm
+key table
+wait 120
+screenshot out/grapher_mixed_relations_table.ppm
+assert_app Grapher
+log "mixed relations: graph+table ok"

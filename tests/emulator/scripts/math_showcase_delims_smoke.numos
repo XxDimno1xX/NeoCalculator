@@ -1,0 +1,24 @@
+# math_showcase_delims_smoke.numos — Phase 10B. Cycle the Math Showcase to the
+# cases with TALL delimiters — (2/3)^2 (index 4) and (1 + 1/2)/(x + 3) (index 6) —
+# where the parenthesis height exceeds the single bundled stix_math size variant
+# and the vector delimiter fallback (MathRenderer::drawStrokedDelimiter) renders.
+# Used to visually confirm the delimiters look clean / font-quality, not jagged.
+# Warning-only (screenshots, no golden).
+log "showcase delims: start"
+wait 200
+open_app MathShowcase
+wait 60
+# RIGHT x4 -> case 4: (2/3)^2
+key right
+key right
+key right
+key right
+wait 20
+screenshot out/showcase_case_2over3_sq.ppm
+# RIGHT x2 -> case 6: (1 + 1/2)/(x + 3)
+key right
+key right
+wait 20
+screenshot out/showcase_case_nested.ppm
+assert_app MathShowcase
+log "showcase delims: captured"

@@ -331,41 +331,12 @@ static KeyCode mapSdlToKeyCode(SDL_Keycode sym)
         case SDLK_TAB:          return KeyCode::ALPHA;
         case SDLK_INSERT:       return KeyCode::STO;    // Store (Phase 3A)
 
-        // Dígitos (fila superior del teclado)
-        case SDLK_0:
-        case SDLK_KP_0:         return KeyCode::NUM_0;
-        case SDLK_1:
-        case SDLK_KP_1:         return KeyCode::NUM_1;
-        case SDLK_2:
-        case SDLK_KP_2:         return KeyCode::NUM_2;
-        case SDLK_3:
-        case SDLK_KP_3:         return KeyCode::NUM_3;
-        case SDLK_4:
-        case SDLK_KP_4:         return KeyCode::NUM_4;
-        case SDLK_5:
-        case SDLK_KP_5:         return KeyCode::NUM_5;
-        case SDLK_6:
-        case SDLK_KP_6:         return KeyCode::NUM_6;
-        case SDLK_7:
-        case SDLK_KP_7:         return KeyCode::NUM_7;
-        case SDLK_8:
-        case SDLK_KP_8:         return KeyCode::NUM_8;
-        case SDLK_9:
-        case SDLK_KP_9:         return KeyCode::NUM_9;
-
-        // Operadores
-        case SDLK_KP_PLUS:      return KeyCode::ADD;
-        case SDLK_KP_MINUS:     return KeyCode::SUB;
-        case SDLK_KP_MULTIPLY:
-        case SDLK_ASTERISK:     return KeyCode::MUL;
-        case SDLK_KP_DIVIDE:
-        case SDLK_SLASH:        return KeyCode::DIV;
-        case SDLK_KP_PERIOD:    return KeyCode::DOT;
-        case SDLK_CARET:        return KeyCode::POW;
-
-        // Paréntesis (necesitan SHIFT en teclado US)
-        case SDLK_LEFTPAREN:    return KeyCode::LPAREN;
-        case SDLK_RIGHTPAREN:   return KeyCode::RPAREN;
+        // Dígitos, operadores, paréntesis, '=', '.', '^', '+', '-' y demás
+        // CARACTERES imprimibles ya NO se mapean aquí: los entrega SDL_TEXTINPUT
+        // con el símbolo resuelto por la distribución del SO (ver mapTextChar y
+        // processSdlEvents). Mapearlos también por keysym duplicaría la inserción
+        // (KEYDOWN + TEXTINPUT). KEYDOWN conserva solo navegación, control,
+        // modificadores y los atajos de LETRA (s=SIN, p=POW, f=fracción, …).
 
         // Funciones y constantes (teclas de letras)
         case SDLK_s:            return KeyCode::SIN;
@@ -406,21 +377,59 @@ static KeyCode mapSdlToKeyCode(SDL_Keycode sym)
         // vivo dedicada (iba a FREE_EQ). '/' sigue siendo equivalente.
         case SDLK_f:            return KeyCode::DIV;
 
-        // S⇔D y especiales (F5 y '=' siguen en FREE_EQ; 'f' ya no).
-        case SDLK_F5:
-        case SDLK_EQUALS:       return KeyCode::FREE_EQ;
-
-        // Periodo: punto normal
-        case SDLK_PERIOD:       return KeyCode::DOT;
-
-        // +/- en fila principal
-        case SDLK_PLUS:         return KeyCode::ADD;
-        case SDLK_MINUS:        return KeyCode::SUB;
+        // S⇔D: F5 sigue siendo FREE_EQ aquí (no es un carácter). El '=' literal lo
+        // entrega SDL_TEXTINPUT (mapTextChar) como FREE_EQ, así que SDLK_EQUALS ya
+        // no se mapea por keysym (evita doble inserción y respeta la distribución).
+        case SDLK_F5:           return KeyCode::FREE_EQ;
 
         // n = NEGATE
         case SDLK_n:            return KeyCode::NEGATE;
 
         default: return KeyCode::NONE;
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// mapTextChar — Traduce un CARÁCTER imprimible (de SDL_TEXTINPUT) a KeyCode
+//
+// SDL_TEXTINPUT entrega el carácter YA resuelto por la distribución de teclado
+// del SO, con SHIFT/AltGr/dead-keys aplicados. Así no "fingimos" SHIFT: si en el
+// teclado del usuario «*» se obtiene con Shift+«+» (típico en teclados ES), SDL
+// nos da directamente '*' y aquí lo convertimos en MUL. Lo mismo para ( ) = etc.
+//
+// Solo se traducen los caracteres que la calculadora entiende (dígitos y los
+// símbolos matemáticos); las LETRAS se dejan a mapSdlToKeyCode por keysym (son
+// atajos de función: s=SIN, p=POW, …), por eso aquí devuelven KeyCode::NONE y el
+// TEXTINPUT correspondiente se ignora sin duplicar nada.
+// ════════════════════════════════════════════════════════════════════════════
+static KeyCode mapTextChar(char c)
+{
+    switch (c) {
+        case '0': return KeyCode::NUM_0;
+        case '1': return KeyCode::NUM_1;
+        case '2': return KeyCode::NUM_2;
+        case '3': return KeyCode::NUM_3;
+        case '4': return KeyCode::NUM_4;
+        case '5': return KeyCode::NUM_5;
+        case '6': return KeyCode::NUM_6;
+        case '7': return KeyCode::NUM_7;
+        case '8': return KeyCode::NUM_8;
+        case '9': return KeyCode::NUM_9;
+        case '+': return KeyCode::ADD;
+        case '-': return KeyCode::SUB;
+        case '*': return KeyCode::MUL;
+        case '/': return KeyCode::DIV;
+        case '^': return KeyCode::POW;
+        case '=': return KeyCode::FREE_EQ;
+        case '(': return KeyCode::LPAREN;
+        case ')': return KeyCode::RPAREN;
+        case '.': return KeyCode::DOT;
+        // Desigualdades (Grapher). SDL_TEXTINPUT entrega '<'/'>' ya resueltos por
+        // la distribución (en US son Shift+, y Shift+.), así que el keysym crudo no
+        // se mapea — solo aquí — evitando doble inserción.
+        case '<': return KeyCode::LESS;
+        case '>': return KeyCode::GREATER;
+        default:  return KeyCode::NONE;
     }
 }
 
@@ -446,6 +455,11 @@ static KeyCode scriptNameToKeyCode(const std::string& raw)
     if (raw == "(") return KeyCode::LPAREN;
     if (raw == ")") return KeyCode::RPAREN;
     if (raw == "=") return KeyCode::FREE_EQ;
+    // Desigualdades del Grapher (Phase 10D). KeyCode::LESS/GREATER lo consume
+    // GrapherApp::handleExprEdit (insertVariable '<'/'>'); GraphModel sombrea la
+    // región. Alias alfabéticos lt/less y gt/greater para scripts .numos.
+    if (raw == "<") return KeyCode::LESS;
+    if (raw == ">") return KeyCode::GREATER;
 
     // Digitos sueltos. OJO: NUM_0..NUM_9 NO son contiguos en el enum
     // (KeyCodes.h:68-77), asi que NO se puede hacer aritmetica de enum.
@@ -532,6 +546,10 @@ static KeyCode scriptNameToKeyCode(const std::string& raw)
     //     era alcanzable por el caso compartido de ADD ("+") -> ahora tiene token.
     if (n == "logbase" || n == "log_n")       return KeyCode::LOG_BASE; // KeyCodes.h:86
     if (n == "zoom")                          return KeyCode::ZOOM;     // KeyCodes.h:62
+
+    // Phase 10D: operadores de desigualdad para inecuaciones del Grapher.
+    if (n == "lt" || n == "less")             return KeyCode::LESS;     // KeyCodes.h LESS
+    if (n == "gt" || n == "greater")          return KeyCode::GREATER;  // KeyCodes.h GREATER
 
     return KeyCode::NONE;
 }
@@ -752,6 +770,28 @@ static void processSdlEvents()
             return;
         }
 
+        // ── Entrada de TEXTO (SDL_TEXTINPUT) ────────────────────────────────
+        // El SO ya resolvió la distribución de teclado, SHIFT, AltGr y dead-keys:
+        // aquí llega el CARÁCTER final. Traducimos dígitos y símbolos matemáticos
+        // (+ - * / ^ = ( ) .) a su KeyCode y los despachamos como una pulsación.
+        // Así Shift+«tecla» produce el símbolo que el teclado del usuario asocia a
+        // esa combinación (p. ej. en un teclado ES, Shift+«+» → «*»), sin que el
+        // emulador finja SHIFT. No hay RELEASE de texto, pero las apps lo ignoran
+        // para estas teclas; la auto-repetición del SO reemite TEXTINPUT (PRESS),
+        // que es justo lo deseado al mantener pulsada una tecla.
+        if (ev.type == SDL_TEXTINPUT) {
+            for (const char* p = ev.text.text; *p; ++p) {
+                const KeyCode tkc = mapTextChar(*p);
+                if (tkc == KeyCode::NONE) continue;  // letras/otros → vía keysym
+                if (!g_opts.quiet) {
+                    std::printf("[KEY] TEXT='%c' code=%d action=PRESS\n",
+                                *p, static_cast<int>(tkc));
+                }
+                dispatchKey(tkc, KeyAction::PRESS, true);
+            }
+            continue;
+        }
+
         // Procesar pulsacion (KEYDOWN) Y liberacion (KEYUP). Antes solo KEYDOWN.
         if (ev.type != SDL_KEYDOWN && ev.type != SDL_KEYUP) continue;
 
@@ -761,8 +801,12 @@ static void processSdlEvents()
 
         KeyCode kc = mapSdlToKeyCode(sym);
         if (kc == KeyCode::NONE) {
-            // Log de teclas sin mapear (modo debug nativo, silenciable).
-            if (!g_opts.quiet) {
+            // Los CARACTERES imprimibles (dígitos/símbolos) ya no se mapean por
+            // keysym: los entrega SDL_TEXTINPUT (arriba). Para no llenar el log de
+            // "sin-mapear" en cada dígito, solo se reporta si la tecla NO es un
+            // carácter imprimible (p. ej. una F-key o tecla multimedia real).
+            const bool printable = (sym >= 0x20 && sym < 0x7F);
+            if (!g_opts.quiet && !printable) {
                 std::printf("[KEY] sin-mapear SDL=%s (%s)\n",
                             SDL_GetKeyName(sym), isDown ? "down" : "up");
             }
@@ -1862,6 +1906,13 @@ int main(int argc, char** argv)
         SDL_Quit();
         return 1;
     }
+
+    // Activa la entrada de TEXTO de SDL: además de SDL_KEYDOWN (keysyms físicos)
+    // recibimos SDL_TEXTINPUT con el CARÁCTER ya resuelto por la distribución de
+    // teclado del SO. Así los símbolos de la fila numérica (* ( ) = + - / ^)
+    // llegan tal y como los teclea el usuario en SU distribución (p. ej. en un
+    // teclado español Shift+«+» da «*»), sin que el emulador "finja" SHIFT.
+    SDL_StartTextInput();
 
     g_renderer = SDL_CreateRenderer(g_window, -1,
                                     SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);

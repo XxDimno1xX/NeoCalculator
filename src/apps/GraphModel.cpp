@@ -51,6 +51,21 @@ static std::string normalizeLeadingUnary(const char* rhs) {
     return out;
 }
 
+// Trim leading/trailing ASCII whitespace from a std::string in place.
+static std::string trimSpaces(const std::string& s) {
+    size_t a = 0, b = s.size();
+    while (a < b && (s[a] == ' ' || s[a] == '\t')) ++a;
+    while (b > a && (s[b - 1] == ' ' || s[b - 1] == '\t')) --b;
+    return s.substr(a, b - a);
+}
+
+// True when the trimmed string is exactly the single variable y/Y — i.e. the
+// side is the plain dependent variable, marking an explicit "y = f(x)" form.
+static bool isJustY(const std::string& s) {
+    std::string t = trimSpaces(s);
+    return t.size() == 1 && (t[0] == 'y' || t[0] == 'Y');
+}
+
 const char* GraphModel::getExprRHS(const char* text) {
     if (!text) return nullptr;
     // An explicit "lhs = rhs" plots the rhs; a bare expression (no '=') is
@@ -63,34 +78,142 @@ const char* GraphModel::getExprRHS(const char* text) {
     return rhs;
 }
 
-// ── preCacheRPN ────────────────────────────────────────────────────────────
+// ── compileExpr / referencesY ──────────────────────────────────────────────
 
+bool GraphModel::compileExpr(const char* expr, std::vector<Token>& outRpn) {
+    outRpn.clear();
+    if (!expr || !*expr) return false;
+    std::string norm = normalizeLeadingUnary(expr);
+    TokenizeResult tr = _tok.tokenize(norm.c_str());
+    if (!tr.ok) return false;
+    ParseResult pr = _par.toRPN(tr.tokens);
+    if (!pr.ok) return false;
+    outRpn = pr.outputRPN;
+    return true;
+}
+
+bool GraphModel::referencesY(const char* expr) {
+    if (!expr) return false;
+    TokenizeResult tr = _tok.tokenize(expr);
+    if (!tr.ok) {
+        // Tokenize failed — fall back to a literal scan so we still classify.
+        for (const char* p = expr; *p; ++p)
+            if (*p == 'y' || *p == 'Y') return true;
+        return false;
+    }
+    for (const Token& t : tr.tokens) {
+        if (t.type == TokenType::Identifier &&
+            (t.text == "y" || t.text == "Y")) return true;
+    }
+    return false;
+}
+
+// ── preCacheRPN ────────────────────────────────────────────────────────────
+//
+// Classifies the expression as EXPLICIT (single-valued y = f(x), drawn by the
+// fast adaptive sampler) or IMPLICIT (a general relation F(x,y) = 0, drawn by
+// marching squares over G(x,y) = lhs - rhs). Classification:
+//
+//   no '='            → explicit y = <expr>      unless <expr> references y,
+//                       in which case implicit G = <expr> (= 0).
+//   "y" = rhs         → explicit y = rhs          (when rhs has no y)
+//   lhs = "y"         → explicit y = lhs          (when lhs has no y)
+//   anything else     → implicit  G = lhs - rhs   (= 0)
+//
+// So "y=x^2", bare "x"/"2x"/"sin(x)", and the y= templates stay on the fast
+// path; "x=y^2", "x^2+y^2=1", and "y=x^2+y^2" become implicit contours.
 void GraphModel::preCacheRPN(CartesianFunction& fn) {
-    fn.rpnValid = false;
+    fn.rpnValid  = false;
+    fn.rpnLValid = false;
+    fn.implicit  = false;
+    fn.relation  = Relation::Equal;
     fn.rpn.clear();
+    fn.rpnL.clear();
     fn.valid = false;
 
     if (fn.len <= 0) return;
 
-    const char* rhs = getExprRHS(fn.text);
-    if (!rhs) return;
+    // ── Inequalities (checked first, before '=') ──────────────────────────
+    // A single '<' or '>' (optionally followed by '=') splits the expression
+    // into lhs/rhs. We compile G(x,y)=lhs-rhs exactly like an implicit equation
+    // and remember the comparison direction; the renderer shades the half-plane
+    // where the relation holds and draws the G=0 boundary. `implicit` is set so
+    // the y=f(x) consumers (trace/table) treat the slot as multi-valued.
+    for (const char* p = fn.text; *p; ++p) {
+        if (*p != '<' && *p != '>') continue;
+        const bool orEqual = (p[1] == '=');
+        if (*p == '<') fn.relation = orEqual ? Relation::LessEqual    : Relation::Less;
+        else           fn.relation = orEqual ? Relation::GreaterEqual : Relation::Greater;
+        std::string lhs = trimSpaces(std::string(fn.text, p - fn.text));
+        std::string rhs = trimSpaces(std::string(p + (orEqual ? 2 : 1)));
+        bool okL = !lhs.empty() && compileExpr(lhs.c_str(), fn.rpnL);
+        bool okR = !rhs.empty() && compileExpr(rhs.c_str(), fn.rpn);
+        fn.rpnLValid = okL;
+        fn.rpnValid  = okR;
+        if (!okL && !okR) { fn.relation = Relation::Equal; return; }  // both sides invalid
+        fn.implicit = true;
+        fn.valid    = true;
+        return;
+    }
 
-    std::string expr = normalizeLeadingUnary(rhs);
-    TokenizeResult tr = _tok.tokenize(expr.c_str());
-    if (!tr.ok) return;
+    const char* eq = strchr(fn.text, '=');
 
-    ParseResult pr = _par.toRPN(tr.tokens);
-    if (!pr.ok) return;
+    if (!eq) {
+        // Bare expression. Plain x-function unless it mentions y.
+        const char* rhs = getExprRHS(fn.text);
+        if (!rhs) return;
+        if (!referencesY(rhs)) {
+            if (!compileExpr(rhs, fn.rpn)) return;
+            fn.rpnValid = true;
+            fn.valid    = true;
+            return;
+        }
+        // Implicit contour with an implicit "= 0": G = <expr>.
+        if (!compileExpr(rhs, fn.rpnL)) return;
+        fn.rpnLValid = true;
+        fn.implicit  = true;
+        fn.valid     = true;
+        return;
+    }
 
-    fn.rpn = pr.outputRPN;
-    fn.rpnValid = true;
-    fn.valid = true;
+    std::string lhs = trimSpaces(std::string(fn.text, eq - fn.text));
+    std::string rhs = trimSpaces(std::string(eq + 1));
+    if (rhs.empty() && lhs.empty()) return;
+
+    const bool lhsHasY = referencesY(lhs.c_str());
+    const bool rhsHasY = referencesY(rhs.c_str());
+
+    // Explicit "y = f(x)" (either orientation), when the function side has no y.
+    if (isJustY(lhs) && !rhsHasY) {
+        if (!compileExpr(rhs.c_str(), fn.rpn)) return;
+        fn.rpnValid = true;
+        fn.valid    = true;
+        return;
+    }
+    if (isJustY(rhs) && !lhsHasY) {
+        if (!compileExpr(lhs.c_str(), fn.rpn)) return;
+        fn.rpnValid = true;
+        fn.valid    = true;
+        return;
+    }
+
+    // General implicit relation: G(x,y) = lhs - rhs.
+    bool okL = compileExpr(lhs.c_str(), fn.rpnL);
+    bool okR = compileExpr(rhs.c_str(), fn.rpn);
+    fn.rpnLValid = okL;
+    fn.rpnValid  = okR;
+    if (!okL && !okR) return;   // neither side compiled → invalid
+    fn.implicit = true;
+    fn.valid    = true;
 }
 
 // ── evalAt ─────────────────────────────────────────────────────────────────
 
 float GraphModel::evalAt(CartesianFunction& fn, float x) {
     if (!fn.valid) return NAN;
+    // Implicit relations are multi-valued in y; they have no single y=f(x).
+    // Trace/table/auto-fit call evalAt and gracefully skip a NAN result.
+    if (fn.implicit) return NAN;
 
     _vars.setVar('x', (double)x);
 
@@ -111,6 +234,30 @@ float GraphModel::evalAt(CartesianFunction& fn, float x) {
     if (!pr.ok) return NAN;
     EvalResult er = _eval.evaluateRPN(pr.outputRPN, _vars);
     return er.ok ? (float)er.value : NAN;
+}
+
+// ── evalImplicit: G(x,y) = lhs(x,y) - rhs(x,y) ─────────────────────────────
+
+float GraphModel::evalImplicit(CartesianFunction& fn, float x, float y) {
+    if (!fn.implicit) return NAN;
+
+    _vars.setVar('x', (double)x);
+    _vars.setVar('y', (double)y);
+
+    double lv = 0.0, rv = 0.0;
+    if (fn.rpnLValid && !fn.rpnL.empty()) {
+        EvalResult er = _eval.evaluateRPN(fn.rpnL, _vars);
+        if (!er.ok) return NAN;
+        lv = er.value;
+    }
+    if (fn.rpnValid && !fn.rpn.empty()) {
+        EvalResult er = _eval.evaluateRPN(fn.rpn, _vars);
+        if (!er.ok) return NAN;
+        rv = er.value;
+    }
+    double g = lv - rv;
+    if (std::isnan(g) || std::isinf(g)) return NAN;
+    return (float)g;
 }
 
 // ── Difference function: f1(x) - f2(x) ────────────────────────────────────

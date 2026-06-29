@@ -32,6 +32,10 @@
 
 </div>
 
+> **Youth Hacking 4 Freedom 2026 submission:** see [`YH4F_SUBMISSION.md`](YH4F_SUBMISSION.md).
+>
+> **Demo video:** [youtu.be/IOTeKleOHQY](https://youtu.be/IOTeKleOHQY) — launcher, Calculation, natural-display math, and Grapher.
+
 ![Image](https://github.com/user-attachments/assets/e1b1df29-362b-4f5c-b824-bacb8e9a28f4)
 
 ## Table of Contents
@@ -79,15 +83,15 @@
 
 | Feature | Description |
 |:--------|:------------|
-| **Giac CAS Backend** | Symbolic evaluation through `GiacBridge` with UART parser/eval flow validated on hardware. Migration milestones completed: `-DDOUBLEVAL`, 64 KB loop stack, real-style `complex_mode(false)` with preserved `i^2=-1` behavior |
-| **Unified Calculus App** | Symbolic $d/dx$ differentiation (17 rules) and numerical/symbolic $\int dx$ integration (Slagle heuristic: table lookup, linearity, u-substitution, integration by parts/LIATE), tab-based mode switching, automatic simplification, and detailed step-by-step output |
-| **EquationsApp** | Solves linear, quadratic, and 2×2 systems (linear + non-linear via Sylvester resultant) with full step-by-step display |
-| **Bridge Designer** | Real-time structural bridge simulator with Verlet integration physics, stress analysis (green→red beam visualisation), snap-to-grid editor, wood/steel/cable materials, and truck/car load testing — PSRAM-backed, 60 Hz fixed timestep |
-| **Particle Lab** | Powder-Toy-class sandbox: 30+ materials (Sand, Water, Lava, LN2, Wire, Iron, Titan, C4, Clone), spark electronics with Joule heating, phase transitions, reaction matrix (Water+Lava=Stone+Steam), Bresenham line tool, material palette overlay, LittleFS save/load |
+| **Giac CAS Backend** | *Experimental / in progress — not a validated CAS.* Symbolic evaluation through `GiacBridge` with UART parser/eval flow exercised on hardware. Milestones: `-DDOUBLEVAL`, 64 KB loop stack, real-style `complex_mode(false)` with preserved `i^2=-1` behavior |
+| **Unified Calculus App** | *Experimental / still rough.* Symbolic $d/dx$ differentiation (17 rules) and numerical/symbolic $\int dx$ integration (Slagle heuristic: table lookup, linearity, u-substitution, integration by parts/LIATE), tab-based mode switching, automatic simplification, and step-by-step output |
+| **EquationsApp** | *Experimental; the "steps" view is alpha.* Solves linear, quadratic, and 2×2 systems (linear + non-linear via Sylvester resultant) with step-by-step display |
+| **Bridge Designer** | *Prototype.* Real-time structural bridge simulator with Verlet integration physics, stress analysis (green→red beam visualisation), snap-to-grid editor, wood/steel/cable materials, and truck/car load testing — PSRAM-backed, 60 Hz fixed timestep |
+| **Particle Lab** | *Experimental.* Powder-Toy-class sandbox: 30+ materials (Sand, Water, Lava, LN2, Wire, Iron, Titan, C4, Clone), spark electronics with Joule heating, phase transitions, reaction matrix (Water+Lava=Stone+Steam), Bresenham line tool, material palette overlay, LittleFS save/load |
 | **Settings App** | System-wide toggles for complex number output (ON/OFF), decimal precision selector (6/8/10/12 digits), and angle-mode display |
 | **Natural Display** | Real fractions, radicals, exponents, 2D cursors — mathematical rendering as it appears on paper |
 | **Graphing: y=f(x)** | Real-time function plotter with zoom, pan, and value table |
-| **85+ CAS Unit Tests** | Comprehensive test suite for the CAS, enable/disable via compile-time flag |
+| **53 CAS Unit Tests** | CAS unit-test suite (Phases A–D), compile-time gated and off by default |
 | **PSRAMAllocator** | CAS uses `PSRAMAllocator<T>` to isolate memory usage in the 8 MB PSRAM OPI |
 | **Variables A–Z + Ans** | Persistent storage via LittleFS — 216 bytes in `/vars.dat` |
 | **SerialBridge** | Full calculator control from PC via Serial Monitor without physical hardware |
@@ -328,6 +332,24 @@ pio run -e esp32s3_n16r8 --target upload
 pio device monitor
 ```
 
+### Run on Your PC — Desktop Emulator (no ESP32 required)
+
+Want to try NumOS **without buying any hardware**? The SDL2 desktop emulator runs
+the real UI and math code on your computer — no ESP32-S3 board needed:
+
+```bash
+pio run -e emulator_pc
+```
+
+> The `esp32s3_*` targets above are **firmware builds for real hardware**;
+> `emulator_pc` is the **desktop** target. A bare `pio run` (no `-e`) builds *every*
+> environment, which is slower — pass `-e emulator_pc` to build only the emulator.
+
+Full setup (including installing SDL2 on Windows/Linux) and a troubleshooting
+guide live in the
+**[SDL2 Desktop Emulator Quickstart](docs/emulator-sdl2-quickstart.md)** — start
+there if your `esp32s3_*` builds pass but `emulator_pc` fails.
+
 ### Serial Keyboard Control (SerialBridge)
 
 With the Serial Monitor open, type characters to control the calculator:
@@ -562,22 +584,24 @@ Issues discovered and resolved during bring-up. **Essential** for any fork or ne
 |:--------|:---------:|:--------:|:-------------:|:-----------:|
 | Open Source | ✅ GPL-3.0 | ✅ Source-available | ❌ | ❌ |
 | Natural Display | ✅ | ✅ | ✅ | ✅ |
-| Symbolic CAS | ✅ Giac | ✅ SymPy | ❌ | ✅ |
-| Symbolic derivatives | ✅ | ✅ | ❌ | ✅ |
-| Symbolic integrals | ✅ | ✅ | ❌ | ✅ |
-| Solution steps | ✅ | ❌ | ❌ | ✅ |
+| Symbolic CAS | 🟡 Giac | ✅ SymPy | ❌ | ✅ |
+| Symbolic derivatives | 🟡 | ✅ | ❌ | ✅ |
+| Symbolic integrals | 🟡 | ✅ | ❌ | ✅ |
+| Solution steps | 🟡 | ❌ | ❌ | ✅ |
 | Colour graphing | ✅ | ✅ | ✅ | ✅ |
 | Multi-function graphing | 🔲 | ✅ | ✅ | ✅ |
-| Statistics & Regression | ✅ | ✅ | ✅ | ✅ |
+| Statistics & Regression | 🟡 | ✅ | ✅ | ✅ |
 | Matrices | 🔲 | ✅ | ✅ | ✅ |
 | Complex numbers | 🔲 | ✅ | ✅ | ✅ |
-| Scripting / Python | ✅ NeoLanguage + Python | ✅ | ✅ TI-BASIC | ✅ HP PPL |
+| Scripting / Python | 🟡 NeoLanguage + Python | ✅ | ✅ TI-BASIC | ✅ HP PPL |
 | WiFi / Connectivity | 🔲 | ✅ | ❌ | ❌ |
 | Rechargeable battery | 🔲 | ✅ | ❌ | ✅ |
 | Estimated HW cost | **~€15-25** | €79 | €149 | €179 |
 | Platform | ESP32-S3 | STM32F730 | Zilog eZ80 | ARM Cortex-A7 |
 
 > 📐 NumOS is developing CAS capabilities and cost-effectiveness as an open-source alternative, working toward feature parity with established commercial calculators.
+>
+> **Legend:** ✅ = working today · 🟡 = experimental / in progress · 🔲 = planned. See [`YH4F_SUBMISSION.md`](YH4F_SUBMISSION.md) for the honest current status of each feature.
 
 ---
 

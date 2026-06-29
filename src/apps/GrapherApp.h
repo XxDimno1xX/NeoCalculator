@@ -278,6 +278,14 @@ private:
     void drawTraceCursor();
     void updateInfoBar();
     void autoFit();
+    // Enforce equal aspect (square grid): equalize world-units-per-pixel on x and
+    // y so circles render circular. Idempotent; applied at the top of replot().
+    void normalizeAspect();
+
+    // Find a traceable (valid, visible, single-valued y=f(x)) function index,
+    // scanning from `from` in direction `dir` (+1/-1). Returns -1 if none —
+    // implicit equations and inequalities are multi-valued and never traceable.
+    int  firstTraceableFunc(int from, int dir) const;
 
     // POI (snap-to-point) helpers
     void preCacheFuncRPN(int idx);
@@ -320,6 +328,9 @@ private:
                         float wx0, float wy0,
                         float wx1, float wy1,
                         int depth, uint32_t color);
+
+    // ── Implicit-equation plotting (marching squares over G(x,y)=0) ───
+    void plotImplicit(int fi, uint32_t color);
 
     // ── Key dispatchers ──────────────────────────────────────────────
     void handleTabBar(const KeyEvent& ev);

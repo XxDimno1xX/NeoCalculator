@@ -59,6 +59,128 @@ constexpr int16_t kPlusMinusStrokeDivisor = 10;
 /// when the variant table is missing or assembly fails — this guarantees the
 /// user sees SOMETHING even if the assembly pieces were omitted from the font
 /// subset (e.g. U+239B–U+23A6 missing from lv_font_conv --range arguments).
+
+/// Thin stroke helper (rounded caps) for synthetic delimiters.
+static void strokeSeg(lv_layer_t* layer, int16_t x1, int16_t y1,
+                      int16_t x2, int16_t y2, int16_t w, lv_color_t color) {
+    lv_draw_line_dsc_t dsc;
+    lv_draw_line_dsc_init(&dsc);
+    dsc.color = color;
+    dsc.width = w < 1 ? 1 : w;
+    dsc.opa   = LV_OPA_COVER;
+    dsc.round_start = 1;
+    dsc.round_end   = 1;
+    dsc.p1.x = x1; dsc.p1.y = y1;
+    dsc.p2.x = x2; dsc.p2.y = y2;
+    lv_draw_line(layer, &dsc);
+}
+
+/// Draw a delimiter using vector strokes, scaled to [yTop, yBottom].
+///
+/// WHY: the NumOS stix_math subset omits the OpenType extensible-delimiter
+/// assembly glyphs (U+239B..U+23B3 for parens, brackets, braces, bars). For any
+/// content taller than the single bundled size variant (~17px) the assembler
+/// selects those missing glyphs, so lv_font_get_glyph_dsc fails and the
+/// delimiter renders as nothing at all. This vector fallback reproduces the
+/// delimiter at any height with no font dependency, so parentheses (and the
+/// other delimiters) are always visible and correctly sized.
+static void drawStrokedDelimiter(lv_layer_t* layer, int16_t x,
+                                 int16_t yTop, int16_t yBottom,
+                                 uint32_t delimCp, lv_color_t color,
+                                 int16_t emSizePx) {
+    const int16_t H = static_cast<int16_t>(yBottom - yTop);
+    if (H <= 0) return;
+    // Stroke weight tuned to sit close to the digit/letter weight of the math
+    // font (≈ emSize/8) so a synthetic delimiter doesn't read lighter than the
+    // glyphs it wraps; clamped to ≥2 px so it never disappears at small sizes.
+    const int16_t stroke = std::max<int16_t>(2, static_cast<int16_t>((emSizePx + 4) / 8));
+    const int16_t bulge  = std::max<int16_t>(4, std::min<int16_t>(
+                               static_cast<int16_t>(H / 5), emSizePx));
+    const int16_t footW  = std::max<int16_t>(3, static_cast<int16_t>(emSizePx / 4));
+    const int16_t inset  = static_cast<int16_t>(stroke / 2 + 1);
+
+    auto vbar = [&](int16_t vx) { strokeSeg(layer, vx, yTop, vx, yBottom, stroke, color); };
+
+    switch (delimCp) {
+        case 0x0028:    // (
+        case 0x0029: {  // )
+            // Quadratic Bézier: tips at the inner edge (toward content), bulging
+            // outward at the vertical middle — a single smooth parabolic arc.
+            // A quadratic is inherently hook-free (the endpoint tangent points
+            // straight at the lone control), so the tips read clean at every
+            // size; a cubic with belly-placed controls flares the tips into
+            // little hooks on tall delimiters. Left '(' bulges left; right ')'
+            // bulges right. The belly midpoint x = 0.5·xTip + 0.5·xCtrl reaches
+            // the box edge, matching the layout's reserved width. The stroke is
+            // weight-matched to the font (see `stroke` above) so the arc no
+            // longer reads lighter than the glyphs it wraps.
+            const bool left = (delimCp == 0x0028);
+            const float midY = static_cast<float>(yTop + yBottom) * 0.5f;
+            const float xTip  = left ? static_cast<float>(x + bulge)
+                                     : static_cast<float>(x);
+            const float xCtrl = left ? static_cast<float>(x - bulge)
+                                     : static_cast<float>(x + 2 * bulge);
+            const int N = 22;
+            int16_t prevX = 0, prevY = 0;
+            for (int i = 0; i <= N; ++i) {
+                const float t  = static_cast<float>(i) / N;
+                const float mt = 1.0f - t;
+                const float bx = mt * mt * xTip + 2.0f * mt * t * xCtrl + t * t * xTip;
+                const float by = mt * mt * static_cast<float>(yTop)
+                               + 2.0f * mt * t * midY
+                               + t * t * static_cast<float>(yBottom);
+                const int16_t px = static_cast<int16_t>(bx + 0.5f);
+                const int16_t py = static_cast<int16_t>(by + 0.5f);
+                if (i > 0) strokeSeg(layer, prevX, prevY, px, py, stroke, color);
+                prevX = px; prevY = py;
+            }
+            break;
+        }
+        case 0x005B:    // [
+        case 0x005D: {  // ]
+            const bool left = (delimCp == 0x005B);
+            const int16_t vx = left ? static_cast<int16_t>(x + inset)
+                                    : static_cast<int16_t>(x + bulge - inset);
+            const int16_t fx = left ? static_cast<int16_t>(vx + footW)
+                                    : static_cast<int16_t>(vx - footW);
+            vbar(vx);
+            strokeSeg(layer, vx, yTop, fx, yTop, stroke, color);
+            strokeSeg(layer, vx, yBottom, fx, yBottom, stroke, color);
+            break;
+        }
+        case 0x007C: {  // |
+            vbar(static_cast<int16_t>(x + bulge / 2));
+            break;
+        }
+        case 0x007B:    // {
+        case 0x007D: {  // }
+            const bool left = (delimCp == 0x007B);
+            const int16_t midY  = static_cast<int16_t>((yTop + yBottom) / 2);
+            const int16_t spine = left ? static_cast<int16_t>(x + bulge / 2)
+                                       : static_cast<int16_t>(x + bulge / 2);
+            const int16_t tip   = left ? static_cast<int16_t>(x)
+                                       : static_cast<int16_t>(x + bulge);
+            strokeSeg(layer, spine, yTop, spine, midY, stroke, color);
+            strokeSeg(layer, spine, midY, spine, yBottom, stroke, color);
+            strokeSeg(layer, spine, midY, tip, midY, stroke, color);
+            break;
+        }
+        default:
+            vbar(static_cast<int16_t>(x + bulge / 2));
+            break;
+    }
+}
+
+/// True when every glyph the assembly needs is present in `font`.
+static bool assemblyGlyphsAvailable(const lv_font_t* font,
+                                    const DelimiterAssembler::AssemblyResult& a) {
+    for (uint8_t i = 0; i < a.pieceCount; ++i) {
+        lv_font_glyph_dsc_t g;
+        if (!lv_font_get_glyph_dsc(font, &g, a.pieces[i].glyphCp, 0)) return false;
+    }
+    return true;
+}
+
 static bool drawDelimiterGlyph(lv_layer_t* layer,
                                int16_t x, int16_t yTop, int16_t yBottom,
                                uint32_t delimCp, lv_color_t color,
@@ -70,7 +192,10 @@ static bool drawDelimiterGlyph(lv_layer_t* layer,
     if (!table) {
         // ── Fallback A: no variant table → draw the base codepoint directly ──
         lv_font_glyph_dsc_t glyph;
-        if (!lv_font_get_glyph_dsc(font, &glyph, delimCp, 0)) return false;
+        if (!lv_font_get_glyph_dsc(font, &glyph, delimCp, 0)) {
+            drawStrokedDelimiter(layer, x, yTop, yBottom, delimCp, color, emSizePx);
+            return true;
+        }
         lv_draw_letter_dsc_t dsc;
         lv_draw_letter_dsc_init(&dsc);
         dsc.font = font;
@@ -90,7 +215,10 @@ static bool drawDelimiterGlyph(lv_layer_t* layer,
     if (!assembly.valid || assembly.pieceCount == 0) {
         // ── Fallback B: assembly failed → draw the table's base codepoint ──
         lv_font_glyph_dsc_t glyph;
-        if (!lv_font_get_glyph_dsc(font, &glyph, table->baseCodepoint, 0)) return false;
+        if (!lv_font_get_glyph_dsc(font, &glyph, table->baseCodepoint, 0)) {
+            drawStrokedDelimiter(layer, x, yTop, yBottom, delimCp, color, emSizePx);
+            return true;
+        }
         lv_draw_letter_dsc_t dsc;
         lv_draw_letter_dsc_init(&dsc);
         dsc.font = font;
@@ -101,6 +229,14 @@ static bool drawDelimiterGlyph(lv_layer_t* layer,
         pos.x = static_cast<int32_t>(x);
         pos.y = static_cast<int32_t>((yTop + yBottom) / 2 - glyph.ofs_y);
         lv_draw_letter(layer, &dsc, &pos);
+        return true;
+    }
+
+    // ── Fallback C: assembly is valid but the font subset omits one or more of
+    // its glyphs (the stix_math subset lacks U+239B..U+23B3). Drawing those
+    // pieces would silently render nothing, so draw a vector delimiter instead. ──
+    if (!assemblyGlyphsAvailable(font, assembly)) {
+        drawStrokedDelimiter(layer, x, yTop, yBottom, delimCp, color, emSizePx);
         return true;
     }
 
@@ -287,6 +423,16 @@ MathCanvas::MathCanvas()
     _fmNormal.script = &_fmSmall;
     _fmSmall.script = &_fmScriptScript;
     _fmScriptScript.script = nullptr;
+
+    // Probe once whether the active math font actually carries the extensible
+    // delimiter assembly glyphs (U+239C is the parenthesis extender). If absent
+    // (the stix_math subset omits them), layout must hug delimiter content and
+    // the renderer draws a vector delimiter fallback — see drawStrokedDelimiter.
+    if (_fontNormal) {
+        lv_font_glyph_dsc_t g;
+        g_delimiterAssemblyRenderable =
+            lv_font_get_glyph_dsc(_fontNormal, &g, 0x239C, 0);
+    }
 }
 
 MathCanvas::~MathCanvas() {

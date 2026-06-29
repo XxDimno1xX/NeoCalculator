@@ -121,46 +121,46 @@ void GraphView::fastDrawLine(int x0, int y0, int x1, int y1, uint16_t color) {
 // Grid and axes
 // ═════════════════════════════════════════════════════════════════════════
 
+float GraphView::squareGridStep(float unitsPerPx) {
+    const float rough = unitsPerPx * 48.0f;   // ~48 px target spacing
+    if (!(rough > 0.0f)) return 1.0f;
+    const float mag  = powf(10.0f, floorf(log10f(rough)));
+    const float norm = rough / mag;
+    const float nice = (norm < 1.5f) ? 1.0f : (norm < 3.5f) ? 2.0f
+                     : (norm < 7.5f) ? 5.0f : 10.0f;
+    return nice * mag;
+}
+
 void GraphView::drawGrid() {
     uint16_t gridColor = utils::rgb888to565(0xE0E0E0);  // Light grey
-    uint16_t subGridColor = utils::rgb888to565(0xF0F0F0);  // Lighter grey
 
-    float xRange = _xMax - _xMin;
-    float yRange = _yMax - _yMin;
+    const float xRange = _xMax - _xMin;
+    const float yRange = _yMax - _yMin;
+    if (xRange <= 0.0f || yRange <= 0.0f || _bufW <= 0 || _bufH <= 0) return;
 
-    // Nice step for grid lines: 1, 2, 5 × 10^n
-    auto niceStep = [](float range, int maxTicks) -> float {
-        float rough = range / maxTicks;
-        float mag = powf(10.0f, floorf(log10f(rough)));
-        float norm = rough / mag;
-        float nice;
-        if (norm < 1.5f)      nice = 1.0f;
-        else if (norm < 3.5f) nice = 2.0f;
-        else if (norm < 7.5f) nice = 5.0f;
-        else                  nice = 10.0f;
-        return nice * mag;
-    };
+    // ── Square grid cells ────────────────────────────────────────────────
+    // Use a SINGLE world-step for both axes. The viewport is equal-aspect
+    // (GrapherApp::normalizeAspect makes world-units-per-pixel identical on x and
+    // y), so the same world step maps to the same pixel spacing horizontally and
+    // vertically — i.e. visually square cells. Previously x and y picked their own
+    // "nice" step (targets of 8 vs 6 ticks), so cells were rectangular even when
+    // the units-per-pixel matched.
+    const float unitsPerPx = xRange / static_cast<float>(_bufW);  // == yRange/_bufH
+    const float step = squareGridStep(unitsPerPx);
+    if (step <= 0.0f) return;
 
-    float xStep = niceStep(xRange, 8);
-    float yStep = niceStep(yRange, 6);
-
-    int x0_screen = worldToScreenX(_xMin);
-    int x1_screen = worldToScreenX(_xMax);
-    int y0_screen = worldToScreenY(_yMax);
-    int y1_screen = worldToScreenY(_yMin);
-
-    // Vertical grid lines
-    float xStart = floorf(_xMin / xStep) * xStep;
-    for (float x = xStart; x <= _xMax; x += xStep) {
+    // Vertical grid lines (every 'step' world units in x)
+    float xStart = floorf(_xMin / step) * step;
+    for (float x = xStart; x <= _xMax; x += step) {
         int sx = worldToScreenX(x);
         if (sx >= 0 && sx < _bufW) {
             fastDrawLine(sx, 0, sx, _bufH - 1, gridColor);
         }
     }
 
-    // Horizontal grid lines
-    float yStart = floorf(_yMin / yStep) * yStep;
-    for (float y = yStart; y <= _yMax; y += yStep) {
+    // Horizontal grid lines (same 'step' → square cells)
+    float yStart = floorf(_yMin / step) * step;
+    for (float y = yStart; y <= _yMax; y += step) {
         int sy = worldToScreenY(y);
         if (sy >= 0 && sy < _bufH) {
             fastDrawLine(0, sy, _bufW - 1, sy, gridColor);
@@ -206,6 +206,38 @@ void GraphView::drawFunctionSegment(float wx0, float wy0, float wx1, float wy1, 
     const int sy1 = worldToScreenY(wy1);
     const uint16_t color565 = utils::rgb888to565(rgbColor);
     fastDrawLine(sx0, sy0, sx1, sy1, color565);
+}
+
+void GraphView::drawSegmentPx(int x0, int y0, int x1, int y1, uint32_t rgbColor) {
+    fastDrawLine(x0, y0, x1, y1, utils::rgb888to565(rgbColor));
+}
+
+void GraphView::plotPixel(int x, int y, uint32_t rgbColor) {
+    if ((unsigned)x < (unsigned)_bufW && (unsigned)y < (unsigned)_bufH)
+        _graphBuf[y * _bufW + x] = utils::rgb888to565(rgbColor);
+}
+
+void GraphView::plotPixelStipple(int x, int y, uint32_t rgbColor) {
+    if (((x + y) & 1) != 0) return;  // global checkerboard parity
+    if ((unsigned)x < (unsigned)_bufW && (unsigned)y < (unsigned)_bufH)
+        _graphBuf[y * _bufW + x] = utils::rgb888to565(rgbColor);
+}
+
+void GraphView::fillRectStipple(int x0, int y0, int x1, int y1, uint32_t rgbColor) {
+    if (!_graphBuf) return;
+    if (x0 > x1) std::swap(x0, x1);
+    if (y0 > y1) std::swap(y0, y1);
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 >= _bufW) x1 = _bufW - 1;
+    if (y1 >= _bufH) y1 = _bufH - 1;
+    const uint16_t c = utils::rgb888to565(rgbColor);
+    for (int y = y0; y <= y1; ++y) {
+        // Start each row on the parity-matching column so the checkerboard tiles.
+        int xs = x0 + (((x0 + y) & 1) ? 1 : 0);
+        uint16_t* row = _graphBuf + (size_t)y * _bufW;
+        for (int x = xs; x <= x1; x += 2) row[x] = c;
+    }
 }
 
 // ═════════════════════════════════════════════════════════════════════════
