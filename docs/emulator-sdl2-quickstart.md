@@ -937,6 +937,34 @@ golden. Run1-vs-run2 is **byte-identical** (the focus animation is driven by the
 deterministic tick; the launcher has no blinking cursor). **No golden is blessed
 and no mask is added in this phase** — promotion remains a later, human-gated step.
 
+**Phase 9F Grapher no-hang / function / template guards** (golden-free; same
+assert-only CI contract as the Phase 9A/9B scripts — exit 0, ≥1 `[ASSERT] … PASS`,
+no `[ASSERT] … FAIL`; not in the candidate list). Wired into the emulator workflow
+as the *Grapher no-hang / function / template guard* step; a hang trips the
+per-script `timeout` (nonzero exit → fail), a broken fix trips an assertion
+(`exit 4`):
+
+- `grapher_home_return_smoke.numos` — presses HOME (MODE) from every Grapher state
+  (Expressions / Graph / Table / Trace / Templates modal / mid-edit) and asserts a
+  return to the launcher each time, then re-enters. Before 9F's deferred teardown
+  this hung on the first return.
+- `grapher_tan_exit_smoke.numos` — `y=tan(x)` (asymptotes) plots, pans, traces, and
+  exits without hanging.
+- `grapher_functions_smoke.numos` — sin/cos/tan/ln/log insert + serialize + graph.
+- `grapher_logbase_smoke.numos` — `log` with an explicit base inserts, renders,
+  graphs (change-of-base identity), tabulates, and exits.
+- `grapher_template_insert_smoke.numos` / `grapher_template_all_smoke.numos` —
+  templates insert **real plottable** expressions (the `OpKind::Eq` serialization
+  fix) and plot. The few screenshots these write under `out/` are uploaded for human
+  inspection only — they are **not** in the candidate list and never gate.
+
+**Phase 9G visual re-bless.** The six Grapher visual goldens (`grapher_smoke`,
+`grapher_expr_smoke`, `grapher_graph_smoke`, `grapher_table_smoke`,
+`grapher_trace_smoke`, `grapher_templates_smoke`) were re-blessed after the
+Phase 9D/9E/9F render changes (fixed active-tab pill clipping; templates modal now
+lists the real plottable expressions). Each reuses its existing clock-only mask
+(`4,6,37,13`) **unchanged** — no new masks, no broadened masks, no source changes.
+
 ---
 
 ## Build directory

@@ -468,6 +468,76 @@ jobs:
           path: out/menu_9b/
           if-no-files-found: ignore
 
+      # Grapher no-hang / function / template guard (Phase 9F) — golden-free.
+      #
+      # Same assert-only contract as the Phase 8C / 9A / 9B suites above (run
+      # headless + deterministic, require exit 0, at least one "[ASSERT] ... PASS"
+      # marker, and NO "[ASSERT] ... FAIL" marker), and explicitly SEPARATE from the
+      # visual candidate/golden flow below: these scripts are NOT in
+      # generate-emulator-candidates.py's CANDIDATES list, so the screenshots a few
+      # of them write under out/ never become a gating golden. They lock in the
+      # Phase 9F manual-QA Grapher fixes (committed in 98328f3):
+      #   * grapher_home_return  — HOME (MODE) returns to the launcher from EVERY
+      #     Grapher state (Expressions / Graph / Table / Trace / Templates modal /
+      #     mid-edit) and re-entry still works. Before 9F's deferred teardown this
+      #     hung in lv_timer_handler on the first return.
+      #   * grapher_tan_exit     — y=tan(x) (asymptotes) plots, pans, traces, and
+      #     returns to the launcher without hanging.
+      #   * grapher_functions    — sin/cos/tan/ln/log insert + serialize + graph.
+      #   * grapher_logbase      — log with an explicit base inserts, renders, graphs
+      #     (change-of-base identity), tabulates, and exits.
+      #   * grapher_template_insert / grapher_template_all — templates insert REAL
+      #     plottable expressions (OpKind::Eq serialization fix) and plot.
+      # A hang trips the per-script `timeout` (nonzero exit -> fail); a broken fix
+      # trips an assertion (exit 4 + "[ASSERT] ... FAIL"). mkdir out/ so the
+      # screenshot-taking scripts have a writable target (those images are uploaded
+      # for human inspection, never gated).
+      - name: Grapher no-hang / function / template guard (headless deterministic, Phase 9F)
+        run: |
+          set -euo pipefail
+          BIN=.pio/build/emulator_pc/program
+          mkdir -p out out/grapher_9f
+
+          run_grapher() {
+            script="$1"
+            name="$(basename "$script" .numos)"
+            log="out/grapher_9f/${name}.log"
+            echo "=== ${name} ==="
+            rc=0
+            SDL_VIDEODRIVER=dummy timeout 60s "$BIN" \
+              --headless --deterministic --script "$script" \
+              --frames 1400 --quiet > "$log" 2>&1 || rc=$?
+            cat "$log"
+            if [ "$rc" -ne 0 ]; then
+              echo "::error::grapher guard FAILED for ${name} (exit $rc -- hang/timeout or assertion failure)"
+              return 1
+            fi
+            if grep -qE '\[ASSERT\].*: FAIL -' "$log"; then
+              echo "::error::grapher guard: [ASSERT] FAIL present for ${name}"
+              return 1
+            fi
+            if ! grep -qE '\[ASSERT\].*: PASS -' "$log"; then
+              echo "::error::grapher guard: no [ASSERT] PASS marker for ${name}"
+              return 1
+            fi
+          }
+
+          run_grapher tests/emulator/scripts/grapher_home_return_smoke.numos
+          run_grapher tests/emulator/scripts/grapher_tan_exit_smoke.numos
+          run_grapher tests/emulator/scripts/grapher_functions_smoke.numos
+          run_grapher tests/emulator/scripts/grapher_logbase_smoke.numos
+          run_grapher tests/emulator/scripts/grapher_template_insert_smoke.numos
+          run_grapher tests/emulator/scripts/grapher_template_all_smoke.numos
+          echo "OK: 6 Phase 9F Grapher no-hang/function/template guards passed (assert-only, NO gating golden)."
+
+      - name: Upload Phase 9F Grapher guard logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: numos-emulator-grapher-9f
+          path: out/grapher_9f/
+          if-no-files-found: ignore
+
       # ---------------------------------------------------------------------
       # Candidate screenshot generation + golden comparison (Phase 4B-A).
       #
