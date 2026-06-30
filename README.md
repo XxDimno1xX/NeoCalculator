@@ -313,6 +313,10 @@ build_src_filter = +<*> +<../tests/CASTest.cpp>
 ### Requirements
 
 - [PlatformIO IDE](https://platformio.org/install/ide?install=vscode) (VS Code extension)
+- **PlatformIO Core CLI** (`pio`) for the command-line builds below — bundled with the
+  IDE extension's own terminal, or install it standalone for a normal Terminal/shell
+  (macOS: `brew install platformio`; any OS: `pip install -U platformio`). Verify with
+  `pio --version`.
 - USB drivers for ESP32-S3 (no external driver needed on Windows 11+)
 - Python 3.x (PlatformIO installs it automatically)
 
@@ -338,17 +342,43 @@ Want to try NumOS **without buying any hardware**? The SDL2 desktop emulator run
 the real UI and math code on your computer — no ESP32-S3 board needed:
 
 ```bash
-pio run -e emulator_pc
+pio --version                   # confirm the PlatformIO CLI is installed and on your PATH
+pio run -e emulator_pc -t exec  # build AND open the emulator window (one step)
 ```
+
+> **`-t exec` builds *and runs* it.** Plain `pio run -e emulator_pc` only
+> **compiles** the emulator — it does **not** open a window. Add `-t exec` (or use
+> the [run scripts](docs/emulator-sdl2-quickstart.md)) to actually launch it. macOS/
+> Linux can also use `./scripts/run-emulator.sh`; Windows uses
+> `./scripts/run-emulator-windows.ps1` (it also resolves `SDL2.dll`).
 
 > The `esp32s3_*` targets above are **firmware builds for real hardware**;
 > `emulator_pc` is the **desktop** target. A bare `pio run` (no `-e`) builds *every*
 > environment, which is slower — pass `-e emulator_pc` to build only the emulator.
 
-Full setup (including installing SDL2 on Windows/Linux) and a troubleshooting
+> **VS Code users:** to run the emulator, use **Terminal → Run Task… → “Run NumOS
+> Emulator”** (or run the command above in a terminal). Do **not** press **Run/Debug
+> (F5)** or pick **“PIO Debug”** / **“Electron Main”** — “PIO Debug” targets a real
+> ESP32 over JTAG and fails without a board, and NumOS is not an Electron app. See
+> [Build vs. Run vs. Debug](docs/emulator-sdl2-quickstart.md#build-vs-run-vs-debug-and-vs-code).
+
+> **`command not found: pio` (macOS `zsh` / Linux)?** The PlatformIO **CLI** isn't on
+> your PATH yet. The VS Code PlatformIO IDE extension bundles PlatformIO inside *its
+> own* terminal — a normal Terminal/shell needs the standalone CLI. On **macOS**
+> (Homebrew):
+>
+> ```bash
+> brew install platformio        # PlatformIO CLI
+> brew install sdl2 pkg-config   # SDL2 desktop dependency for the emulator
+> pio --version                  # confirm the CLI is now on your PATH
+> pio run -e emulator_pc
+> ```
+
+Full setup (including installing SDL2 on Windows/Linux/macOS) and a troubleshooting
 guide live in the
 **[SDL2 Desktop Emulator Quickstart](docs/emulator-sdl2-quickstart.md)** — start
-there if your `esp32s3_*` builds pass but `emulator_pc` fails.
+there if your `esp32s3_*` builds pass but `emulator_pc` fails (or if `pio` is
+"command not found").
 
 ### Serial Keyboard Control (SerialBridge)
 

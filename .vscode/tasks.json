@@ -2,7 +2,33 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "Run NumOS Emulator",
+			"detail": "Build (if needed) AND launch the SDL2 desktop emulator on your PC — no ESP32 required. Runs `pio run -e emulator_pc -t exec`. Do NOT use Run/Debug (F5) or 'PIO Debug' for this — those target real ESP32 hardware over JTAG and will fail without a board.",
+			"type": "shell",
+			"command": "pio run -e emulator_pc -t exec",
+			"problemMatcher": [
+				"$gcc"
+			],
+			"group": "build",
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated",
+				"focus": true
+			}
+		},
+		{
+			"label": "Build NumOS Emulator (compile only)",
+			"detail": "Compile the desktop emulator without running it. Use 'Run NumOS Emulator' to actually open the window.",
+			"type": "shell",
+			"command": "pio run -e emulator_pc",
+			"problemMatcher": [
+				"$gcc"
+			],
+			"group": "build"
+		},
+		{
 			"label": "PIO Build Emulator PC",
+			"detail": "Legacy alias kept for compatibility — same as 'Build NumOS Emulator (compile only)'.",
 			"type": "shell",
 			"command": "platformio run -e emulator_pc",
 			"problemMatcher": [
