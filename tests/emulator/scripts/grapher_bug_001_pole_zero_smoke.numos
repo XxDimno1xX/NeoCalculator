@@ -1,0 +1,50 @@
+# grapher_bug_001_pole_zero_smoke — GRBUG-001 regression guard. y=1/x has its
+# pole exactly at x=0 (the default viewport centre): the explicit sampler used
+# to drop both segments adjacent to the non-finite centre sample (amputated
+# branches), and zooming while the trace cursor sat off-domain at x=0 centred
+# the viewport on _traceY=NaN, poisoning _yMin/_yMax and blanking the canvas
+# on every later replot. Now the branch is bisection-extended to the pole edge
+# and all cursor/zoom consumers are finite-guarded, so the classic two-branch
+# hyperbola survives graph + zoom + zoom.
+#
+# Assert-only guards: slot classification, app alive after each zoom, trace
+# state (still trace, cursor merely off-domain at x=0). The screenshots go to
+# gitignored out/ as warning-only visual candidates — NOT blessed goldens.
+#
+# Run:
+#   program --script tests/emulator/scripts/grapher_bug_001_pole_zero_smoke.numos \
+#           --deterministic --frames 1400 --headless --quiet
+log "grapher_bug_001_pole_zero: start"
+wait 200
+open_app Grapher
+wait 60
+key down
+key enter
+key y
+key =
+key 1
+key /
+key x
+key enter
+wait 60
+assert_graph_relation_count 1
+assert_graph_slot_kind 0 explicitY
+assert_graph_slot_valid 0
+key graph
+wait 100
+assert_app Grapher
+assert_graph_trace_state trace
+screenshot out/grapher_bug_001_pole_zero_default.ppm
+wait 5
+key zoom
+wait 40
+key zoom
+wait 60
+assert_app Grapher
+assert_graph_trace_state trace
+screenshot out/grapher_bug_001_pole_zero_zoom2.ppm
+wait 5
+key home
+wait 80
+assert_app Menu
+log "grapher_bug_001_pole_zero: y=1/x survives graph + zoom x2 (no blank canvas)"

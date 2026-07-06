@@ -200,12 +200,23 @@ void GraphView::drawFunctionSegment(float wx0, float wy0, float wx1, float wy1, 
         std::isinf(wx0) || std::isinf(wy0) || std::isinf(wx1) || std::isinf(wy1)) {
         return;
     }
-    const int sx0 = worldToScreenX(wx0);
-    const int sy0 = worldToScreenY(wy0);
-    const int sx1 = worldToScreenX(wx1);
-    const int sy1 = worldToScreenY(wy1);
+    // Huge-but-finite world values (1/x² sampled at x≈1e-7 → y≈1e14) used to be
+    // fed straight into the int conversion inside worldToScreen* — a float→int
+    // cast that overflows int is UB, and even in-range casts sent Bresenham on
+    // walks of millions of off-buffer pixels. Do the projection in float and
+    // clamp far outside the buffer first: any |coord| ≤ 20000 px is bit-identical
+    // to the old path, and a clamped endpoint still exits the view on the same
+    // side, so visible clipping is preserved.
+    auto clampS = [](float v) {
+        return v < -20000.0f ? -20000.0f : (v > 20000.0f ? 20000.0f : v);
+    };
+    const float fx0 = (_xMax > _xMin) ? (wx0 - _xMin) / (_xMax - _xMin) * (float)_bufW : 0.0f;
+    const float fx1 = (_xMax > _xMin) ? (wx1 - _xMin) / (_xMax - _xMin) * (float)_bufW : 0.0f;
+    const float fy0 = (_yMax > _yMin) ? (1.0f - (wy0 - _yMin) / (_yMax - _yMin)) * (float)_bufH : 0.0f;
+    const float fy1 = (_yMax > _yMin) ? (1.0f - (wy1 - _yMin) / (_yMax - _yMin)) * (float)_bufH : 0.0f;
     const uint16_t color565 = utils::rgb888to565(rgbColor);
-    fastDrawLine(sx0, sy0, sx1, sy1, color565);
+    fastDrawLine((int)clampS(fx0), (int)clampS(fy0),
+                 (int)clampS(fx1), (int)clampS(fy1), color565);
 }
 
 void GraphView::drawSegmentPx(int x0, int y0, int x1, int y1, uint32_t rgbColor) {

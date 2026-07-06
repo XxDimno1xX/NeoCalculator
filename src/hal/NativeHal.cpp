@@ -1370,7 +1370,8 @@ enum class ScriptCmdType : uint8_t {
     AssertGraphSlotInvalidReason, // assert_graph_slot_invalid_reason SLOT SUBSTR...
     AssertGraphRelationOp,     // assert_graph_relation_op SLOT eq|lt|gt|le|ge
     AssertGraphExprText,       // assert_graph_expr_text SLOT TEXT...  (igualdad exacta)
-    AssertGraphTraceState      // assert_graph_trace_state idle|navigate|trace
+    AssertGraphTraceState,     // assert_graph_trace_state idle|navigate|trace
+    AssertGraphIntersectionCount // assert_graph_intersection_count N  (POIs Intersection, N en waitN)
 };
 
 struct ScriptCmd {
@@ -1704,6 +1705,16 @@ static bool loadScript(const char* path)
             sc.type   = ScriptCmdType::AssertGraphTraceState;
             sc.strArg = mode;
         }
+        else if (lc == "assert_graph_intersection_count") {
+            // GRBUG-002/005 guard: POIs de tipo Intersection actualmente calculados.
+            std::string nTok, extra;
+            long n = 0;
+            if (!(iss >> nTok) || !parseNonNegLong(nTok, n))
+                return scriptErr(path, lineNo, "assert_graph_intersection_count requiere N entero >= 0");
+            if (iss >> extra) return scriptErr(path, lineNo, "assert_graph_intersection_count: demasiados argumentos");
+            sc.type  = ScriptCmdType::AssertGraphIntersectionCount;
+            sc.waitN = n;
+        }
         else {
             return scriptErr(path, lineNo, "comando desconocido");
         }
@@ -1950,7 +1961,8 @@ static void scriptStepBegin()
         case ScriptCmdType::AssertGraphSlotInvalidReason:
         case ScriptCmdType::AssertGraphRelationOp:
         case ScriptCmdType::AssertGraphExprText:
-        case ScriptCmdType::AssertGraphTraceState: {
+        case ScriptCmdType::AssertGraphTraceState:
+        case ScriptCmdType::AssertGraphIntersectionCount: {
             if (g_mode != AppMode::GRAPHER || !g_grapherApp) {
                 assertFail(sc.line, "assert_graph_* requiere Grapher activo (app actual: '" +
                                     std::string(activeAppName()) + "')");
@@ -2028,6 +2040,15 @@ static void scriptStepBegin()
                     else
                         assertFail(sc.line, "assert_graph_trace_state esperaba '" + sc.strArg +
                                             "' pero es '" + actual + "'");
+                    break;
+                }
+                case ScriptCmdType::AssertGraphIntersectionCount: {
+                    const int actual = g_grapherApp->debugIntersectionCount();
+                    if (actual == slot)
+                        assertPass(sc.line, "assert_graph_intersection_count " + std::to_string(slot));
+                    else
+                        assertFail(sc.line, "assert_graph_intersection_count esperaba " +
+                                            std::to_string(slot) + " pero hay " + std::to_string(actual));
                     break;
                 }
                 default: break;

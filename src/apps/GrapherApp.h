@@ -74,6 +74,7 @@ public:
     const char* debugSlotExprText(int i) const;       // serialized text[64]
     const char* debugTraceMode() const;               // idle|navigate|trace
     int         debugTraceFn() const { return _traceFn; }
+    int         debugIntersectionCount() const;       // POIs of type Intersection
 #endif
 
 private:

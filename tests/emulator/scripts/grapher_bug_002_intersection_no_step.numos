@@ -1,0 +1,66 @@
+# grapher_bug_002_intersection_no_step — GRBUG-002/GRBUG-005 regression guard.
+#
+# GRBUG-002: POIs used to be seeded only by trace NAVIGATION, so opening the
+# Calculate menu right after graphing (NO arrow key pressed) and choosing Find
+# Intersection searched an empty POI set → "No intersection found" even with a
+# line visibly crossing a circle. openCalcMenu() now seeds the POI pass
+# SYNCHRONOUSLY, so the intersection is available on the very first menu use.
+#
+# Asserted semantically via the append-only GR-14 hook
+# `assert_graph_intersection_count` (POIs of type Intersection): y=x crosses
+# x^2+y^2=9 at (±3/√2, ±3/√2) → exactly 2. After executing Find Intersection
+# (menu row 3; DOWN skips only enabled rows) the app must still be tracing.
+#
+# Run:
+#   program --script tests/emulator/scripts/grapher_bug_002_intersection_no_step.numos \
+#           --deterministic --frames 1400 --headless --quiet
+log "grapher_bug_002_intersection_no_step: start"
+wait 200
+open_app Grapher
+wait 60
+key down
+key enter
+key y
+key =
+key x
+key enter
+wait 40
+key down
+key enter
+key x
+key ^
+key 2
+key right
+key +
+key y
+key ^
+key 2
+key right
+key =
+key 9
+key enter
+wait 40
+assert_graph_relation_count 2
+assert_graph_slot_kind 0 explicitY
+assert_graph_slot_kind 1 implicit
+key graph
+wait 120
+assert_graph_trace_state trace
+# Open Calculate immediately — NO trace-step arrow first. The menu-open seeds
+# the POI set synchronously; both line∩circle crossings must already be there.
+key enter
+wait 20
+assert_graph_intersection_count 2
+# Navigate to Find Intersection (Root is the initial selection for y=f(x);
+# three DOWNs land on Intersection, which is enabled: 2 traceable curves).
+key down
+key down
+key down
+key enter
+wait 60
+assert_app Grapher
+assert_graph_trace_state trace
+key home
+wait 80
+assert_app Menu
+log "grapher_bug_002_intersection_no_step: intersection found with zero trace steps"

@@ -1903,14 +1903,18 @@ void GrapherApp::ensureTraceSeed() {
     switch (traceKind(_traceFn)) {
     case TraceKind::ExplicitX: {
         float yv = evalAt(_traceFn, _traceX);
-        _traceY = yv;
         _traceValid = !(std::isnan(yv) || std::isinf(yv));
+        // Never store a non-finite coordinate: a NaN _traceY poisons every
+        // consumer that centres the viewport on the cursor (zoom-while-tracing
+        // y=1/x → NaN _yMin/_yMax → blank canvas, GRBUG-001). Keep the view
+        // centre as a finite fallback when f is off-domain at this x.
+        _traceY = _traceValid ? yv : (_yMin + _yMax) * 0.5f;
         break;
     }
     case TraceKind::ExplicitY: {
         float xv = _model.evalAtY(_funcs[_traceFn], _traceY);
-        _traceX = xv;
         _traceValid = !(std::isnan(xv) || std::isinf(xv));
+        _traceX = _traceValid ? xv : (_xMin + _xMax) * 0.5f;   // see ExplicitX note
         break;
     }
     case TraceKind::Implicit:
@@ -1941,8 +1945,10 @@ void GrapherApp::traceStep(int dir) {
         }
         syncViewportToCursor();
         float yv = evalAt(_traceFn, _traceX);
-        _traceY = yv;
         _traceValid = !(std::isnan(yv) || std::isinf(yv));
+        // Off-domain step (pole/domain hole): keep _traceY finite so a later
+        // zoom-about-the-cursor cannot poison the viewport (GRBUG-001).
+        _traceY = _traceValid ? yv : (_yMin + _yMax) * 0.5f;
         break;
     }
     case TraceKind::ExplicitY: {
@@ -1950,8 +1956,8 @@ void GrapherApp::traceStep(int dir) {
         const float stepY = (_yMax - _yMin) / SCREEN_H;
         _traceY += (float)dir * stepY;
         float xv = _model.evalAtY(_funcs[_traceFn], _traceY);
-        _traceX = xv;
         _traceValid = !(std::isnan(xv) || std::isinf(xv));
+        _traceX = _traceValid ? xv : (_xMin + _xMax) * 0.5f;   // see ExplicitX note
         if (_traceValid) syncViewportToCursor();   // lock camera on the control point
         break;
     }
@@ -2032,12 +2038,40 @@ void GrapherApp::sampleFuncAdaptive(int fi, uint32_t color) {
     float wy0 = (float)evalAt(fi, wx0);
     bool prevOk = (!std::isnan(wy0) && !std::isinf(wy0));
 
+    // GRBUG-001: a sample landing ON a pole / domain edge (y=1/x at x=0, the
+    // viewport centre) evaluates non-finite, and both adjacent coarse segments
+    // used to be dropped whole — visibly amputating the steep near-pole branch
+    // (a gap up to 2·step wide). On an ok↔non-finite transition, bisect toward
+    // the edge to find the last representable on-curve point and draw the
+    // finite-side extension, clamping the divergent end to just outside the
+    // view so the branch runs off-screen like a real asymptote. The clamp also
+    // keeps screen coordinates small (no megapixel Bresenham walks). This never
+    // BRIDGES the pole — each side extends independently — so tan()-style
+    // asymptotes still cannot smear into vertical connector lines.
+    auto extendToEdge = [&](float xa, float ya, float xb) {
+        float lo = xa, ylo = ya, hi = xb;
+        for (int k = 0; k < 12; ++k) {
+            const float mid = (lo + hi) * 0.5f;
+            const float ym  = (float)evalAt(fi, mid);
+            if (!std::isnan(ym) && !std::isinf(ym)) { lo = mid; ylo = ym; }
+            else                                    { hi = mid; }
+        }
+        float yEnd = ylo;
+        if (yEnd > _yMax + yRange) yEnd = _yMax + yRange;
+        if (yEnd < _yMin - yRange) yEnd = _yMin - yRange;
+        _view.drawFunctionSegment(xa, ya, lo, yEnd, color);
+    };
+
     for (int i = 1; i <= INIT_SAMPLE_N; ++i) {
         const float wx1 = (i == INIT_SAMPLE_N) ? (float)_xMax : ((float)_xMin + step * (float)i);
         const float wy1 = (float)evalAt(fi, wx1);
         const bool currOk = (!std::isnan(wy1) && !std::isinf(wy1));
         if (prevOk && currOk) {
             adaptSegStream(fi, wx0, wy0, wx1, wy1, 0, color);
+        } else if (prevOk && !currOk) {
+            extendToEdge(wx0, wy0, wx1);      // branch ends at a pole/domain edge
+        } else if (!prevOk && currOk) {
+            extendToEdge(wx1, wy1, wx0);      // branch begins at a pole/domain edge
         }
         wx0 = wx1;
         wy0 = wy1;
@@ -2506,7 +2540,11 @@ void GrapherApp::appendPOIsForFunction(int fi) {
                 prevDiff = diff;
                 continue;
             }
-            if (prevDiff * diff < 0.0f) {
+            // GRBUG-005: accept an exact zero at the right sample too — a
+            // crossing landing exactly on a sample point (y=x ∩ y=-x at x=0 on
+            // the centred grid) gives diff==0, which the strict `< 0` product
+            // test used to skip.
+            if (prevDiff * diff < 0.0f || (diff == 0.0f && prevDiff != 0.0f)) {
                 float lo = x1 - step;
                 float hi = x1;
                 float dlo = prevDiff;
@@ -2523,8 +2561,12 @@ void GrapherApp::appendPOIsForFunction(int fi) {
                 }
                 const float ix = (lo + hi) * 0.5f;
                 const float iy = (float)evalAt(fi, ix);
+                // GRBUG-005: dedupe ONLY against other Intersection POIs. Both
+                // lines of y=x ∩ y=-x carry a root POI at x≈0, so the origin
+                // crossing was always discarded as a "duplicate" of a ROOT.
                 bool dup = false;
                 for (int k = 0; k < _numPOIs; ++k) {
+                    if (_pois[k].type != POIType::Intersection) continue;
                     if (fabsf(_pois[k].x - ix) < step * 0.1f) { dup = true; break; }
                 }
                 if (!dup && !std::isnan(iy) && !std::isinf(iy) && _numPOIs < MAX_POIS) {
@@ -2613,6 +2655,11 @@ void GrapherApp::syncViewportToCursor() {
                  ? traceY
                  : (_yMin + _yMax) * 0.5f;
     }
+    // Defence in depth vs GRBUG-001: never let a non-finite cursor coordinate
+    // (off-domain seed/step) recentre the viewport onto NaN — that blanks every
+    // later replot. Keep the respective current centre instead.
+    if (!std::isfinite(cx)) cx = (_xMin + _xMax) * 0.5f;
+    if (!std::isfinite(cy)) cy = (_yMin + _yMax) * 0.5f;
 
     _xMin = cx - xRange / 2.0f;
     _xMax = cx + xRange / 2.0f;
@@ -3359,11 +3406,16 @@ void GrapherApp::handleGraphTrace(const KeyEvent& ev) {
     case KeyCode::SUB: {
         // Zoom in (ZOOM/+) or out (-) by 1.5×, keeping the control point centred —
         // so you can zoom while tracing any curve kind without losing the cursor.
+        // Guard against a non-finite cursor coordinate (off-domain trace, e.g.
+        // y=1/x at x=0): centring on NaN poisons _xMin.._yMax and blanks the
+        // canvas on every later replot (GRBUG-001). Fall back to the view centre.
         const float f = (ev.code == KeyCode::SUB) ? 1.5f : (1.0f / 1.5f);
         const float nxr = (_xMax - _xMin) * f;
         const float nyr = (_yMax - _yMin) * f;
-        _xMin = _traceX - nxr * 0.5f; _xMax = _traceX + nxr * 0.5f;
-        _yMin = _traceY - nyr * 0.5f; _yMax = _traceY + nyr * 0.5f;
+        const float czx = std::isfinite(_traceX) ? _traceX : (_xMin + _xMax) * 0.5f;
+        const float czy = std::isfinite(_traceY) ? _traceY : (_yMin + _yMax) * 0.5f;
+        _xMin = czx - nxr * 0.5f; _xMax = czx + nxr * 0.5f;
+        _yMin = czy - nyr * 0.5f; _yMax = czy + nyr * 0.5f;
         if (traceKind(_traceFn) != TraceKind::None) {
             syncViewportToCursor();   // re-lock on the cursor at the new zoom
         } else {
@@ -3506,6 +3558,24 @@ void GrapherApp::restyleCalcMenu() {
 
 void GrapherApp::openCalcMenu() {
     if (_calcMenuOpen || !_graphArea) return;
+
+    // GRBUG-002: POIs (roots/extrema/intersections) used to be seeded only by
+    // trace NAVIGATION, so Find Intersection invoked right after graphing (no
+    // arrow pressed yet) searched an empty POI set → "No intersection found".
+    // Seed them SYNCHRONOUSLY here: menu-open is a modal pause, the sweep is
+    // bounded (≤ MAX_FUNCS slots × fixed sampling), and doing it inline (not
+    // via the async timer) guarantees the set is ready even if ENTER lands on
+    // "Find Intersection" on the very next frame. Flows that never open this
+    // menu are untouched (pixel-identical goldens).
+    if (_poiAsyncTimer) {
+        lv_timer_delete(_poiAsyncTimer);
+        _poiAsyncTimer = nullptr;
+        _poiAsyncFi = -1;
+    }
+    _numPOIs = 0;
+    for (int i = 0; i < _numFuncs; ++i) {
+        if (_funcs[i].valid && _funcs[i].visible) appendPOIsForFunction(i);
+    }
 
     _calcMenuOpen = true;
 
@@ -4061,5 +4131,15 @@ const char* GrapherApp::debugTraceMode() const {
         case GrMode::NAVIGATE: return "navigate";
         default:               return "idle";
     }
+}
+
+// GR-14 append-only hook (GRBUG-002/005 regression guard): how many of the
+// currently computed POIs are curve∩curve intersections. Deterministic after
+// openCalcMenu()'s synchronous seed / executeCalcOption(3).
+int GrapherApp::debugIntersectionCount() const {
+    int n = 0;
+    for (int i = 0; i < _numPOIs; ++i)
+        if (_pois[i].type == POIType::Intersection) ++n;
+    return n;
 }
 #endif  // NATIVE_SIM

@@ -18,6 +18,7 @@
  */
 #include "GraphModel.h"
 #include <cstring>
+#include <cstdlib>
 #include <cmath>
 #include <algorithm>
 #include <string>
@@ -99,6 +100,7 @@ const char* GraphModel::getExprRHS(const char* text) {
 // therefore CalculationApp, is left exactly as it was.
 //
 // Examples:  "xx" → x*x   "xxx" → x*x*x   "xy" → x*y   "xpi" → x*pi   "pi" → pi
+//            "x2" → x*2   "pi2" → pi*2    "x(x+1)" → x*(x+1)
 
 // Case-insensitive prefix compare of the first n chars.
 static bool ciPrefixEq(const std::string& s, size_t pos, const char* w) {
@@ -112,6 +114,18 @@ static bool ciPrefixEq(const std::string& s, size_t pos, const char* w) {
     return true;
 }
 
+// The functions the shared Evaluator actually dispatches (Evaluator.cpp Function
+// case, case-insensitive). A Tokenizer "Function" token with any OTHER name is
+// not a call at all — it is juxtaposed variables in front of a parenthesised
+// group ("x(x+1)"), which the lookahead misclassified.
+static bool isSupportedFunctionName(const Token& t) {
+    static const char* kFuncs[] = { "sin", "cos", "tan", "sqrt", "log", "ln", "abs" };
+    std::string lc(t.text.c_str());
+    for (char& c : lc) if (c >= 'A' && c <= 'Z') c = (char)(c + 32);
+    for (const char* f : kFuncs) if (lc == f) return true;
+    return false;
+}
+
 static std::vector<Token> expandImplicitVarMul(const std::vector<Token>& in) {
     // Reserved multi-letter words that must NOT be split into single vars.
     // Longer words first so a prefix match is unambiguous.
@@ -119,36 +133,94 @@ static std::vector<Token> expandImplicitVarMul(const std::vector<Token>& in) {
 
     std::vector<Token> out;
     out.reserve(in.size());
-    for (const Token& t : in) {
-        if (t.type != TokenType::Identifier || t.text.length() <= 1) {
-            out.push_back(t);
-            continue;
-        }
-        std::string s(t.text.c_str());
+
+    auto pushMul = [&out]() {
+        Token mul;
+        mul.type = TokenType::Operator;
+        mul.op   = OperatorKind::Mul;
+        mul.text = "*";
+        out.push_back(mul);
+    };
+
+    // Split one merged run into '*'-joined pieces: reserved words, single-letter
+    // variables, and DIGIT RUNS as Number literals ("x2" → x*2, the mirror of the
+    // already-valid "2x"; a bare digit piece must never surface as an unknown
+    // *identifier* — the old expansion produced the nonsense reason "unknown: 2").
+    auto expandRun = [&](const std::string& s) {
         size_t i = 0;
         bool firstPiece = true;
         while (i < s.size()) {
             size_t matchLen = 0;
-            for (const char* w : kReserved) {
-                if (ciPrefixEq(s, i, w)) { matchLen = std::strlen(w); break; }
+            bool   isNum    = false;
+            if (s[i] >= '0' && s[i] <= '9') {          // whole digit run → Number
+                while (i + matchLen < s.size() &&
+                       s[i + matchLen] >= '0' && s[i + matchLen] <= '9') ++matchLen;
+                isNum = true;
+            } else {
+                for (const char* w : kReserved) {
+                    if (ciPrefixEq(s, i, w)) { matchLen = std::strlen(w); break; }
+                }
+                if (matchLen == 0) matchLen = 1;       // single-letter variable
             }
-            if (matchLen == 0) matchLen = 1;   // single-letter variable
 
-            if (!firstPiece) {                 // implicit '*' between pieces
-                Token mul;
-                mul.type = TokenType::Operator;
-                mul.op   = OperatorKind::Mul;
-                mul.text = "*";
-                out.push_back(mul);
-            }
+            if (!firstPiece) pushMul();                // implicit '*' between pieces
             firstPiece = false;
 
             Token id;
-            id.type = TokenType::Identifier;
             id.text = s.substr(i, matchLen).c_str();
+            if (isNum) {
+                id.type  = TokenType::Number;
+                id.value = std::strtod(s.substr(i, matchLen).c_str(), nullptr);
+            } else {
+                id.type = TokenType::Identifier;
+            }
             out.push_back(id);
             i += matchLen;
         }
+    };
+
+    for (size_t k = 0; k < in.size(); ++k) {
+        const Token& t = in[k];
+
+        // "x(x+1)": the Tokenizer lookahead marks the identifier before '(' as a
+        // Function, so its implicit-mul pass deliberately skipped it and the
+        // Evaluator died with "Función no soportada: x" (classifier: syntax).
+        // A Function token that is NOT a real evaluator function is juxtaposed
+        // variables times a parenthesised group: expand the name and multiply
+        // into the following '('. sin(/cos(/…​ pass through untouched.
+        if (t.type == TokenType::Function && !isSupportedFunctionName(t)) {
+            expandRun(std::string(t.text.c_str()));
+            pushMul();                                 // …* ( — LParen is the next token
+            continue;
+        }
+
+        if (t.type != TokenType::Identifier || t.text.length() <= 1) {
+            out.push_back(t);
+            continue;
+        }
+
+        // "x2.5" splits at the Tokenizer into Identifier "x2" · '*' · Number
+        // "0.5" (readNumber rewrites ".5" → "0.5" and the Tokenizer's own
+        // implicit-mul pass inserts the '*'). Expanding the digit tail would
+        // silently evaluate x*2*0.5 — a wrong answer, worse than a refusal.
+        // When a digit-TAILED identifier is followed (directly or through that
+        // '*') by a decimal-containing Number, keep the identifier intact so it
+        // stays an honest unknown-identifier refusal, exactly as before.
+        std::string s(t.text.c_str());
+        const bool digitTail = (s.back() >= '0' && s.back() <= '9');
+        auto isDecimalNumber = [&](size_t idx) {
+            return idx < in.size() && in[idx].type == TokenType::Number &&
+                   std::strchr(in[idx].text.c_str(), '.') != nullptr;
+        };
+        const bool mulNext = (k + 1 < in.size() &&
+                              in[k + 1].type == TokenType::Operator &&
+                              in[k + 1].op == OperatorKind::Mul);
+        if (digitTail && (isDecimalNumber(k + 1) || (mulNext && isDecimalNumber(k + 2)))) {
+            out.push_back(t);
+            continue;
+        }
+
+        expandRun(s);
     }
     return out;
 }

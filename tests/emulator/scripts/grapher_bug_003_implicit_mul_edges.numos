@@ -1,0 +1,95 @@
+# grapher_bug_003_implicit_mul_edges — GRBUG-003/004 regression guard for the
+# Grapher-local implicit-multiplication expansion (GraphModel::expandImplicitVarMul).
+#
+# Product semantics (stabilization-note deviation #8 extended): juxtaposition
+# reads as multiplication —
+#   slot 0  "x2"      → x*2        explicitY  (was: invalid "unknown: 2" — a
+#                                   literal digit surfaced as an unknown VARIABLE)
+#   slot 1  "pi2"     → pi*2       explicitY  (was: invalid "unknown: 2")
+#   slot 2  "x(x+1)"  → x*(x+1)    explicitY  (was: invalid "syntax" — the
+#                                   Tokenizer lookahead made 'x' a Function)
+#   slot 3  "(x)(x+1)"             explicitY  control — was already valid
+#   slot 4  "xxx"     → x*x*x      explicitY  stabilization behavior preserved
+#   slot 5  "xy=1"    → x*y=1      implicit   stabilization behavior preserved
+# Real function calls (sin(x), log(x), ln(x)) stay function calls: the demotion
+# only touches Function tokens whose name is NOT an evaluator function —
+# covered by the existing grapher_classifier_* suite; "x2.5" stays an honest
+# unknown-identifier refusal (fraction-tail guard) rather than silently
+# evaluating x*2*0.5.
+#
+# Assert-only: NO golden, NO screenshot.
+#
+# Run:
+#   program --script tests/emulator/scripts/grapher_bug_003_implicit_mul_edges.numos \
+#           --deterministic --frames 1400 --headless --quiet
+log "grapher_bug_003_implicit_mul_edges: start"
+wait 200
+open_app Grapher
+wait 60
+key down
+key enter
+key x
+key 2
+key enter
+wait 30
+key down
+key enter
+key pi
+key 2
+key enter
+wait 30
+key down
+key enter
+key x
+key (
+key x
+key +
+key 1
+key right
+key enter
+wait 30
+key down
+key enter
+key (
+key x
+key right
+key (
+key x
+key +
+key 1
+key right
+key enter
+wait 30
+key down
+key enter
+key x
+key x
+key x
+key enter
+wait 30
+key down
+key enter
+key x
+key y
+key =
+key 1
+key enter
+wait 60
+assert_graph_relation_count 6
+assert_graph_slot_kind 0 explicitY
+assert_graph_slot_valid 0
+assert_graph_expr_text 0 x2
+assert_graph_slot_kind 1 explicitY
+assert_graph_slot_valid 1
+assert_graph_expr_text 1 pi2
+assert_graph_slot_kind 2 explicitY
+assert_graph_slot_valid 2
+assert_graph_expr_text 2 x(x+1)
+assert_graph_slot_kind 3 explicitY
+assert_graph_slot_valid 3
+assert_graph_slot_kind 4 explicitY
+assert_graph_slot_valid 4
+assert_graph_slot_kind 5 implicit
+assert_graph_slot_valid 5
+assert_app Grapher
+log "grapher_bug_003_implicit_mul_edges: juxtaposition reads as product everywhere"
