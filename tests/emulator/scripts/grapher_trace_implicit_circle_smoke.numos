@@ -1,0 +1,61 @@
+# grapher_trace_implicit_circle_smoke.numos — Phase 10F/10G. Trace a general
+# implicit contour.
+#
+# Commits "x^2+y^2=9" (a circle of radius 3) and walks the cursor AROUND the
+# contour. Proves the predictor-corrector implicit tracer: it seeds an on-curve
+# point in the viewport, then each `right` advances a fixed arc-length along the
+# tangent (perpendicular to grad G) with a Newton correction back onto
+# G(x,y)=lhs-rhs=0 — so the cursor stays ON the circle instead of showing nan or a
+# fake y=0. LEFT/RIGHT walk opposite ways via a persistent heading.
+#
+# Phase 10G: the Graph tab opens directly in a CENTRED Trace for an implicit
+# equation (no ENTER needed); ZOOM works while tracing (zooms about the control
+# point); and the camera locks onto the cursor every step (syncViewportToCursor)
+# so the circle scrolls under a cursor pinned to screen centre.
+#
+# Flow (src/apps/GrapherApp.cpp): seedImplicitTrace / correctOntoCurve /
+# updateImplicitHeading / traceStep (Implicit). The circle plots via marching
+# squares (plotImplicit) exactly as before.
+#
+# Warning-only: screenshot, NO golden, NOT CI-gated (absent from the
+# generate-emulator-candidates CANDIDATES list and every emulator-build.yml step).
+#
+# Run:
+#   program --headless --deterministic --script tests/emulator/scripts/grapher_trace_implicit_circle_smoke.numos \
+#           --frames 800 --screenshot out/grapher_trace_implicit_circle_smoke.ppm --quiet
+log "grapher_trace_implicit_circle: start"
+wait 200
+open_app Grapher
+wait 60
+# down -> Add row; enter -> edit slot 0; type "x^2+y^2=9" (right exits each exponent).
+key down
+key enter
+key x
+key ^
+key 2
+key right
+key +
+key y
+key ^
+key 2
+key right
+key =
+key 9
+key enter
+wait 80
+# Graph opens directly in a centred Trace for the implicit equation; ZOOM enlarges
+# the circle while keeping the cursor centred, then each `right` walks the contour.
+key graph
+wait 80
+key zoom
+wait 60
+key right
+key right
+key right
+key right
+key right
+key right
+wait 120
+screenshot out/grapher_trace_implicit_circle_smoke.ppm
+assert_app Grapher
+log "grapher_trace_implicit_circle: walked the x^2+y^2=9 contour, cursor centred"

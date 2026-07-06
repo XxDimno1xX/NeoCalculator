@@ -1,0 +1,44 @@
+# grapher_calcmenu_xfy_smoke.numos — Phase 10G. Full Calculate menu on x = f(y).
+#
+# Commits "x = y^2" (a parabola opening RIGHT, single-valued in y) and opens the
+# Calculate menu. Proves Phase 10G's x=f(y) analysis: Root / Minimum / Maximum /
+# Integral are now ENABLED for an x=f(y) curve (calcItemEnabled: ExplicitX ||
+# ExplicitY), not just for y=f(x). Only "Find Intersection" is greyed here because
+# a single curve has nothing to intersect.
+#
+# executeCalcOption analyses the slot as a function of y (alongY): evalFunc(t) =
+# evalAtY(t) over [yMin,yMax], then maps the result back to a screen point with the
+# x/y roles swapped — Root = where x=0, Min/Max = leftmost/rightmost turning point,
+# Integral = ∫f(y)dy (drawIntegralShadingY draws horizontal strips). A general
+# implicit contour (e.g. a circle) stays Tangent-only (multivalued).
+#
+# Warning-only: screenshot, NO golden, NOT CI-gated (absent from the
+# generate-emulator-candidates CANDIDATES list and every emulator-build.yml step).
+#
+# Run:
+#   program --headless --deterministic --script tests/emulator/scripts/grapher_calcmenu_xfy_smoke.numos \
+#           --frames 1000 --screenshot out/grapher_calcmenu_xfy_smoke.ppm --quiet
+log "grapher_calcmenu_xfy: start"
+wait 200
+open_app Grapher
+wait 60
+# down -> Add row; enter -> edit slot 0; type "x=y^2" (right exits the exponent).
+key down
+key enter
+key x
+key =
+key y
+key ^
+key 2
+key right
+key enter
+wait 50
+# Graph opens directly in a centred Trace for x=f(y); ENTER opens the Calculate menu
+# with Root/Minimum/Maximum/Integral/Tangent all available (Intersection greyed).
+key graph
+wait 120
+key enter
+wait 80
+screenshot out/grapher_calcmenu_xfy_smoke.ppm
+assert_app Grapher
+log "grapher_calcmenu_xfy: full menu enabled for x=y^2"

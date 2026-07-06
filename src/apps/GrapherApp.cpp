@@ -49,6 +49,17 @@ static constexpr uint32_t COL_TAB_TXT_A = 0x000000;  // Active tab text (black)
 static constexpr uint32_t COL_ROW_BG    = 0xFFFFFF;  // Expr pill background (white)
 static constexpr uint32_t COL_ROW_BRD   = 0xD1D1D1;  // Expr pill border (gray)
 static constexpr uint32_t COL_ROW_SEL   = 0x4A90E2;  // Selected pill (blue)
+static constexpr uint32_t COL_ROW_INV   = 0xCC3333;  // Invalid pill border (red)
+
+// Compose the user-visible refusal string for an invalid slot ("one-sided
+// relation", "unknown: xy", ...). Canonical strings frozen by the classifier
+// contract; scripts assert them by substring.
+static void formatInvalidReason(const grapher::CartesianFunction& f, char* out, size_t n) {
+    if (f.invalidReason == grapher::InvalidReason::UnknownIdent && f.reasonDetail[0])
+        snprintf(out, n, "unknown: %s", f.reasonDetail);
+    else
+        snprintf(out, n, "%s", grapher::invalidReasonText(f.invalidReason));
+}
 static constexpr uint32_t COL_HINT      = 0x999999;
 static constexpr uint32_t COL_ADD_TXT   = 0x888888;  // "Add element" muted
 static constexpr uint32_t COL_BTN_BG    = 0x4A90E2;  // Action buttons (blue)
@@ -106,14 +117,16 @@ GrapherApp::GrapherApp()
     , _tracePill(nullptr), _tracePillDot(nullptr), _tracePillLabel(nullptr)
     , _infoBar(nullptr), _infoLabel(nullptr)
     , _calcMenu(nullptr), _calcMenuIdx(0), _calcMenuOpen(false)
-    , _shadingActive(false), _shadingFuncIdx(-1), _shadingX0(0.0f), _shadingX1(0.0f)
-    , _tangentActive(false), _tangentFuncIdx(-1), _tangentX(0.0f)
+    , _shadingActive(false), _shadingFuncIdx(-1), _shadingX0(0.0f), _shadingX1(0.0f), _shadingAlongY(false)
+    , _tangentActive(false), _tangentFuncIdx(-1), _tangentX(0.0f), _tangentY(0.0f)
     , _tblTable(nullptr)
     , _tab(Tab::EXPRESSIONS), _focus(Focus::TAB_BAR), _tabIdx(0)
     , _numFuncs(0), _exprIdx(0), _exprMode(ExprMode::LIST)
     , _grMode(GrMode::IDLE), _toolIdx(0)
     , _xMin(-10.0f), _xMax(10.0f), _yMin(-7.0f), _yMax(7.0f)
-    , _traceX(0.0f), _traceFn(0), _plotDirty(true)
+    , _traceX(0.0f), _traceY(0.0f), _traceFn(0)
+    , _traceValid(false), _traceSeeded(false), _traceHeadX(0.0f), _traceHeadY(0.0f)
+    , _plotDirty(true)
     , _tblRow(0), _tblStart(-5.0f), _tblStep(1.0f), _tblFuncIdx(0)
     , _poiAsyncTimer(nullptr), _poiAsyncFi(-1)
 {
@@ -129,7 +142,7 @@ GrapherApp::GrapherApp()
         _funcs[i].color = FUNC_COLORS[i];
     }
     for (int i = 0; i < 4; ++i) _toolLabels[i] = nullptr;
-    for (int i = 0; i < CALC_MENU_ITEMS; ++i) _calcMenuRows[i] = nullptr;
+    for (int i = 0; i < CALC_MENU_ITEMS; ++i) { _calcMenuRows[i] = nullptr; _calcMenuEnabled[i] = false; }
     _tblTable = nullptr;
     _tblHeaderBar = nullptr;
     for (int i = 0; i < TBL_COLS; ++i)     _tblHdrLabels[i] = nullptr;
@@ -820,13 +833,16 @@ void GrapherApp::switchTab(Tab t) {
             Serial.println("[GRAPHER] graphPanel done");
             if (_panelGraph) {
                 lv_obj_remove_flag(_panelGraph, LV_OBJ_FLAG_HIDDEN);
-                // Default to TRACE only when a single-valued y=f(x) exists; with
-                // only implicit/inequality slots start in PAN so the graph never
-                // auto-enters a dead trace (no "y=nan", and ENTER won't pop the
-                // Calculate menu on a non-traceable curve).
+                // Default to TRACE on ANY traceable curve — y=f(x), x=f(y), or a
+                // general implicit equation. Only a graph with no traceable curve
+                // (inequality / region only) opens in PAN. The camera then locks
+                // onto the control point for every kind (syncViewportToCursor).
                 _traceFn = firstTraceableFunc(0, +1);
                 _grMode  = (_traceFn >= 0) ? GrMode::TRACE : GrMode::NAVIGATE;
                 _traceX = (_xMin + _xMax) / 2.0f;
+                _traceY = (_yMin + _yMax) / 2.0f;
+                _traceSeeded = false;
+                _traceHeadX = 0.0f; _traceHeadY = 0.0f;
                 _plotDirty = true;
                 _snappedToPOI = false;
                 _snappedPOIIdx = -1;
@@ -836,25 +852,42 @@ void GrapherApp::switchTab(Tab t) {
                 // the Graph tab — including via the "Plot graph" button — shows an
                 // empty graph (just axes) until the user presses a key, because
                 // replot() bails while lv_obj_get_height(_graphArea) is still 0.
-                // The trace cursor/POIs are intentionally left to the first trace
-                // key (unchanged behaviour), so only the missing curve is fixed.
                 lv_obj_update_layout(_panelGraph);
                 replot();
+                // y=f(x) keeps its long-standing deferred cursor/POIs (drawn on the
+                // first trace key, so the legacy goldens are untouched). x=f(y) and
+                // implicit curves seed an on-curve point and centre the camera on it
+                // NOW, so the graph opens in a centred Trace instead of Pan.
+                if (_grMode == GrMode::TRACE && traceKind(_traceFn) != TraceKind::ExplicitX) {
+                    ensureTraceSeed();
+                    if (_traceValid) syncViewportToCursor();
+                    drawTraceCursor();
+                }
             }
         } else {
             lv_obj_remove_flag(_panelGraph, LV_OBJ_FLAG_HIDDEN);
-            // See lazy-create branch above: trace only a single-valued y=f(x).
+            // See lazy-create branch above: auto-trace ANY traceable curve.
             _traceFn = firstTraceableFunc(0, +1);
             _grMode  = (_traceFn >= 0) ? GrMode::TRACE : GrMode::NAVIGATE;
             _traceX = (_xMin + _xMax) / 2.0f;
+            _traceY = (_yMin + _yMax) / 2.0f;
+            _traceSeeded = false;
+            _traceHeadX = 0.0f; _traceHeadY = 0.0f;
             _plotDirty = true;
             _snappedToPOI = false;
             _snappedPOIIdx = -1;
             _snapEscapeCount = 0;
             replot();
-            // Pre-compute POIs for snap-to-point
-            if (_traceFn >= 0) computePOIs(_traceFn);
-            drawTraceCursor();
+            if (_grMode == GrMode::TRACE) {
+                ensureTraceSeed();
+                // x=f(y) / implicit lock the camera on the seed; y=f(x) keeps the
+                // current view and just precomputes POIs (camera follows on step).
+                if (traceKind(_traceFn) != TraceKind::ExplicitX && _traceValid)
+                    syncViewportToCursor();
+                else
+                    computePOIs(_traceFn);
+                drawTraceCursor();
+            }
         }
         updateInfoBar();
         break;
@@ -952,9 +985,15 @@ void GrapherApp::refreshExprList() {
 void GrapherApp::refreshExprFocus() {
     for (int i = 0; i < MAX_FUNCS; ++i) {
         if (i < _numFuncs) {
+            // Invalid committed slots (len>0, rejected by the classifier) show a
+            // red border so a refused expression is VISIBLY different from a
+            // plotted one. Valid and empty slots keep the legacy gray border, so
+            // every existing golden (valid slots only) stays byte-identical.
+            const bool invalid = _funcs[i].len > 0 && !_funcs[i].valid;
             lv_obj_set_style_bg_color(_exprRows[i], lv_color_hex(COL_ROW_BG), LV_PART_MAIN);
-            lv_obj_set_style_border_color(_exprRows[i], lv_color_hex(COL_ROW_BRD), LV_PART_MAIN);
-            lv_obj_set_style_border_width(_exprRows[i], 1, LV_PART_MAIN);
+            lv_obj_set_style_border_color(_exprRows[i],
+                lv_color_hex(invalid ? COL_ROW_INV : COL_ROW_BRD), LV_PART_MAIN);
+            lv_obj_set_style_border_width(_exprRows[i], invalid ? 2 : 1, LV_PART_MAIN);
         }
     }
     lv_obj_set_style_bg_color(_addRow, lv_color_hex(0xF7F7F7), LV_PART_MAIN);
@@ -977,6 +1016,23 @@ void GrapherApp::refreshExprFocus() {
         lv_obj_set_style_bg_color(_plotBtn, lv_color_hex(0x3A7BD5), LV_PART_MAIN);
     } else if (_exprIdx == _numFuncs + 2) {
         lv_obj_set_style_bg_color(_tableBtn, lv_color_hex(0x3A7BD5), LV_PART_MAIN);
+    }
+
+    // Selected-row refusal hint: when the focused slot was rejected, the hint
+    // bar says WHY ("Invalid: one-sided relation", "Invalid: unknown: xy") so
+    // the refusal is explicit, not a mysteriously blank plot. On valid/other
+    // rows the hint reverts to the LIST default. Only in LIST mode (the editor
+    // owns the hint while editing).
+    if (_exprHint && _exprMode == ExprMode::LIST) {
+        if (_exprIdx < _numFuncs && _funcs[_exprIdx].len > 0 && !_funcs[_exprIdx].valid) {
+            char reason[32];
+            formatInvalidReason(_funcs[_exprIdx], reason, sizeof(reason));
+            char hint[64];
+            snprintf(hint, sizeof(hint), "Invalid: %s  ENTER=edit", reason);
+            lv_label_set_text(_exprHint, hint);
+        } else {
+            lv_label_set_text(_exprHint, "ENTER=edit  AC=back");
+        }
     }
 
     // Keep the focused item on-screen. Snap with no animation so the list never
@@ -1100,6 +1156,12 @@ void GrapherApp::refreshVPAMExpr(int idx) {
 }
 
 // ── AST → text serialization for the Tokenizer/Parser/Evaluator pipeline ──
+// s_serializeUnsupported is set when serialization meets an AST node the
+// numeric pipeline cannot express (DefIntegral, Summation, Subscript, BigOp,
+// PeriodicDecimal). Previously such nodes were silently DROPPED, so the slot
+// compiled a different expression than the one on screen. The flag turns that
+// into a visible "unsupported node" rejection (classifier contract R14).
+static bool s_serializeUnsupported = false;
 static void serializeNode(const vpam::MathNode* node, char* buf, int& pos, int maxLen);
 
 static void serializeRow(const vpam::NodeRow* row, char* buf, int& pos, int maxLen) {
@@ -1258,7 +1320,12 @@ static void serializeNode(const vpam::MathNode* node, char* buf, int& pos, int m
             break;
         }
         case NodeType::Empty:
+            break;
         default:
+            // AST node with no textual form in the numeric pipeline — flag it
+            // instead of silently dropping it (would plot a DIFFERENT function
+            // than the one displayed).
+            s_serializeUnsupported = true;
             break;
     }
 }
@@ -1266,12 +1333,33 @@ static void serializeNode(const vpam::MathNode* node, char* buf, int& pos, int m
 void GrapherApp::syncASTtoText(int idx) {
     if (idx < 0 || idx >= MAX_FUNCS) return;
     FuncSlot& f = _funcs[idx];
+
+    // Serialize into an oversized scratch first (classifier contract R13): the
+    // slot's text[] holds at most 63 chars, and the old direct-serialize
+    // silently TRUNCATED longer expressions — which then compiled and plotted a
+    // wrong curve. Overflow now records a TooLong verdict that preCacheRPN
+    // turns into a visible "expression too long" rejection.
+    char scratch[128];
     int pos = 0;
+    s_serializeUnsupported = false;
     if (_exprASTRow[idx]) {
-        serializeRow(_exprASTRow[idx], f.text, pos, 63);
+        serializeRow(_exprASTRow[idx], scratch, pos, (int)sizeof(scratch) - 1);
     }
-    f.text[pos] = '\0';
-    f.len = pos;
+    scratch[pos] = '\0';
+
+    f.serializeVerdict = grapher::InvalidReason::None;
+    if (s_serializeUnsupported) {
+        f.serializeVerdict = grapher::InvalidReason::Unsupported;
+    } else if (pos > 63) {
+        f.serializeVerdict = grapher::InvalidReason::TooLong;
+    }
+
+    // Copy (possibly clamped) text for display/diagnostics; when a verdict is
+    // set the text is never classified or compiled (preCacheRPN early-outs).
+    int n = pos > 63 ? 63 : pos;
+    memcpy(f.text, scratch, (size_t)n);
+    f.text[n] = '\0';
+    f.len = n;
 }
 
 vpam::NodePtr GrapherApp::buildTemplateAST(const char* text) {
@@ -1621,6 +1709,14 @@ void GrapherApp::preCacheFuncRPN(int idx) {
 
     // Delegate to GraphModel to compile and cache the RPN
     _model.preCacheRPN(_funcs[idx]);
+
+    // Refusal telemetry: one greppable line per rejected commit, so scripted
+    // runs (and users watching the serial log) see WHY a slot will not plot.
+    if (!_funcs[idx].valid) {
+        char reason[32];
+        formatInvalidReason(_funcs[idx], reason, sizeof(reason));
+        Serial.printf("[GRAPH] invalid slot=%d reason=%s\n", idx, reason);
+    }
 }
 
 float GrapherApp::evalAt(int idx, float x) {
@@ -1631,9 +1727,254 @@ float GrapherApp::evalAt(int idx, float x) {
 
 int GrapherApp::firstTraceableFunc(int from, int dir) const {
     for (int i = from; i >= 0 && i < _numFuncs; i += dir) {
+        if (_funcs[i].isTraceable() && _funcs[i].visible) return i;
+    }
+    return -1;
+}
+
+int GrapherApp::firstExplicitXFunc(int from, int dir) const {
+    for (int i = from; i >= 0 && i < _numFuncs; i += dir) {
         if (_funcs[i].isExplicit() && _funcs[i].visible) return i;
     }
     return -1;
+}
+
+// ── Unified trace cursor ───────────────────────────────────────────────────
+//
+// Three curve kinds share one cursor (_traceX,_traceY) + validity flag:
+//   ExplicitX  y=f(x): LEFT/RIGHT step x by one pixel; y = f(x). Locked camera
+//                      + POI snap (unchanged legacy behaviour).
+//   ExplicitY  x=f(y): LEFT/RIGHT step y by one pixel; x = f(y) exactly.
+//   Implicit   G=0   : LEFT/RIGHT advance along the contour by a fixed arc-length
+//                      (predictor along the tangent ⟂∇G, Newton corrector back
+//                      onto G=0). A persistent heading keeps RIGHT/LEFT consistent
+//                      around closed curves.
+// ExplicitY/Implicit keep the viewport fixed and only pan when the cursor nears
+// an edge, so a circle stays still while the cursor walks around it.
+
+GrapherApp::TraceKind GrapherApp::traceKind(int fi) const {
+    if (fi < 0 || fi >= _numFuncs) return TraceKind::None;
+    const FuncSlot& f = _funcs[fi];
+    if (!f.isTraceable() || !f.visible) return TraceKind::None;
+    if (!f.implicit)  return TraceKind::ExplicitX;   // y = f(x)
+    if (f.explicitY)  return TraceKind::ExplicitY;   // x = f(y)
+    return TraceKind::Implicit;                      // general G(x,y) = 0
+}
+
+// Finite-difference gradient ∇G = (∂G/∂x, ∂G/∂y) at (x,y), central difference
+// over ~one pixel. Returns false if any sample lands on a domain hole (NaN).
+bool GrapherApp::gradImplicit(int fi, float x, float y, float& gx, float& gy) const {
+    const int   bw = _view.bufW() > 1 ? _view.bufW() : SCREEN_W;
+    const int   bh = _view.bufH() > 1 ? _view.bufH() : GRAPH_CANVAS_H;
+    float hx = (_xMax - _xMin) / (float)bw;
+    float hy = (_yMax - _yMin) / (float)bh;
+    if (!(hx > 0.0f)) hx = 1e-4f;
+    if (!(hy > 0.0f)) hy = 1e-4f;
+    grapher::GraphModel& m = const_cast<grapher::GraphModel&>(_model);
+    FuncSlot&   f = const_cast<FuncSlot&>(_funcs[fi]);
+    float gpx = m.evalImplicit(f, x + hx, y);
+    float gnx = m.evalImplicit(f, x - hx, y);
+    float gpy = m.evalImplicit(f, x, y + hy);
+    float gny = m.evalImplicit(f, x, y - hy);
+    if (std::isnan(gpx) || std::isnan(gnx) || std::isnan(gpy) || std::isnan(gny))
+        return false;
+    gx = (gpx - gnx) / (2.0f * hx);
+    gy = (gpy - gny) / (2.0f * hy);
+    if (std::isnan(gx) || std::isnan(gy) || std::isinf(gx) || std::isinf(gy))
+        return false;
+    return true;
+}
+
+// Newton corrector: project (x,y) onto the nearest point of G(x,y)=0 along the
+// gradient. Converges quadratically near the curve. Returns true when the final
+// residual distance |G|/|∇G| is sub-pixel-small; false on divergence/domain holes.
+bool GrapherApp::correctOntoCurve(int fi, float& x, float& y) const {
+    const float scale = _xMax - _xMin;
+    grapher::GraphModel& m = const_cast<grapher::GraphModel&>(_model);
+    FuncSlot&   f = const_cast<FuncSlot&>(_funcs[fi]);
+    for (int it = 0; it < TRACE_NEWTON_ITERS; ++it) {
+        float g = m.evalImplicit(f, x, y);
+        if (std::isnan(g) || std::isinf(g)) return false;
+        float gx, gy;
+        if (!gradImplicit(fi, x, y, gx, gy)) return false;
+        float gm2 = gx * gx + gy * gy;
+        if (gm2 < 1e-20f) return false;          // singular gradient
+        float dx = g * gx / gm2;
+        float dy = g * gy / gm2;
+        x -= dx;
+        y -= dy;
+        if (std::sqrt(dx * dx + dy * dy) < scale * 1e-4f) break;
+    }
+    float g = m.evalImplicit(f, x, y);
+    if (std::isnan(g) || std::isinf(g)) return false;
+    float gx, gy;
+    if (!gradImplicit(fi, x, y, gx, gy)) return false;
+    float gm = std::sqrt(gx * gx + gy * gy);
+    if (gm < 1e-12f) return false;
+    return (std::fabs(g) / gm) < scale * 1e-3f;  // within ~0.1% of viewport width
+}
+
+// Recompute the unit tangent (⟂∇G) at (x,y) and orient it consistently: align
+// with the previous heading so RIGHT keeps circling the same way; on the first
+// call (no heading yet) prefer the +x direction so RIGHT initially moves right.
+void GrapherApp::updateImplicitHeading(int fi, float x, float y) {
+    float gx, gy;
+    if (!gradImplicit(fi, x, y, gx, gy)) return;
+    float tx = gy, ty = -gx;                     // tangent ⟂ gradient
+    float m = std::sqrt(tx * tx + ty * ty);
+    if (m < 1e-12f) return;
+    tx /= m; ty /= m;
+    const bool havePrev = !(_traceHeadX == 0.0f && _traceHeadY == 0.0f);
+    const float ref = havePrev ? (tx * _traceHeadX + ty * _traceHeadY) : tx;
+    if (ref < 0.0f) { tx = -tx; ty = -ty; }
+    _traceHeadX = tx;
+    _traceHeadY = ty;
+}
+
+// Scan the viewport on a coarse grid for a G sign change, pick the crossing
+// nearest the screen centre, refine it with the Newton corrector, and seed the
+// cursor + heading there. Returns false if the contour is not in view.
+bool GrapherApp::seedImplicitTrace() {
+    const int bw = _view.bufW();
+    const int bh = _view.bufH();
+    if (bw < 2 || bh < 2) return false;
+
+    constexpr int GX = 48, GY = 36;              // seed-scan grid resolution
+    std::vector<float> g((size_t)(GX + 1) * (GY + 1));
+    auto pxAt = [&](int i) { return (int)((float)i / (float)GX * (float)(bw - 1)); };
+    auto pyAt = [&](int j) { return (int)((float)j / (float)GY * (float)(bh - 1)); };
+
+    grapher::GraphModel& m = _model;
+    for (int j = 0; j <= GY; ++j) {
+        float wy = _view.screenToWorldY(pyAt(j));
+        for (int i = 0; i <= GX; ++i) {
+            float wx = _view.screenToWorldX(pxAt(i));
+            g[(size_t)j * (GX + 1) + i] = m.evalImplicit(_funcs[_traceFn], wx, wy);
+        }
+    }
+
+    const float cxp = (float)bw * 0.5f, cyp = (float)bh * 0.5f;
+    bool found = false;
+    float best = 1e30f, bx = 0.0f, by = 0.0f;
+    auto consider = [&](float va, float vb, int xa, int ya, int xb, int yb) {
+        if (std::isnan(va) || std::isnan(vb)) return;
+        if ((va <= 0.0f) == (vb <= 0.0f)) return;       // no sign change on this edge
+        float t = va / (va - vb);
+        if (t < 0.0f) t = 0.0f; else if (t > 1.0f) t = 1.0f;
+        float sx = (float)xa + t * (float)(xb - xa);
+        float sy = (float)ya + t * (float)(yb - ya);
+        float dx = sx - cxp, dy = sy - cyp;
+        float d = dx * dx + dy * dy;
+        if (d < best) {
+            best = d;
+            bx = _view.screenToWorldX((int)(sx + 0.5f));
+            by = _view.screenToWorldY((int)(sy + 0.5f));
+            found = true;
+        }
+    };
+    for (int j = 0; j <= GY; ++j) {
+        for (int i = 0; i <= GX; ++i) {
+            float v = g[(size_t)j * (GX + 1) + i];
+            if (i < GX)
+                consider(v, g[(size_t)j * (GX + 1) + (i + 1)], pxAt(i), pyAt(j), pxAt(i + 1), pyAt(j));
+            if (j < GY)
+                consider(v, g[(size_t)(j + 1) * (GX + 1) + i], pxAt(i), pyAt(j), pxAt(i), pyAt(j + 1));
+        }
+    }
+    if (!found) return false;
+
+    float x = bx, y = by;
+    if (!correctOntoCurve(_traceFn, x, y)) { x = bx; y = by; }
+    _traceX = x;
+    _traceY = y;
+    _traceHeadX = 0.0f;                            // reset → prefer +x heading
+    _traceHeadY = 0.0f;
+    updateImplicitHeading(_traceFn, x, y);
+    return true;
+}
+
+// Compute the initial on-curve point for the active slot/kind (idempotent until
+// reset). Sets _traceValid; for ExplicitX/Y the parameter (_traceX or _traceY)
+// is supplied by the caller and the dependent coordinate is filled in here.
+void GrapherApp::ensureTraceSeed() {
+    if (_traceSeeded) return;
+    _traceSeeded = true;
+    _traceValid  = false;
+    switch (traceKind(_traceFn)) {
+    case TraceKind::ExplicitX: {
+        float yv = evalAt(_traceFn, _traceX);
+        _traceY = yv;
+        _traceValid = !(std::isnan(yv) || std::isinf(yv));
+        break;
+    }
+    case TraceKind::ExplicitY: {
+        float xv = _model.evalAtY(_funcs[_traceFn], _traceY);
+        _traceX = xv;
+        _traceValid = !(std::isnan(xv) || std::isinf(xv));
+        break;
+    }
+    case TraceKind::Implicit:
+        _traceValid = seedImplicitTrace();
+        break;
+    default:
+        break;
+    }
+}
+
+// Walk the active curve one step. dir = -1 (LEFT) / +1 (RIGHT).
+void GrapherApp::traceStep(int dir) {
+    ensureTraceSeed();
+    switch (traceKind(_traceFn)) {
+    case TraceKind::ExplicitX: {
+        // Legacy y=f(x): pixel-precise x move, POI snap, locked camera.
+        const float step = (_xMax - _xMin) / SCREEN_W;
+        const bool wasSnapped = _snappedToPOI;
+        _traceX += (float)dir * step;
+        if (_traceX < _xMin) _traceX = _xMin;
+        if (_traceX > _xMax) _traceX = _xMax;
+        if (wasSnapped) {
+            _snappedToPOI = false; _snappedPOIIdx = -1; _snapEscapeCount = 10;
+        } else if (_snapEscapeCount > 0) {
+            --_snapEscapeCount;
+        } else {
+            snapToPOI();
+        }
+        syncViewportToCursor();
+        float yv = evalAt(_traceFn, _traceX);
+        _traceY = yv;
+        _traceValid = !(std::isnan(yv) || std::isinf(yv));
+        break;
+    }
+    case TraceKind::ExplicitY: {
+        // x=f(y): pixel-precise y move along the curve, exact x = f(y).
+        const float stepY = (_yMax - _yMin) / SCREEN_H;
+        _traceY += (float)dir * stepY;
+        float xv = _model.evalAtY(_funcs[_traceFn], _traceY);
+        _traceX = xv;
+        _traceValid = !(std::isnan(xv) || std::isinf(xv));
+        if (_traceValid) syncViewportToCursor();   // lock camera on the control point
+        break;
+    }
+    case TraceKind::Implicit: {
+        if (!_traceValid) {                       // (re)seed if we lost the curve
+            _traceSeeded = false;
+            ensureTraceSeed();
+            if (!_traceValid) break;
+        }
+        const float pxw = (_xMax - _xMin) / SCREEN_W;
+        const float h = TRACE_IMPLICIT_STEP_PX * pxw;     // arc-length per press
+        float nx = _traceX + (float)dir * _traceHeadX * h;
+        float ny = _traceY + (float)dir * _traceHeadY * h;
+        if (correctOntoCurve(_traceFn, nx, ny)) {
+            updateImplicitHeading(_traceFn, nx, ny);
+            _traceX = nx; _traceY = ny; _traceValid = true;
+            syncViewportToCursor();                // lock camera on the control point
+        }
+        break;
+    }
+    default:
+        break;
+    }
 }
 
 // ── Adaptive sampling helpers (Phase B: Kandinsky streaming) ──────────────
@@ -1893,11 +2234,10 @@ void GrapherApp::replot() {
     }
 
     if (_shadingActive) {
-        drawIntegralShading(_shadingFuncIdx, _shadingX0, _shadingX1);
+        if (_shadingAlongY) drawIntegralShadingY(_shadingFuncIdx, _shadingX0, _shadingX1);
+        else                drawIntegralShading(_shadingFuncIdx, _shadingX0, _shadingX1);
     }
-    if (_tangentActive) {
-        drawTangentOverlay(_tangentFuncIdx, _tangentX);
-    }
+    drawActiveTangent();
     for (int i = 0; i < _numPOIs; ++i) {
         if (_pois[i].type == POIType::Intersection) {
             _view.drawIntersectionMarker(_pois[i].x, _pois[i].y, 0xAA00CC);
@@ -1912,8 +2252,21 @@ void GrapherApp::replot() {
 }
 
 void GrapherApp::drawTraceCursor() {
-    if (_grMode != GrMode::TRACE || _traceFn < 0 || _traceFn >= _numFuncs ||
-        !_funcs[_traceFn].valid) {
+    const TraceKind kind = (_grMode == GrMode::TRACE) ? traceKind(_traceFn)
+                                                      : TraceKind::None;
+    // Resolve the on-curve point for the active kind. ExplicitX recomputes y from
+    // x (pixel-identical to the legacy path); the others use the authoritative
+    // (_traceX,_traceY) maintained by the seed/step logic.
+    if (kind != TraceKind::None) ensureTraceSeed();
+    float wx = _traceX, wy = _traceY;
+    bool  ok  = (kind != TraceKind::None);
+    if (kind == TraceKind::ExplicitX) {
+        wx = _traceX;
+        wy = evalAt(_traceFn, _traceX);
+    } else if (kind != TraceKind::None) {
+        ok = _traceValid;
+    }
+    if (!ok || std::isnan(wx) || std::isinf(wx) || std::isnan(wy) || std::isinf(wy)) {
         if (_traceDot)   lv_obj_add_flag(_traceDot, LV_OBJ_FLAG_HIDDEN);
         if (_traceLineH) lv_obj_add_flag(_traceLineH, LV_OBJ_FLAG_HIDDEN);
         if (_traceLineV) lv_obj_add_flag(_traceLineV, LV_OBJ_FLAG_HIDDEN);
@@ -1926,16 +2279,7 @@ void GrapherApp::drawTraceCursor() {
     float xRange = _xMax - _xMin;
     float yRange = _yMax - _yMin;
 
-    float wy = evalAt(_traceFn, _traceX);
-    if (std::isnan(wy) || std::isinf(wy)) {
-        if (_traceDot)   lv_obj_add_flag(_traceDot, LV_OBJ_FLAG_HIDDEN);
-        if (_traceLineH) lv_obj_add_flag(_traceLineH, LV_OBJ_FLAG_HIDDEN);
-        if (_traceLineV) lv_obj_add_flag(_traceLineV, LV_OBJ_FLAG_HIDDEN);
-        if (_tracePill)  lv_obj_add_flag(_tracePill, LV_OBJ_FLAG_HIDDEN);
-        return;
-    }
-
-    float sx = (_traceX - _xMin) / xRange * areaW;
+    float sx = (wx - _xMin) / xRange * areaW;
     float sy = (1.0f - (wy - _yMin) / yRange) * areaH;
 
     // Trace dot
@@ -1965,9 +2309,9 @@ void GrapherApp::drawTraceCursor() {
         ? _pois[_snappedPOIIdx].label
         : nullptr;
     if (poiLabel) {
-        snprintf(pillBuf, sizeof(pillBuf), "%s: (%.3f, %.3f)", poiLabel, (double)_traceX, wy);
+        snprintf(pillBuf, sizeof(pillBuf), "%s: (%.3f, %.3f)", poiLabel, (double)wx, (double)wy);
     } else {
-        snprintf(pillBuf, sizeof(pillBuf), "x: %.3f   y: %.3f", (double)_traceX, wy);
+        snprintf(pillBuf, sizeof(pillBuf), "x: %.3f   y: %.3f", (double)wx, (double)wy);
     }
     lv_label_set_text(_tracePillLabel, pillBuf);
 }
@@ -1987,9 +2331,23 @@ void GrapherApp::updateInfoBar() {
         } else {
             snprintf(buf, sizeof(buf), "Trace: x=%.3f  y=%.3f", (double)_traceX, (double)y);
         }
+    } else if (_grMode == GrMode::TRACE && traceKind(_traceFn) == TraceKind::ExplicitY) {
+        // x = f(y): report the exact (x,y) on the curve, parametrised by y.
+        ensureTraceSeed();
+        if (!_traceValid)
+            snprintf(buf, sizeof(buf), "Trace: y=%.3f  x=---  (off domain)", (double)_traceY);
+        else
+            snprintf(buf, sizeof(buf), "Trace: x=%.3f  y=%.3f", (double)_traceX, (double)_traceY);
+    } else if (_grMode == GrMode::TRACE && traceKind(_traceFn) == TraceKind::Implicit) {
+        // General implicit contour: report the point we are sitting on.
+        ensureTraceSeed();
+        if (!_traceValid)
+            snprintf(buf, sizeof(buf), "Trace: curve not in view");
+        else
+            snprintf(buf, sizeof(buf), "Trace: x=%.3f  y=%.3f", (double)_traceX, (double)_traceY);
     } else if (_grMode == GrMode::TRACE) {
-        // Defensive: trace somehow active with no single-valued target.
-        snprintf(buf, sizeof(buf), "Trace n/a: implicit/inequality");
+        // Defensive: trace somehow active with no traceable target.
+        snprintf(buf, sizeof(buf), "Trace n/a: inequality");
     } else {
         snprintf(buf, sizeof(buf), "x:[%.2g,%.2g] y:[%.2g,%.2g]  ENTER=trace",
                  (double)_xMin, (double)_xMax, (double)_yMin, (double)_yMax);
@@ -2182,6 +2540,10 @@ void GrapherApp::appendPOIsForFunction(int fi) {
             if ((i & 7) == 0) yield();
         }
     }
+
+    // Cross-kind intersections (line∩circle, parabola∩curve, contour∩contour, …)
+    // for every pair involving fi that the 1-D loop above could not handle.
+    appendCrossIntersections(fi);
 }
 
 void GrapherApp::computePOIs(int fi) {
@@ -2231,25 +2593,173 @@ void GrapherApp::snapToPOI() {
     }
 }
 
-// ── Strict 1:1 locked camera: viewport center is always (traceX, traceY) ─
+// ── Strict 1:1 locked camera: viewport centre is always the control point ─
+// Every traceable kind keeps the cursor pinned to screen centre as it walks the
+// curve (NumWorks-style). y=f(x) recomputes y from x (legacy, pixel-identical);
+// x=f(y) and implicit contours centre on the authoritative (_traceX,_traceY),
+// which is what lets a circle/parabola stay centred instead of drifting to an edge.
 void GrapherApp::syncViewportToCursor() {
     float xRange = _xMax - _xMin;
     float yRange = _yMax - _yMin;
 
-    // Immediately lock viewport center to the traced point
-    _xMin = _traceX - xRange / 2.0f;
-    _xMax = _traceX + xRange / 2.0f;
-
-    float traceY = (_traceFn >= 0) ? evalAt(_traceFn, _traceX) : NAN;
-    if (!std::isnan(traceY) && !std::isinf(traceY)) {
-        _yMin = traceY - yRange / 2.0f;
-        _yMax = traceY + yRange / 2.0f;
+    float cx = _traceX;
+    float cy = _traceY;
+    if (traceKind(_traceFn) == TraceKind::ExplicitX) {
+        // Legacy path: x is authoritative, y is recomputed; keep the current y
+        // centre if the function is off-domain at this x (NaN), exactly as before.
+        float traceY = (_traceFn >= 0) ? evalAt(_traceFn, _traceX) : NAN;
+        cx = _traceX;
+        cy = (!std::isnan(traceY) && !std::isinf(traceY))
+                 ? traceY
+                 : (_yMin + _yMax) * 0.5f;
     }
+
+    _xMin = cx - xRange / 2.0f;
+    _xMax = cx + xRange / 2.0f;
+    _yMin = cy - yRange / 2.0f;
+    _yMax = cy + yRange / 2.0f;
 
     _plotDirty = true;
     replot();
     // Recompute POIs for new viewport
     if (_traceFn >= 0) computePOIs(_traceFn);
+}
+
+// ── Cross-kind intersection markers ─────────────────────────────────────────
+//
+// The legacy intersection finder (appendPOIsForFunction) only compares y=f(x)
+// against y=f(x) by sampling evalAt. To mark where a line meets a circle, an
+// x=f(y) parabola meets a curve, or two implicit contours cross, we treat every
+// traceable slot as a residual G(x,y)=0 and look for points where two residuals
+// vanish at once.
+
+// Unified residual: 0 exactly on the curve, signed off it. NAN on a domain hole
+// or for a non-traceable slot (inequality region).
+float GrapherApp::residualAt(int fi, float x, float y) {
+    if (fi < 0 || fi >= _numFuncs) return NAN;
+    FuncSlot& f = _funcs[fi];
+    if (!f.isTraceable() || !f.visible) return NAN;
+    if (!f.implicit) {                       // y = f(x)
+        float fx = evalAt(fi, x);
+        if (std::isnan(fx) || std::isinf(fx)) return NAN;
+        return y - fx;
+    }
+    return _model.evalImplicit(f, x, y);     // x = f(y) and general implicit
+}
+
+// 2-D Newton on F(x,y) = (Ga, Gb) = (0, 0). Jacobian by central difference over
+// ~one pixel. Returns true when both residuals are sub-pixel-small at the end.
+bool GrapherApp::newton2D(int a, int b, float& x, float& y) {
+    const int bw = _view.bufW() > 1 ? _view.bufW() : SCREEN_W;
+    const int bh = _view.bufH() > 1 ? _view.bufH() : GRAPH_CANVAS_H;
+    float hx = (_xMax - _xMin) / (float)bw;
+    float hy = (_yMax - _yMin) / (float)bh;
+    if (!(hx > 0.0f)) hx = 1e-4f;
+    if (!(hy > 0.0f)) hy = 1e-4f;
+    const float scale = _xMax - _xMin;
+    for (int it = 0; it < 16; ++it) {
+        float Fa = residualAt(a, x, y), Fb = residualAt(b, x, y);
+        if (std::isnan(Fa) || std::isnan(Fb) || std::isinf(Fa) || std::isinf(Fb)) return false;
+        float ax1 = residualAt(a, x + hx, y), ax0 = residualAt(a, x - hx, y);
+        float ay1 = residualAt(a, x, y + hy), ay0 = residualAt(a, x, y - hy);
+        float bx1 = residualAt(b, x + hx, y), bx0 = residualAt(b, x - hx, y);
+        float by1 = residualAt(b, x, y + hy), by0 = residualAt(b, x, y - hy);
+        if (std::isnan(ax1) || std::isnan(ax0) || std::isnan(ay1) || std::isnan(ay0) ||
+            std::isnan(bx1) || std::isnan(bx0) || std::isnan(by1) || std::isnan(by0))
+            return false;
+        const float j11 = (ax1 - ax0) / (2.0f * hx);   // ∂Ga/∂x
+        const float j12 = (ay1 - ay0) / (2.0f * hy);   // ∂Ga/∂y
+        const float j21 = (bx1 - bx0) / (2.0f * hx);   // ∂Gb/∂x
+        const float j22 = (by1 - by0) / (2.0f * hy);   // ∂Gb/∂y
+        const float det = j11 * j22 - j12 * j21;
+        if (std::fabs(det) < 1e-20f) return false;      // parallel curves / singular
+        const float dx = (-Fa * j22 + Fb * j12) / det;
+        const float dy = (-Fb * j11 + Fa * j21) / det;
+        x += dx;
+        y += dy;
+        if (std::sqrt(dx * dx + dy * dy) < scale * 1e-4f) break;
+    }
+    float Fa = residualAt(a, x, y), Fb = residualAt(b, x, y);
+    if (std::isnan(Fa) || std::isnan(Fb)) return false;
+    const float tol = (std::fabs(_xMax - _xMin) + std::fabs(_yMax - _yMin)) * 1e-3f;
+    return std::fabs(Fa) < tol && std::fabs(Fb) < tol;
+}
+
+// Grid-seeded search for points where curves a and b cross. A cell whose four
+// corners straddle zero for BOTH residuals brackets a crossing; refine with
+// newton2D and add a unique in-view Intersection POI.
+void GrapherApp::find2DIntersections(int a, int b) {
+    constexpr int GX = 32, GY = 24;
+    const float xr = _xMax - _xMin, yr = _yMax - _yMin;
+    if (xr <= 0.0f || yr <= 0.0f) return;
+
+    std::vector<float> ga((size_t)(GX + 1) * (GY + 1));
+    std::vector<float> gb((size_t)(GX + 1) * (GY + 1));
+    for (int j = 0; j <= GY; ++j) {
+        const float wy = _yMin + (float)j / (float)GY * yr;
+        for (int i = 0; i <= GX; ++i) {
+            const float wx = _xMin + (float)i / (float)GX * xr;
+            ga[(size_t)j * (GX + 1) + i] = residualAt(a, wx, wy);
+            gb[(size_t)j * (GX + 1) + i] = residualAt(b, wx, wy);
+        }
+        if ((j & 3) == 0) yield();
+    }
+
+    auto straddles = [](float c0, float c1, float c2, float c3) -> bool {
+        if (std::isnan(c0) || std::isnan(c1) || std::isnan(c2) || std::isnan(c3)) return false;
+        const bool anyNeg = c0 < 0.0f || c1 < 0.0f || c2 < 0.0f || c3 < 0.0f;
+        const bool anyPos = c0 > 0.0f || c1 > 0.0f || c2 > 0.0f || c3 > 0.0f;
+        return anyNeg && anyPos;
+    };
+
+    const float dupPx = 6.0f;   // markers closer than this (screen px) are the same point
+    for (int j = 0; j < GY && _numPOIs < MAX_POIS; ++j) {
+        for (int i = 0; i < GX && _numPOIs < MAX_POIS; ++i) {
+            const size_t i00 = (size_t)j * (GX + 1) + i;
+            const float a00 = ga[i00], a10 = ga[i00 + 1];
+            const float a01 = ga[i00 + (GX + 1)], a11 = ga[i00 + (GX + 1) + 1];
+            const float b00 = gb[i00], b10 = gb[i00 + 1];
+            const float b01 = gb[i00 + (GX + 1)], b11 = gb[i00 + (GX + 1) + 1];
+            if (!straddles(a00, a10, a01, a11)) continue;
+            if (!straddles(b00, b10, b01, b11)) continue;
+
+            float x = _xMin + ((float)i + 0.5f) / (float)GX * xr;
+            float y = _yMin + ((float)j + 0.5f) / (float)GY * yr;
+            if (!newton2D(a, b, x, y)) continue;
+            if (x < _xMin || x > _xMax || y < _yMin || y > _yMax) continue;
+
+            const int sx = _view.worldToScreenX(x);
+            const int sy = _view.worldToScreenY(y);
+            bool dup = false;
+            for (int k = 0; k < _numPOIs; ++k) {
+                const float ddx = (float)(sx - _view.worldToScreenX(_pois[k].x));
+                const float ddy = (float)(sy - _view.worldToScreenY(_pois[k].y));
+                if (ddx * ddx + ddy * ddy < dupPx * dupPx) { dup = true; break; }
+            }
+            if (dup) continue;
+            auto& p = _pois[_numPOIs++];
+            p.x = x; p.y = y;
+            p.type = POIType::Intersection;
+            strncpy(p.label, "Intersection", sizeof(p.label) - 1);
+            p.label[sizeof(p.label) - 1] = '\0';
+        }
+        if ((j & 3) == 0) yield();
+    }
+}
+
+// Intersections of fi with each earlier slot j<fi, for any pair that is NOT both
+// y=f(x) (those keep the exact 1-D path in appendPOIsForFunction). Every unordered
+// pair is visited once because appendPOIsForFunction runs for every fi in turn.
+void GrapherApp::appendCrossIntersections(int fi) {
+    if (fi < 0 || fi >= _numFuncs) return;
+    if (!_funcs[fi].isTraceable() || !_funcs[fi].visible) return;
+    const TraceKind ki = traceKind(fi);
+    for (int j = 0; j < fi && _numPOIs < MAX_POIS; ++j) {
+        if (!_funcs[j].isTraceable() || !_funcs[j].visible) continue;
+        const TraceKind kj = traceKind(j);
+        if (ki == TraceKind::ExplicitX && kj == TraceKind::ExplicitX) continue;  // legacy 1-D
+        find2DIntersections(fi, j);
+    }
 }
 
 
@@ -2667,24 +3177,31 @@ void GrapherApp::handleToolbar(const KeyEvent& ev) {
             updateInfoBar();
             break;
         case 3: { // Trace (was Calculate)
-            // Only single-valued y=f(x) slots are traceable. If the user has only
-            // implicit equations / inequalities loaded, refuse trace gracefully
-            // instead of silently tracing an invisible y=0 line (no "y=nan").
+            // Trace any curve — y=f(x), x=f(y), or an implicit equation. Only a
+            // graph with no traceable curve (inequality / region only) refuses,
+            // instead of tracing an invisible y=0 line (no "y=nan").
             int tf = firstTraceableFunc(0, +1);
             if (tf < 0) {
                 if (_infoLabel)
-                    lv_label_set_text(_infoLabel, "Trace n/a: no y=f(x) (implicit/inequality)");
+                    lv_label_set_text(_infoLabel, "Trace n/a: inequality region only");
                 break;
             }
             _focus = Focus::CONTENT;
             _grMode = GrMode::TRACE;
+            _traceFn = tf;
             _traceX = (_xMin + _xMax) / 2.0f;
+            _traceY = (_yMin + _yMax) / 2.0f;
+            _traceSeeded = false;
+            _traceHeadX = 0.0f; _traceHeadY = 0.0f;
             _snappedToPOI = false;
             _snappedPOIIdx = -1;
             _snapEscapeCount = 0;
-            _traceFn = tf;
-            // Pre-compute POIs now that we have a target function
-            computePOIs(_traceFn);
+            ensureTraceSeed();
+            // x=f(y) / implicit lock the camera on the seed; y=f(x) keeps the view.
+            if (traceKind(_traceFn) != TraceKind::ExplicitX && _traceValid)
+                syncViewportToCursor();
+            else
+                computePOIs(_traceFn);
             drawTraceCursor();
             updateInfoBar();
             break;
@@ -2726,21 +3243,32 @@ void GrapherApp::handleGraphNav(const KeyEvent& ev) {
         break;
     }
     case KeyCode::ENTER: {
-        // Toggle Trace Mode — only if a single-valued y=f(x) exists. With only
-        // implicit/inequality slots, stay in pan mode and say so (no "y=nan").
+        // Enter Trace on any traceable curve — explicit y=f(x), explicit x=f(y),
+        // or a general implicit equation. Only an inequality-only graph has no
+        // traceable curve; there, stay in Pan and say so.
         int tf = firstTraceableFunc(0, +1);
         if (tf < 0) {
             if (_infoLabel)
-                lv_label_set_text(_infoLabel, "Trace n/a: no y=f(x) (implicit/inequality)");
+                lv_label_set_text(_infoLabel, "Trace n/a: inequality region only");
             return;
         }
         _grMode = GrMode::TRACE;
+        _traceFn = tf;
         _traceX = (_xMin + _xMax) / 2.0f;
+        _traceY = (_yMin + _yMax) / 2.0f;
+        _traceSeeded = false;
+        _traceHeadX = 0.0f; _traceHeadY = 0.0f;
         _snappedToPOI = false;
         _snappedPOIIdx = -1;
         _snapEscapeCount = 0;
-        _traceFn = tf;
-        computePOIs(_traceFn);
+        // POIs for snap (roots/extrema, y=f(x) only) + intersection markers (every
+        // curve kind, via the cross-kind finder). Snap itself stays ExplicitX-only.
+        ensureTraceSeed();
+        // x=f(y) / implicit lock the camera on the seed; y=f(x) keeps the view.
+        if (traceKind(_traceFn) != TraceKind::ExplicitX && _traceValid)
+            syncViewportToCursor();
+        else
+            computePOIs(_traceFn);
         drawTraceCursor();
         updateInfoBar();
         return;
@@ -2760,80 +3288,97 @@ void GrapherApp::handleGraphNav(const KeyEvent& ev) {
 
 // ── Graph trace keys ────────────────────────────────────────────────────
 void GrapherApp::handleGraphTrace(const KeyEvent& ev) {
-    float step = (_xMax - _xMin) / SCREEN_W;  // Pixel-precise cursor movement
     bool didSyncViewport = false;
 
     switch (ev.code) {
-    case KeyCode::LEFT: {
-        bool wasSnapped = _snappedToPOI;
-        _traceX -= step;
-        if (_traceX < _xMin) _traceX = _xMin;  // Clamp to viewport left edge
-
-        if (wasSnapped) {
-            // "Escape Force": break snap, ignore POI for next 10 moves
-            _snappedToPOI = false;
-            _snappedPOIIdx = -1;
-            _snapEscapeCount = 10;
-        } else if (_snapEscapeCount > 0) {
-            --_snapEscapeCount;
-        } else {
-            snapToPOI();
-        }
-        syncViewportToCursor();
+    case KeyCode::LEFT:
+        traceStep(-1);
+        didSyncViewport = true;   // traceStep owns viewport sync / redraw
+        break;
+    case KeyCode::RIGHT:
+        traceStep(+1);
         didSyncViewport = true;
         break;
-    }
-    case KeyCode::RIGHT: {
-        bool wasSnapped = _snappedToPOI;
-        _traceX += step;
-        if (_traceX > _xMax) _traceX = _xMax;
-
-        if (wasSnapped) {
-            _snappedToPOI = false;
-            _snappedPOIIdx = -1;
-            _snapEscapeCount = 10;
-        } else if (_snapEscapeCount > 0) {
-            --_snapEscapeCount;
-        } else {
-            snapToPOI();
-        }
-        syncViewportToCursor();
-        didSyncViewport = true;
-        break;
-    }
     case KeyCode::UP: {
-        // Switch to next traceable function (keep same X); skip implicit/inequality.
+        // Switch to next traceable curve (explicit y=f(x), x=f(y), or implicit);
+        // re-seed for the new slot. Keep the same X/Y where the kind allows.
         int nf = firstTraceableFunc(_traceFn + 1, +1);
-        if (nf >= 0) _traceFn = nf;
-        if (_traceFn >= 0) computePOIs(_traceFn);
+        if (nf >= 0 && nf != _traceFn) {
+            _traceFn = nf;
+            _traceSeeded = false;
+            _traceHeadX = 0.0f; _traceHeadY = 0.0f;
+        }
         _snappedToPOI = false;
         _snappedPOIIdx = -1;
-        if (_tangentActive && _traceFn >= 0) {
+        ensureTraceSeed();
+        // x=f(y) / implicit: centre the camera on the new seed. y=f(x): keep the
+        // view and just (re)compute POIs (camera follows on the next step).
+        if (traceKind(_traceFn) != TraceKind::ExplicitX && _traceValid)
+            syncViewportToCursor();
+        else
+            computePOIs(_traceFn);
+        if (_tangentActive && traceKind(_traceFn) != TraceKind::None) {
+            // Carry an active tangent onto the newly selected curve at its seed point.
             _tangentFuncIdx = _traceFn;
             _tangentX = _traceX;
+            _tangentY = _traceY;
             _plotDirty = true;
             replot();
         }
         break;
     }
     case KeyCode::DOWN: {
-        // Switch to prev traceable function (keep same X); skip implicit/inequality.
+        // Switch to previous traceable curve; re-seed for the new slot.
         int pf = firstTraceableFunc(_traceFn - 1, -1);
-        if (pf >= 0) _traceFn = pf;
-        if (_traceFn >= 0) computePOIs(_traceFn);
+        if (pf >= 0 && pf != _traceFn) {
+            _traceFn = pf;
+            _traceSeeded = false;
+            _traceHeadX = 0.0f; _traceHeadY = 0.0f;
+        }
         _snappedToPOI = false;
         _snappedPOIIdx = -1;
-        if (_tangentActive && _traceFn >= 0) {
+        ensureTraceSeed();
+        // x=f(y) / implicit: centre the camera on the new seed. y=f(x): keep the
+        // view and just (re)compute POIs (camera follows on the next step).
+        if (traceKind(_traceFn) != TraceKind::ExplicitX && _traceValid)
+            syncViewportToCursor();
+        else
+            computePOIs(_traceFn);
+        if (_tangentActive && traceKind(_traceFn) != TraceKind::None) {
+            // Carry an active tangent onto the newly selected curve at its seed point.
             _tangentFuncIdx = _traceFn;
             _tangentX = _traceX;
+            _tangentY = _traceY;
             _plotDirty = true;
             replot();
         }
         break;
     }
+    case KeyCode::ADD:
+    case KeyCode::ZOOM:
+    case KeyCode::SUB: {
+        // Zoom in (ZOOM/+) or out (-) by 1.5×, keeping the control point centred —
+        // so you can zoom while tracing any curve kind without losing the cursor.
+        const float f = (ev.code == KeyCode::SUB) ? 1.5f : (1.0f / 1.5f);
+        const float nxr = (_xMax - _xMin) * f;
+        const float nyr = (_yMax - _yMin) * f;
+        _xMin = _traceX - nxr * 0.5f; _xMax = _traceX + nxr * 0.5f;
+        _yMin = _traceY - nyr * 0.5f; _yMax = _traceY + nyr * 0.5f;
+        if (traceKind(_traceFn) != TraceKind::None) {
+            syncViewportToCursor();   // re-lock on the cursor at the new zoom
+        } else {
+            _plotDirty = true; replot();
+        }
+        drawTraceCursor();
+        updateInfoBar();
+        lv_refr_now(NULL);
+        return;
+    }
     case KeyCode::ENTER:
-        // Open floating calculate menu (NumWorks-style)
-        openCalcMenu();
+        // Calculate menu opens on every traceable curve. openCalcMenu greys the
+        // options that don't apply to the current kind (e.g. Root/Integral on an
+        // implicit contour), so non-y=f(x) curves get Intersection + Tangent.
+        if (traceKind(_traceFn) != TraceKind::None) openCalcMenu();
         return;
     case KeyCode::AC:
         // Exit trace mode — hide crosshair + pill, return to toolbar
@@ -2857,6 +3402,7 @@ void GrapherApp::handleGraphTrace(const KeyEvent& ev) {
         (_tangentFuncIdx != _traceFn || fabsf(_tangentX - _traceX) > tangentRedrawDx)) {
         _tangentFuncIdx = _traceFn;
         _tangentX = _traceX;
+        _tangentY = _traceY;
         _plotDirty = true;
         replot();
     }
@@ -2916,11 +3462,62 @@ static const char* CALC_MENU_LABELS[] = {
     "Draw Tangent",
 };
 
+// Which Calculate-menu options make sense for a given traced curve kind. The
+// goal-critical rule: never enable an option that would produce a fake/wrong
+// answer on a curve it isn't defined for. Root/Min/Max/Integral are single-valued
+// y=f(x) concepts. Intersection needs a second traceable curve. Tangent is the
+// only option that works for every traceable kind (via ∇G for implicit/x=f(y)).
+bool GrapherApp::calcItemEnabled(TraceKind k, int item) const {
+    switch (item) {
+    case 0: case 1: case 2: case 4:          // Root, Min, Max, Integral
+        // Single-valued in one variable: y=f(x) analyses over x; x=f(y) analyses
+        // over y (root = where x=0, min/max = leftmost/rightmost turning point,
+        // integral = ∫f(y)dy). A general implicit contour is multivalued → disabled.
+        return k == TraceKind::ExplicitX || k == TraceKind::ExplicitY;
+    case 3: {                                 // Intersection — need ≥2 traceable curves
+        int n = 0;
+        for (int i = 0; i < _numFuncs; ++i)
+            if (_funcs[i].isTraceable() && _funcs[i].visible && ++n >= 2) return true;
+        return false;
+    }
+    case 5:                                   // Tangent — any traceable curve
+        return k != TraceKind::None;
+    default:
+        return false;
+    }
+}
+
+// Apply the three visual states to every menu row: disabled (grey, skipped),
+// selected (blue fill, white text), or idle (white, dark text).
+void GrapherApp::restyleCalcMenu() {
+    for (int i = 0; i < CALC_MENU_ITEMS; ++i) {
+        if (!_calcMenuRows[i]) continue;
+        const bool en  = _calcMenuEnabled[i];
+        const bool sel = en && (i == _calcMenuIdx);
+        lv_obj_set_style_bg_color(_calcMenuRows[i],
+            lv_color_hex(sel ? COL_BTN_BG : 0xFFFFFF), LV_PART_MAIN);
+        lv_obj_t* lbl = lv_obj_get_child(_calcMenuRows[i], 0);
+        if (lbl) {
+            uint32_t txt = sel ? 0xFFFFFF : (en ? 0x333333 : 0xBBBBBB);
+            lv_obj_set_style_text_color(lbl, lv_color_hex(txt), LV_PART_MAIN);
+        }
+    }
+}
+
 void GrapherApp::openCalcMenu() {
     if (_calcMenuOpen || !_graphArea) return;
 
     _calcMenuOpen = true;
-    _calcMenuIdx = 0;
+
+    // Compute per-kind availability and start the cursor on the first enabled item
+    // (Tangent is always enabled, so a valid selection always exists).
+    const TraceKind kind = traceKind(_traceFn);
+    _calcMenuIdx = -1;
+    for (int i = 0; i < CALC_MENU_ITEMS; ++i) {
+        _calcMenuEnabled[i] = calcItemEnabled(kind, i);
+        if (_calcMenuEnabled[i] && _calcMenuIdx < 0) _calcMenuIdx = i;
+    }
+    if (_calcMenuIdx < 0) _calcMenuIdx = 0;
 
     // Create floating menu container centered on the graph area
     _calcMenu = lv_obj_create(_graphArea);
@@ -2959,19 +3556,20 @@ void GrapherApp::openCalcMenu() {
         lv_obj_set_style_pad_right(row, 8, LV_PART_MAIN);
         lv_obj_set_style_pad_top(row, 0, LV_PART_MAIN);
         lv_obj_set_style_pad_bottom(row, 0, LV_PART_MAIN);
-        lv_obj_set_style_bg_color(row, lv_color_hex(i == 0 ? COL_BTN_BG : 0xFFFFFF), LV_PART_MAIN);
         lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_PART_MAIN);
         lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
 
         lv_obj_t* lbl = lv_label_create(row);
         lv_label_set_text(lbl, CALC_MENU_LABELS[i]);
         lv_obj_center(lbl);
-        lv_obj_set_style_text_color(lbl, lv_color_hex(i == 0 ? 0xFFFFFF : 0x333333), LV_PART_MAIN);
         // montserrat_14: every CALC_MENU_LABELS entry contains a space ("Find
         // Root", "Draw Tangent", ...) and stix_math_18 has no U+0020 glyph, so it
         // tofu'd at each space AND clipped vertically in the 24px rows.
         lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, LV_PART_MAIN);
     }
+
+    // Paint selected/idle/disabled states now that all rows exist.
+    restyleCalcMenu();
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -3002,7 +3600,15 @@ void GrapherApp::poiAsyncTimerCb(lv_timer_t* t) {
         lv_timer_delete(t);
         app->_poiAsyncTimer = nullptr;
         app->_poiAsyncFi = -1;
-        app->_plotDirty = true;
+        // Paint the freshly-computed intersection markers immediately. GrapherApp
+        // has no per-frame update(), so replot() only runs on key events — without
+        // this, purple markers would not appear until the next keypress. Only the
+        // Intersection POI type is rendered, so single-curve traces are unaffected.
+        if (app->_tab == Tab::GRAPH) {
+            app->_plotDirty = true;
+            app->replot();
+            if (app->_grMode == GrMode::TRACE) app->drawTraceCursor();
+        }
         return;
     }
 
@@ -3034,41 +3640,25 @@ void GrapherApp::closeCalcMenu() {
 
 void GrapherApp::handleCalcMenu(const KeyEvent& ev) {
     switch (ev.code) {
-    case KeyCode::UP:
-        if (_calcMenuIdx > 0) {
-            _calcMenuIdx--;
-            // Refresh selection styling
-            for (int i = 0; i < CALC_MENU_ITEMS; ++i) {
-                if (!_calcMenuRows[i]) continue;
-                bool sel = (i == _calcMenuIdx);
-                lv_obj_set_style_bg_color(_calcMenuRows[i],
-                    lv_color_hex(sel ? COL_BTN_BG : 0xFFFFFF), LV_PART_MAIN);
-                lv_obj_t* lbl = lv_obj_get_child(_calcMenuRows[i], 0);
-                if (lbl) {
-                    lv_obj_set_style_text_color(lbl,
-                        lv_color_hex(sel ? 0xFFFFFF : 0x333333), LV_PART_MAIN);
-                }
-            }
+    case KeyCode::UP: {
+        // Move to the previous ENABLED row (skip greyed-out options).
+        for (int i = _calcMenuIdx - 1; i >= 0; --i) {
+            if (_calcMenuEnabled[i]) { _calcMenuIdx = i; break; }
         }
+        restyleCalcMenu();
         break;
-    case KeyCode::DOWN:
-        if (_calcMenuIdx < CALC_MENU_ITEMS - 1) {
-            _calcMenuIdx++;
-            for (int i = 0; i < CALC_MENU_ITEMS; ++i) {
-                if (!_calcMenuRows[i]) continue;
-                bool sel = (i == _calcMenuIdx);
-                lv_obj_set_style_bg_color(_calcMenuRows[i],
-                    lv_color_hex(sel ? COL_BTN_BG : 0xFFFFFF), LV_PART_MAIN);
-                lv_obj_t* lbl = lv_obj_get_child(_calcMenuRows[i], 0);
-                if (lbl) {
-                    lv_obj_set_style_text_color(lbl,
-                        lv_color_hex(sel ? 0xFFFFFF : 0x333333), LV_PART_MAIN);
-                }
-            }
+    }
+    case KeyCode::DOWN: {
+        // Move to the next ENABLED row (skip greyed-out options).
+        for (int i = _calcMenuIdx + 1; i < CALC_MENU_ITEMS; ++i) {
+            if (_calcMenuEnabled[i]) { _calcMenuIdx = i; break; }
         }
+        restyleCalcMenu();
         break;
+    }
     case KeyCode::ENTER:
-        executeCalcOption(_calcMenuIdx);
+        if (_calcMenuIdx >= 0 && _calcMenuIdx < CALC_MENU_ITEMS && _calcMenuEnabled[_calcMenuIdx])
+            executeCalcOption(_calcMenuIdx);
         closeCalcMenu();
         break;
     case KeyCode::AC:
@@ -3082,74 +3672,109 @@ void GrapherApp::handleCalcMenu(const KeyEvent& ev) {
 
 void GrapherApp::executeCalcOption(int option) {
     if (_traceFn < 0 || _traceFn >= _numFuncs || !_funcs[_traceFn].valid) return;
+    // Never run an option that isn't valid for the current curve kind (the menu
+    // greys these, but guard here so the math layer can't fabricate a result).
+    if (option < 0 || option >= CALC_MENU_ITEMS || !_calcMenuEnabled[option]) return;
 
-    // Build evaluator lambda for the current traced function
-    auto evalFunc = [this](double x) -> double {
-        return (double)evalAt(_traceFn, (float)x);
+    // Analyse the active slot as a single-variable function. y=f(x) parametrises by
+    // x; x=f(y) parametrises by y (the curve is single-valued in y). `evalFunc(t)`
+    // returns the dependent coordinate; `tMin/tMax` is the visible range of the
+    // independent coordinate. After solving, map the result back to a screen point.
+    const TraceKind kind = traceKind(_traceFn);
+    const bool alongY = (kind == TraceKind::ExplicitY);
+    auto evalFunc = [this, alongY](double t) -> double {
+        return alongY ? (double)_model.evalAtY(_funcs[_traceFn], (float)t)
+                      : (double)evalAt(_traceFn, (float)t);
     };
+    const double tMin = alongY ? (double)_yMin : (double)_xMin;
+    const double tMax = alongY ? (double)_yMax : (double)_xMax;
 
     math::AnalysisResult res = { false, 0.0, 0.0 };
     char pillBuf[80];
+    // Point-finding options (Root/Min/Max) move the cursor onto (px,py).
+    bool  movePoint = false;
+    float px = 0.0f, py = 0.0f;
 
     switch (option) {
-    case 0: { // Find Root
-        res = math::findRoot(evalFunc, (double)_xMin, (double)_xMax);
+    case 0: { // Find Root — where the function value is 0 (y=0 for f(x); x=0 for f(y)).
+        res = math::findRoot(evalFunc, tMin, tMax);
         if (res.found) {
-            snprintf(pillBuf, sizeof(pillBuf), "Root: x=%.4f y=%.6f", res.x, res.y);
+            if (alongY) { px = 0.0f;            py = (float)res.x; }  // x=f(y): x=0 at y=res.x
+            else        { px = (float)res.x;    py = 0.0f;        }  // y=f(x): y=0 at x=res.x
+            movePoint = true;
+            snprintf(pillBuf, sizeof(pillBuf), "Root: x=%.4f y=%.4f", (double)px, (double)py);
         }
         break;
     }
-    case 1: { // Find Minimum
-        res = math::findExtremum(evalFunc, (double)_xMin, (double)_xMax, false);
+    case 1:   // Find Minimum (leftmost turning point for x=f(y))
+    case 2: { // Find Maximum (rightmost turning point for x=f(y))
+        const bool findMax = (option == 2);
+        res = math::findExtremum(evalFunc, tMin, tMax, findMax);
         if (res.found) {
-            snprintf(pillBuf, sizeof(pillBuf), "Min: x=%.4f y=%.4f", res.x, res.y);
+            // res.x = independent coord at the extremum; res.y = the extreme value.
+            if (alongY) { px = (float)res.y;    py = (float)res.x; }
+            else        { px = (float)res.x;    py = (float)res.y; }
+            movePoint = true;
+            snprintf(pillBuf, sizeof(pillBuf), "%s: x=%.4f y=%.4f",
+                     findMax ? "Max" : "Min", (double)px, (double)py);
         }
         break;
     }
-    case 2: { // Find Maximum
-        res = math::findExtremum(evalFunc, (double)_xMin, (double)_xMax, true);
-        if (res.found) {
-            snprintf(pillBuf, sizeof(pillBuf), "Max: x=%.4f y=%.4f", res.x, res.y);
+    case 3: { // Find Intersection — jump to the nearest precomputed crossing.
+        // The cross-kind 2-D finder already seeded every intersection as a purple
+        // POI marker (line∩circle, parabola∩curve, contour∩contour, …); snap the
+        // cursor to the closest one instead of re-deriving via a y=f(x)-only solver.
+        int best = -1;
+        float bestd = 1e30f;
+        for (int i = 0; i < _numPOIs; ++i) {
+            if (_pois[i].type != POIType::Intersection) continue;
+            const float ddx = _pois[i].x - _traceX, ddy = _pois[i].y - _traceY;
+            const float d = ddx * ddx + ddy * ddy;
+            if (d < bestd) { bestd = d; best = i; }
         }
-        break;
-    }
-    case 3: { // Find Intersection
-        // Find the second valid function to intersect with
-        int otherFn = -1;
-        for (int i = 0; i < _numFuncs; ++i) {
-            if (i != _traceFn && _funcs[i].valid) { otherFn = i; break; }
-        }
-        if (otherFn < 0) {
-            if (_tracePillLabel)
-                lv_label_set_text(_tracePillLabel, "No second function");
+        if (best < 0) {
+            if (_tracePillLabel) lv_label_set_text(_tracePillLabel, "No intersection found");
+            if (_tracePill) lv_obj_remove_flag(_tracePill, LV_OBJ_FLAG_HIDDEN);
             return;
         }
-        auto evalFunc2 = [this, otherFn](double x) -> double {
-            return (double)evalAt(otherFn, (float)x);
-        };
-        res = math::findIntersection(evalFunc, evalFunc2,
-                                     (double)_xMin, (double)_xMax);
-        if (res.found) {
-            snprintf(pillBuf, sizeof(pillBuf), "Intersect: x=%.4f y=%.4f", res.x, res.y);
-        }
+        _traceX = _pois[best].x;
+        _traceY = _pois[best].y;
+        _traceValid = true;
+        if (traceKind(_traceFn) == TraceKind::Implicit)
+            updateImplicitHeading(_traceFn, _traceX, _traceY);
+        if (traceKind(_traceFn) != TraceKind::ExplicitX)
+            syncViewportToCursor();   // keep the control point centred on the jump
+        res.found = true; res.x = (double)_traceX; res.y = (double)_traceY;
+        snprintf(pillBuf, sizeof(pillBuf), "Intersect: x=%.4f y=%.4f",
+                 (double)_traceX, (double)_traceY);
         break;
     }
-    case 4: { // Calculate Integral
-        res = math::numericalIntegral(evalFunc, (double)_xMin, (double)_xMax);
+    case 4: { // Calculate Integral — ∫f(x)dx for y=f(x); ∫f(y)dy for x=f(y).
+        res = math::numericalIntegral(evalFunc, tMin, tMax);
         if (res.found) {
-            snprintf(pillBuf, sizeof(pillBuf), "Area = %.4f", res.y);
-            // Draw area shading
-            drawIntegralShading(_traceFn, _xMin, _xMax);
+            if (alongY) {
+                snprintf(pillBuf, sizeof(pillBuf), "Area = %.4f (dy)", res.y);
+                drawIntegralShadingY(_traceFn, _yMin, _yMax);   // horizontal strips
+            } else {
+                snprintf(pillBuf, sizeof(pillBuf), "Area = %.4f", res.y);
+                drawIntegralShading(_traceFn, _xMin, _xMax);     // vertical strips
+            }
             _plotDirty = true;
             replot();
         }
         break;
     }
-    case 5: { // Draw Tangent
-        drawTangentOverlay(_traceFn, _traceX);
+    case 5: { // Draw Tangent — slope line for y=f(x); ⟂∇G line for implicit / x=f(y).
+        if (traceKind(_traceFn) == TraceKind::ExplicitX) {
+            drawTangentOverlay(_traceFn, _traceX);
+            snprintf(pillBuf, sizeof(pillBuf), "Tangent at x=%.4f", (double)_traceX);
+        } else {
+            drawImplicitTangent(_traceFn, _traceX, _traceY);
+            snprintf(pillBuf, sizeof(pillBuf), "Tangent at (%.3f, %.3f)",
+                     (double)_traceX, (double)_traceY);
+        }
         _plotDirty = true;
         replot();
-        snprintf(pillBuf, sizeof(pillBuf), "Tangent at x=%.4f", (double)_traceX);
         res.found = true;
         break;
     }
@@ -3157,13 +3782,20 @@ void GrapherApp::executeCalcOption(int option) {
         return;
     }
 
-    if (res.found) {
-        // Move trace cursor to the result
-        if (option != 4) {
-            _traceX = static_cast<float>(res.x);
+    // Move the cursor onto a found Root/Min/Max point. Intersection set its own
+    // point in-case; Integral/Tangent annotate the current point (no teleport).
+    if (movePoint) {
+        if (alongY) {
+            _traceY = py; _traceX = px; _traceValid = true;
+            syncViewportToCursor();   // lock the camera on the result, on-curve
+        } else {
+            _traceX = px;
             if (_traceX < _xMin) _traceX = _xMin;
             if (_traceX > _xMax) _traceX = _xMax;
         }
+    }
+
+    if (res.found) {
         drawTraceCursor();
 
         // Update pill with special text
@@ -3238,6 +3870,61 @@ void GrapherApp::drawIntegralShading(int funcIdx, float shadeXMin, float shadeXM
     _shadingFuncIdx = funcIdx;
     _shadingX0 = shadeXMin;
     _shadingX1 = shadeXMax;
+    _shadingAlongY = false;
+}
+
+// Horizontal-strip shading for an x=f(y) integral: for each pixel row in the
+// shaded y-range, fill from the y-axis (x=0) out to x=f(y). Mirror of
+// drawIntegralShading with the x/y roles swapped.
+void GrapherApp::drawIntegralShadingY(int funcIdx, float shadeYMin, float shadeYMax) {
+    if (!_graphBuf || funcIdx < 0 || funcIdx >= _numFuncs || !_funcs[funcIdx].valid)
+        return;
+
+    int areaW = GRAPH_CANVAS_W;
+    int areaH = GRAPH_CANVAS_H;
+    if (areaW < 2 || areaH < 2) return;
+
+    float xRange = (float)(_xMax - _xMin);
+    float yRange = (float)(_yMax - _yMin);
+    if (xRange <= 0.0f || yRange <= 0.0f) return;
+
+    if (shadeYMax < shadeYMin) { float t = shadeYMin; shadeYMin = shadeYMax; shadeYMax = t; }
+
+    const int sy0 = std::max(0, std::min(areaH - 1, _view.worldToScreenY(shadeYMin)));
+    const int sy1 = std::max(0, std::min(areaH - 1, _view.worldToScreenY(shadeYMax)));
+    const int top = std::min(sy0, sy1);
+    const int bot = std::max(sy0, sy1);
+
+    const int xAxisPx = _view.worldToScreenX(0.0f);
+    const uint16_t shade565 = utils::rgb888to565(_funcs[funcIdx].color);
+
+    for (int py = top; py <= bot; ++py) {
+        const float wy = (float)_yMax - ((float)py / (float)areaH) * yRange;
+        if (wy < shadeYMin || wy > shadeYMax) continue;
+
+        const float wx = _model.evalAtY(_funcs[funcIdx], wy);
+        if (std::isnan(wx) || std::isinf(wx)) continue;
+
+        int sx = _view.worldToScreenX(wx);
+        if (sx < 0) sx = 0;
+        if (sx >= areaW) sx = areaW - 1;
+        int x0 = xAxisPx;
+        if (x0 < 0) x0 = 0;
+        if (x0 >= areaW) x0 = areaW - 1;
+
+        const int left = std::min(sx, x0);
+        const int right = std::max(sx, x0);
+        for (int px = left; px <= right; ++px) {
+            if (!useStipplePixel(px, py)) continue;  // checkerboard stipple
+            _graphBuf[py * areaW + px] = shade565;
+        }
+    }
+
+    _shadingActive = true;
+    _shadingFuncIdx = funcIdx;
+    _shadingX0 = shadeYMin;
+    _shadingX1 = shadeYMax;
+    _shadingAlongY = true;
 }
 
 void GrapherApp::clearIntegralShading() {
@@ -3245,6 +3932,7 @@ void GrapherApp::clearIntegralShading() {
     _shadingFuncIdx = -1;
     _shadingX0 = 0.0f;
     _shadingX1 = 0.0f;
+    _shadingAlongY = false;
 }
 
 void GrapherApp::drawTangentOverlay(int funcIdx, float xTarget) {
@@ -3273,11 +3961,105 @@ void GrapherApp::drawTangentOverlay(int funcIdx, float xTarget) {
     _tangentActive = true;
     _tangentFuncIdx = funcIdx;
     _tangentX = xTarget;
+    _tangentY = yTarget;
+}
+
+// Tangent to a general curve at (x0,y0): the line ⟂ to ∇G. Works for circles,
+// sideways parabolas, x=f(y) and any other contour the y=f(x) slope line cannot
+// represent (vertical or multi-valued tangents). Drawn as a segment long enough
+// to span the viewport; drawFunctionSegment clips it to the buffer.
+void GrapherApp::drawImplicitTangent(int funcIdx, float x0, float y0) {
+    if (!_graphBuf || funcIdx < 0 || funcIdx >= _numFuncs || !_funcs[funcIdx].valid) return;
+    float gx, gy;
+    if (!gradImplicit(funcIdx, x0, y0, gx, gy)) return;
+    float tx = gy, ty = -gx;                       // tangent ⟂ gradient
+    const float m = std::sqrt(tx * tx + ty * ty);
+    if (m < 1e-9f) return;                          // singular point (∇G = 0)
+    tx /= m; ty /= m;
+    const float T = (_xMax - _xMin) + (_yMax - _yMin);  // overshoots the viewport
+    _view.drawFunctionSegment(x0 - T * tx, y0 - T * ty,
+                              x0 + T * tx, y0 + T * ty, _funcs[funcIdx].color);
+    _tangentActive = true;
+    _tangentFuncIdx = funcIdx;
+    _tangentX = x0;
+    _tangentY = y0;
+}
+
+// Redraw the active tangent the right way for its curve kind (called from replot).
+void GrapherApp::drawActiveTangent() {
+    if (!_tangentActive) return;
+    if (traceKind(_tangentFuncIdx) == TraceKind::ExplicitX)
+        drawTangentOverlay(_tangentFuncIdx, _tangentX);
+    else
+        drawImplicitTangent(_tangentFuncIdx, _tangentX, _tangentY);
 }
 
 void GrapherApp::clearTangent() {
     _tangentActive = false;
     _tangentFuncIdx = -1;
     _tangentX = 0.0f;
+    _tangentY = 0.0f;
 }
 
+
+#ifdef NATIVE_SIM
+// ═══════════════════════════════════════════════════════════════════════
+// Emulator-only debug accessors (GR-14 assert hooks — see GrapherApp.h)
+// ═══════════════════════════════════════════════════════════════════════
+
+const char* GrapherApp::debugSlotKind(int i) const {
+    if (i < 0 || i >= MAX_FUNCS || i >= _numFuncs) return "empty";
+    const FuncSlot& f = _funcs[i];
+    if (f.len == 0)  return "empty";
+    if (!f.valid)    return "invalid";
+    if (!f.implicit) return "explicitY";                       // y = f(x)
+    switch (f.relation) {
+        case grapher::Relation::Less:
+        case grapher::Relation::Greater:      return "ineqStrict";
+        case grapher::Relation::LessEqual:
+        case grapher::Relation::GreaterEqual: return "ineqNonStrict";
+        default: break;
+    }
+    if (f.explicitY) return "explicitX";                       // x = f(y)
+    return "implicit";
+}
+
+bool GrapherApp::debugSlotValid(int i) const {
+    if (i < 0 || i >= MAX_FUNCS || i >= _numFuncs) return false;
+    return _funcs[i].valid;
+}
+
+const char* GrapherApp::debugSlotInvalidReason(int i) const {
+    static char buf[32];
+    buf[0] = '\0';
+    if (i < 0 || i >= MAX_FUNCS || i >= _numFuncs) return buf;
+    const FuncSlot& f = _funcs[i];
+    if (f.valid || f.len == 0) return buf;
+    formatInvalidReason(f, buf, sizeof(buf));
+    return buf;
+}
+
+const char* GrapherApp::debugSlotRelationOp(int i) const {
+    if (i < 0 || i >= MAX_FUNCS || i >= _numFuncs) return "";
+    switch (_funcs[i].relation) {
+        case grapher::Relation::Less:         return "lt";
+        case grapher::Relation::Greater:      return "gt";
+        case grapher::Relation::LessEqual:    return "le";
+        case grapher::Relation::GreaterEqual: return "ge";
+        default:                              return "eq";
+    }
+}
+
+const char* GrapherApp::debugSlotExprText(int i) const {
+    if (i < 0 || i >= MAX_FUNCS || i >= _numFuncs) return "";
+    return _funcs[i].text;
+}
+
+const char* GrapherApp::debugTraceMode() const {
+    switch (_grMode) {
+        case GrMode::TRACE:    return "trace";
+        case GrMode::NAVIGATE: return "navigate";
+        default:               return "idle";
+    }
+}
+#endif  // NATIVE_SIM

@@ -1,0 +1,51 @@
+# grapher_trace_explicit_y_smoke.numos — Phase 10F/10G. Trace an x = f(y) relation.
+#
+# Commits the implicit equation "x = y^2" (a parabola opening RIGHT — single-
+# valued in y, impossible for the y=f(x) sampler), and walks the cursor along y.
+# Proves the explicit-in-y trace path: GraphModel detects the "x = f(y)" orientation
+# (preCacheRPN -> explicitY + rpnY) and GrapherApp's tracer parametrises the slot by
+# y, reporting an EXACT x = f(y) — not "y=nan".
+#
+# Phase 10G: the Graph tab now opens directly in a CENTRED Trace for x=f(y) /
+# implicit curves (firstTraceableFunc auto-traces; the camera locks onto the
+# control point via syncViewportToCursor), so no ENTER is needed to start tracing.
+# Each `right` steps y by one pixel (traceStep ExplicitY), recomputes x = f(y)
+# exactly, and re-centres the viewport so the cursor stays pinned to screen centre.
+#
+# Warning-only: screenshot, NO golden, NOT CI-gated (absent from the
+# generate-emulator-candidates CANDIDATES list and every emulator-build.yml step).
+#
+# Run:
+#   program --headless --deterministic --script tests/emulator/scripts/grapher_trace_explicit_y_smoke.numos \
+#           --frames 800 --screenshot out/grapher_trace_explicit_y_smoke.ppm --quiet
+log "grapher_trace_explicit_y: start"
+wait 200
+open_app Grapher
+wait 60
+# down -> Add row; enter -> edit slot 0; type "x=y^2" (right exits the exponent).
+key down
+key enter
+key x
+key =
+key y
+key ^
+key 2
+key right
+key enter
+wait 80
+# Graph tab opens directly in a centred Trace for an x=f(y) curve (no ENTER needed).
+key graph
+wait 100
+# Walk the cursor up the parabola along y; x = y^2 is recomputed and re-centred each step.
+key right
+key right
+key right
+key right
+key right
+key right
+key right
+key right
+wait 120
+screenshot out/grapher_trace_explicit_y_smoke.ppm
+assert_app Grapher
+log "grapher_trace_explicit_y: x=y^2 traced along y, cursor centred"

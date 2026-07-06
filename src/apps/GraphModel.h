@@ -46,6 +46,40 @@ namespace grapher {
 enum class Relation : uint8_t { Equal, Less, Greater, LessEqual, GreaterEqual };
 
 /**
+ * InvalidReason — WHY a committed expression was rejected by the classifier
+ * (GraphModel::preCacheRPN). The canonical user/script-visible strings are
+ * frozen by the classifier contract (NUMOS_GRAPHER_CLASSIFIER_CONTRACT.md §A.2):
+ *   Syntax           → "syntax"
+ *   OneSided         → "one-sided relation"      (e.g. "x=", "=x", "y<")
+ *   MultiRelation    → "multiple relations"      (e.g. "y=x=2", "0<x<1")
+ *   UnknownIdent     → "unknown: <ident>"        (e.g. "xy=1" → "unknown: xy")
+ *   TooLong          → "expression too long"     (serialised form exceeds 63 chars)
+ *   ConstantRelation → "constant relation"       (e.g. "1=2", "pi<e")
+ *   Unsupported      → "unsupported node"        (AST node the pipeline can't serialise)
+ * An invalid slot NEVER plots, never traces, never tabulates — visible refusal
+ * instead of a silent wrong picture (e.g. the old "x=" ⇒ line x=0 bug).
+ */
+enum class InvalidReason : uint8_t {
+    None, Syntax, OneSided, MultiRelation, UnknownIdent,
+    TooLong, ConstantRelation, Unsupported
+};
+
+/// Canonical base string for an InvalidReason (UnknownIdent's "<ident>" detail
+/// lives in CartesianFunction::reasonDetail and is appended by the caller).
+inline const char* invalidReasonText(InvalidReason r) {
+    switch (r) {
+        case InvalidReason::Syntax:           return "syntax";
+        case InvalidReason::OneSided:         return "one-sided relation";
+        case InvalidReason::MultiRelation:    return "multiple relations";
+        case InvalidReason::UnknownIdent:     return "unknown";
+        case InvalidReason::TooLong:          return "expression too long";
+        case InvalidReason::ConstantRelation: return "constant relation";
+        case InvalidReason::Unsupported:      return "unsupported node";
+        default:                              return "";
+    }
+}
+
+/**
  * CartesianFunction — one graphable function slot.
  *
  * Holds the serialised expression text, its compiled RPN cache for fast
@@ -75,14 +109,42 @@ struct CartesianFunction {
     bool               rpnLValid;  ///< LHS RPN compiled OK
     Relation           relation;   ///< Equal (equation) or an inequality variant
 
+    // ── x = f(y) explicit-in-y support ─────────────────────────────────────
+    // True when the relation is exactly "x = f(y)" — one side is the bare
+    // variable x, the other side has no x (e.g. "x=y^2", "x=sin(y)"). The slot
+    // still PLOTS as an implicit contour (G = lhs - rhs, marching squares), but
+    // the tracer can parametrise it by y and report an exact x = f(y), walking
+    // the cursor along y. rpnY holds that single-valued f(y), evaluated with y.
+    bool               explicitY;  ///< true ⇒ x = f(y); trace parametrised by y
+    std::vector<Token> rpnY;       ///< f(y) RPN (explicitY only), evaluated with y
+    bool               rpnYValid;  ///< rpnY compiled OK
+
+    // ── Rejection bookkeeping (classifier contract) ────────────────────────
+    // invalidReason is set by preCacheRPN whenever valid == false && len > 0.
+    // reasonDetail carries the offending identifier for UnknownIdent ("xy"),
+    // truncated to 11 chars. serializeVerdict is a PRE-classification verdict
+    // recorded by the AST→text serialiser (GrapherApp::syncASTtoText): the model
+    // never sees untruncated text, so overflow (TooLong) and non-serialisable
+    // nodes (Unsupported) must be flagged before preCacheRPN runs; preCacheRPN
+    // honours a pending verdict by early-returning invalid.
+    InvalidReason      invalidReason;    ///< why valid==false (None when valid)
+    char               reasonDetail[12]; ///< UnknownIdent: offending identifier
+    InvalidReason      serializeVerdict; ///< serialiser verdict (None/TooLong/Unsupported)
+
     bool isInequality() const { return relation != Relation::Equal; }
     /// True when this slot can be traced/tabulated as a single-valued y=f(x).
     bool isExplicit()   const { return valid && !implicit; }
+    /// True when this slot is a curve the tracer can follow: an explicit y=f(x),
+    /// an explicit x=f(y), or a general implicit *equation*. Inequalities
+    /// (relation != Equal) are half-plane regions, not curves, so never traceable.
+    bool isTraceable()  const { return valid && relation == Relation::Equal; }
 
     CartesianFunction()
         : len(0), valid(false), color(0xFF0000), visible(true), rpnValid(false),
-          implicit(false), rpnLValid(false), relation(Relation::Equal)
-    { text[0] = '\0'; }
+          implicit(false), rpnLValid(false), relation(Relation::Equal),
+          explicitY(false), rpnYValid(false),
+          invalidReason(InvalidReason::None), serializeVerdict(InvalidReason::None)
+    { text[0] = '\0'; reasonDetail[0] = '\0'; }
 };
 
 /**
@@ -149,6 +211,13 @@ public:
     float evalImplicit(CartesianFunction& fn, float x, float y);
 
     /**
+     * Evaluate the x = f(y) function side at the given y, for a slot detected as
+     * explicit-in-y (fn.explicitY == true). Returns the world x on the curve, or
+     * NAN if the slot is not explicit-in-y or the evaluation fails (domain hole).
+     */
+    float evalAtY(CartesianFunction& fn, float y);
+
+    /**
      * Find intersection points of two functions in the given range.
      * Uses bisection to refine roots of (f1(x) - f2(x)) = 0.
      *
@@ -181,6 +250,30 @@ private:
 
     /// True if the tokenized expression references the variable 'y'/'Y'.
     bool referencesY(const char* expr);
+
+    /// True if the tokenized expression references the variable 'x'/'X'.
+    bool referencesX(const char* expr);
+
+    /**
+     * Tokenize `expr` and expand juxtaposed single-letter variables into an
+     * explicit product ("xx" → x*x, "xy" → x*y), preserving reserved multi-char
+     * words (pi/ans/preans) and function calls. Grapher-local: the shared
+     * Tokenizer (and CalculationApp) is not modified. Returns false only when
+     * the tokenizer rejects the input.
+     */
+    bool tokenizeExpanded(const char* expr, std::vector<Token>& outTokens);
+
+    /**
+     * Structural dry-run of a compiled RPN at the probe point x=1, y=1
+     * (classifier contract R11). Returns true when the expression is
+     * structurally sound. Structural evaluator errors (unknown identifier,
+     * malformed operator/token/stack states) mark the slot invalid and record
+     * the reason (UnknownIdent + reasonDetail, or Syntax) — this is what turns
+     * "xy=1" from a valid-but-blank plot into a visible refusal. Value-dependent
+     * errors at the probe point (domain, div-by-zero, non-finite) are tolerated:
+     * "ln(x-5)" stays valid even though ln(-4) fails.
+     */
+    bool dryRunStructural(const std::vector<Token>& rpn, CartesianFunction& fn);
 
     /// Compute f1(x) - f2(x)
     float diffAt(CartesianFunction& fn1, CartesianFunction& fn2, float x);

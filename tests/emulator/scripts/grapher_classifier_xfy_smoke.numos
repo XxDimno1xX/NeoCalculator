@@ -1,0 +1,59 @@
+# grapher_classifier_xfy_smoke — GR-02: sideways/implicit/inequality kinds.
+#   slot 0: "x=y^(2)"     → explicitX (x = f(y); plots via contour, traces by y)
+#   slot 1: "x^(2)+y^(2)=1" → implicit (marching squares, equal-aspect circle)
+#   slot 2: "y<=x"        → ineqNonStrict, relation op le
+#   slot 3: "y>x"         → ineqStrict,   relation op gt
+wait 200
+open_app Grapher
+wait 60
+key down
+key enter
+key x
+key =
+key y
+key ^
+key 2
+key right
+key enter
+wait 40
+key down
+key enter
+key x
+key ^
+key 2
+key right
+key +
+key y
+key ^
+key 2
+key right
+key =
+key 1
+key enter
+wait 40
+key down
+key enter
+key y
+key lt
+key =
+key x
+key enter
+wait 40
+key down
+key enter
+key y
+key gt
+key x
+key enter
+wait 80
+assert_app Grapher
+assert_graph_relation_count 4
+assert_graph_slot_kind 0 explicitX
+assert_graph_slot_valid 0
+assert_graph_slot_kind 1 implicit
+assert_graph_slot_valid 1
+assert_graph_slot_kind 2 ineqNonStrict
+assert_graph_relation_op 2 le
+assert_graph_slot_kind 3 ineqStrict
+assert_graph_relation_op 3 gt
+log "classifier_xfy: explicitX / implicit / ineq kinds classified"

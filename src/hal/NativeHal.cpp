@@ -1348,7 +1348,19 @@ enum class ScriptCmdType : uint8_t {
     // tarjeta enfocada del Main Menu coincide con la esperada, validando la
     // paridad de navegacion 2D con el firmware. El id de tarjeta resuelto se
     // guarda en waitN; strArg conserva el token original para el diagnostico.
-    AssertMenuFocus        // assert_menu_focus NAME|ID
+    AssertMenuFocus,       // assert_menu_focus NAME|ID
+    // Phase 10 GR-14 (append-only): aserciones semanticas del Grapher. Leen los
+    // accesores debug* de GrapherApp (NATIVE_SIM-only); fuera del Grapher son
+    // FAIL (exit 4), nunca no-op. Tokens de kind congelados por el contrato del
+    // clasificador: explicitY, explicitX, implicit, ineqStrict, ineqNonStrict,
+    // invalid, empty.
+    AssertGraphRelationCount,  // assert_graph_relation_count N        (N en waitN)
+    AssertGraphSlotKind,       // assert_graph_slot_kind SLOT KIND     (SLOT waitN, KIND strArg)
+    AssertGraphSlotValid,      // assert_graph_slot_valid SLOT
+    AssertGraphSlotInvalidReason, // assert_graph_slot_invalid_reason SLOT SUBSTR...
+    AssertGraphRelationOp,     // assert_graph_relation_op SLOT eq|lt|gt|le|ge
+    AssertGraphExprText,       // assert_graph_expr_text SLOT TEXT...  (igualdad exacta)
+    AssertGraphTraceState      // assert_graph_trace_state idle|navigate|trace
 };
 
 struct ScriptCmd {
@@ -1599,6 +1611,89 @@ static bool loadScript(const char* path)
             sc.waitN  = cardId;     // id resuelto
             sc.strArg = name;       // token original, solo para el diagnostico
         }
+        // ── Phase 10 GR-14: aserciones semanticas del Grapher (append-only) ──
+        else if (lc == "assert_graph_relation_count") {
+            std::string nTok, extra;
+            long n = 0;
+            if (!(iss >> nTok) || !parseNonNegLong(nTok, n) || n > 6)
+                return scriptErr(path, lineNo, "assert_graph_relation_count requiere N entero 0..6");
+            if (iss >> extra) return scriptErr(path, lineNo, "assert_graph_relation_count: demasiados argumentos");
+            sc.type  = ScriptCmdType::AssertGraphRelationCount;
+            sc.waitN = n;
+        }
+        else if (lc == "assert_graph_slot_kind") {
+            std::string slotTok, kind, extra;
+            long slot = 0;
+            if (!(iss >> slotTok) || !parseNonNegLong(slotTok, slot) || slot > 5)
+                return scriptErr(path, lineNo, "assert_graph_slot_kind requiere SLOT 0..5");
+            if (!(iss >> kind))
+                return scriptErr(path, lineNo, "assert_graph_slot_kind requiere un KIND");
+            if (kind != "explicitY" && kind != "explicitX" && kind != "implicit" &&
+                kind != "ineqStrict" && kind != "ineqNonStrict" &&
+                kind != "invalid" && kind != "empty")
+                return scriptErr(path, lineNo, "assert_graph_slot_kind: KIND desconocido (explicitY|explicitX|implicit|ineqStrict|ineqNonStrict|invalid|empty)");
+            if (iss >> extra) return scriptErr(path, lineNo, "assert_graph_slot_kind: demasiados argumentos");
+            sc.type   = ScriptCmdType::AssertGraphSlotKind;
+            sc.waitN  = slot;
+            sc.strArg = kind;
+        }
+        else if (lc == "assert_graph_slot_valid") {
+            std::string slotTok, extra;
+            long slot = 0;
+            if (!(iss >> slotTok) || !parseNonNegLong(slotTok, slot) || slot > 5)
+                return scriptErr(path, lineNo, "assert_graph_slot_valid requiere SLOT 0..5");
+            if (iss >> extra) return scriptErr(path, lineNo, "assert_graph_slot_valid: demasiados argumentos");
+            sc.type  = ScriptCmdType::AssertGraphSlotValid;
+            sc.waitN = slot;
+        }
+        else if (lc == "assert_graph_slot_invalid_reason") {
+            std::string slotTok;
+            long slot = 0;
+            if (!(iss >> slotTok) || !parseNonNegLong(slotTok, slot) || slot > 5)
+                return scriptErr(path, lineNo, "assert_graph_slot_invalid_reason requiere SLOT 0..5");
+            std::string rest;
+            std::getline(iss, rest);
+            size_t a = rest.find_first_not_of(" \t");
+            if (a == std::string::npos)
+                return scriptErr(path, lineNo, "assert_graph_slot_invalid_reason requiere una SUBCADENA de motivo");
+            sc.type   = ScriptCmdType::AssertGraphSlotInvalidReason;
+            sc.waitN  = slot;
+            sc.strArg = rest.substr(a);
+        }
+        else if (lc == "assert_graph_relation_op") {
+            std::string slotTok, op, extra;
+            long slot = 0;
+            if (!(iss >> slotTok) || !parseNonNegLong(slotTok, slot) || slot > 5)
+                return scriptErr(path, lineNo, "assert_graph_relation_op requiere SLOT 0..5");
+            if (!(iss >> op) || (op != "eq" && op != "lt" && op != "gt" && op != "le" && op != "ge"))
+                return scriptErr(path, lineNo, "assert_graph_relation_op requiere eq|lt|gt|le|ge");
+            if (iss >> extra) return scriptErr(path, lineNo, "assert_graph_relation_op: demasiados argumentos");
+            sc.type   = ScriptCmdType::AssertGraphRelationOp;
+            sc.waitN  = slot;
+            sc.strArg = op;
+        }
+        else if (lc == "assert_graph_expr_text") {
+            std::string slotTok;
+            long slot = 0;
+            if (!(iss >> slotTok) || !parseNonNegLong(slotTok, slot) || slot > 5)
+                return scriptErr(path, lineNo, "assert_graph_expr_text requiere SLOT 0..5");
+            std::string rest;
+            std::getline(iss, rest);
+            size_t a = rest.find_first_not_of(" \t");
+            if (a == std::string::npos)
+                return scriptErr(path, lineNo, "assert_graph_expr_text requiere el TEXTO esperado");
+            sc.type   = ScriptCmdType::AssertGraphExprText;
+            sc.waitN  = slot;
+            sc.strArg = rest.substr(a);
+        }
+        else if (lc == "assert_graph_trace_state") {
+            std::string mode, extra;
+            if (!(iss >> mode) || (mode != "idle" && mode != "navigate" && mode != "trace"))
+                return scriptErr(path, lineNo, "assert_graph_trace_state requiere idle|navigate|trace");
+            if (iss >> extra) return scriptErr(path, lineNo, "assert_graph_trace_state: demasiados argumentos");
+            sc.type   = ScriptCmdType::AssertGraphTraceState;
+            sc.strArg = mode;
+        }
         else {
             return scriptErr(path, lineNo, "comando desconocido");
         }
@@ -1833,6 +1928,99 @@ static void scriptStepBegin()
                                     (expectName ? expectName : "?") + "') pero el foco esta en id " +
                                     std::to_string(actualId) + " '" +
                                     (actualName ? actualName : "(ninguno)") + "'");
+            }
+            break;
+        }
+
+        // ── Phase 10 GR-14: aserciones semanticas del Grapher ────────────
+        // Todas exigen el Grapher activo; fuera de el son FAIL, nunca no-op.
+        case ScriptCmdType::AssertGraphRelationCount:
+        case ScriptCmdType::AssertGraphSlotKind:
+        case ScriptCmdType::AssertGraphSlotValid:
+        case ScriptCmdType::AssertGraphSlotInvalidReason:
+        case ScriptCmdType::AssertGraphRelationOp:
+        case ScriptCmdType::AssertGraphExprText:
+        case ScriptCmdType::AssertGraphTraceState: {
+            if (g_mode != AppMode::GRAPHER || !g_grapherApp) {
+                assertFail(sc.line, "assert_graph_* requiere Grapher activo (app actual: '" +
+                                    std::string(activeAppName()) + "')");
+                break;
+            }
+            const int slot = static_cast<int>(sc.waitN);
+            switch (sc.type) {
+                case ScriptCmdType::AssertGraphRelationCount: {
+                    const int actual = g_grapherApp->debugRelationCount();
+                    if (actual == slot)
+                        assertPass(sc.line, "assert_graph_relation_count " + std::to_string(slot));
+                    else
+                        assertFail(sc.line, "assert_graph_relation_count esperaba " +
+                                            std::to_string(slot) + " pero hay " + std::to_string(actual));
+                    break;
+                }
+                case ScriptCmdType::AssertGraphSlotKind: {
+                    const char* actual = g_grapherApp->debugSlotKind(slot);
+                    if (sc.strArg == actual)
+                        assertPass(sc.line, "assert_graph_slot_kind " + std::to_string(slot) + " " + sc.strArg);
+                    else
+                        assertFail(sc.line, "assert_graph_slot_kind slot " + std::to_string(slot) +
+                                            " esperaba '" + sc.strArg + "' pero es '" + actual + "'");
+                    break;
+                }
+                case ScriptCmdType::AssertGraphSlotValid: {
+                    if (g_grapherApp->debugSlotValid(slot))
+                        assertPass(sc.line, "assert_graph_slot_valid " + std::to_string(slot));
+                    else
+                        assertFail(sc.line, "assert_graph_slot_valid slot " + std::to_string(slot) +
+                                            " no es valido (kind='" +
+                                            g_grapherApp->debugSlotKind(slot) + "', reason='" +
+                                            g_grapherApp->debugSlotInvalidReason(slot) + "')");
+                    break;
+                }
+                case ScriptCmdType::AssertGraphSlotInvalidReason: {
+                    if (g_grapherApp->debugSlotValid(slot)) {
+                        assertFail(sc.line, "assert_graph_slot_invalid_reason slot " +
+                                            std::to_string(slot) + " es VALIDO (se esperaba invalido con '" +
+                                            sc.strArg + "')");
+                        break;
+                    }
+                    const std::string actual = g_grapherApp->debugSlotInvalidReason(slot);
+                    if (actual.find(sc.strArg) != std::string::npos)
+                        assertPass(sc.line, "assert_graph_slot_invalid_reason " + std::to_string(slot) +
+                                            " '" + sc.strArg + "' (actual: '" + actual + "')");
+                    else
+                        assertFail(sc.line, "assert_graph_slot_invalid_reason slot " + std::to_string(slot) +
+                                            " esperaba subcadena '" + sc.strArg + "' pero el motivo es '" +
+                                            actual + "'");
+                    break;
+                }
+                case ScriptCmdType::AssertGraphRelationOp: {
+                    const char* actual = g_grapherApp->debugSlotRelationOp(slot);
+                    if (sc.strArg == actual)
+                        assertPass(sc.line, "assert_graph_relation_op " + std::to_string(slot) + " " + sc.strArg);
+                    else
+                        assertFail(sc.line, "assert_graph_relation_op slot " + std::to_string(slot) +
+                                            " esperaba '" + sc.strArg + "' pero es '" + actual + "'");
+                    break;
+                }
+                case ScriptCmdType::AssertGraphExprText: {
+                    const char* actual = g_grapherApp->debugSlotExprText(slot);
+                    if (sc.strArg == actual)
+                        assertPass(sc.line, "assert_graph_expr_text " + std::to_string(slot) + " '" + sc.strArg + "'");
+                    else
+                        assertFail(sc.line, "assert_graph_expr_text slot " + std::to_string(slot) +
+                                            " esperaba '" + sc.strArg + "' pero es '" + actual + "'");
+                    break;
+                }
+                case ScriptCmdType::AssertGraphTraceState: {
+                    const char* actual = g_grapherApp->debugTraceMode();
+                    if (sc.strArg == actual)
+                        assertPass(sc.line, "assert_graph_trace_state " + sc.strArg);
+                    else
+                        assertFail(sc.line, "assert_graph_trace_state esperaba '" + sc.strArg +
+                                            "' pero es '" + actual + "'");
+                    break;
+                }
+                default: break;
             }
             break;
         }

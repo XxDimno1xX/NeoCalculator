@@ -66,6 +66,13 @@ static bool isJustY(const std::string& s) {
     return t.size() == 1 && (t[0] == 'y' || t[0] == 'Y');
 }
 
+// True when the trimmed string is exactly the single variable x/X — marks the
+// "x = f(y)" orientation (explicit in y) when the other side has no x.
+static bool isJustX(const std::string& s) {
+    std::string t = trimSpaces(s);
+    return t.size() == 1 && (t[0] == 'x' || t[0] == 'X');
+}
+
 const char* GraphModel::getExprRHS(const char* text) {
     if (!text) return nullptr;
     // An explicit "lhs = rhs" plots the rhs; a bare expression (no '=') is
@@ -78,15 +85,92 @@ const char* GraphModel::getExprRHS(const char* text) {
     return rhs;
 }
 
+// ── Implicit variable multiplication ───────────────────────────────────────
+//
+// The shared Tokenizer reads a run of consecutive letters as ONE identifier, so
+// "xx" tokenizes to the single unknown identifier "xx" and never plots — even
+// though a student means x·x. On this calculator every variable is a single
+// letter; a multi-letter identifier is only ever a function name (which keeps
+// its '(' and tokenizes as TokenType::Function, untouched here) or a reserved
+// constant word. So a bare multi-letter *Identifier* run is juxtaposed
+// single-letter variables: expand it into a product, greedily preserving the
+// reserved multi-char words (pi, ans, preans; single 'e'/'E' resolves to Euler
+// on its own). This is Grapher-local (GraphModel only) — the Tokenizer, and
+// therefore CalculationApp, is left exactly as it was.
+//
+// Examples:  "xx" → x*x   "xxx" → x*x*x   "xy" → x*y   "xpi" → x*pi   "pi" → pi
+
+// Case-insensitive prefix compare of the first n chars.
+static bool ciPrefixEq(const std::string& s, size_t pos, const char* w) {
+    size_t n = std::strlen(w);
+    if (pos + n > s.size()) return false;
+    for (size_t i = 0; i < n; ++i) {
+        char a = s[pos + i]; if (a >= 'A' && a <= 'Z') a = (char)(a + 32);
+        char b = w[i];       if (b >= 'A' && b <= 'Z') b = (char)(b + 32);
+        if (a != b) return false;
+    }
+    return true;
+}
+
+static std::vector<Token> expandImplicitVarMul(const std::vector<Token>& in) {
+    // Reserved multi-letter words that must NOT be split into single vars.
+    // Longer words first so a prefix match is unambiguous.
+    static const char* kReserved[] = { "preans", "ans", "pi" };
+
+    std::vector<Token> out;
+    out.reserve(in.size());
+    for (const Token& t : in) {
+        if (t.type != TokenType::Identifier || t.text.length() <= 1) {
+            out.push_back(t);
+            continue;
+        }
+        std::string s(t.text.c_str());
+        size_t i = 0;
+        bool firstPiece = true;
+        while (i < s.size()) {
+            size_t matchLen = 0;
+            for (const char* w : kReserved) {
+                if (ciPrefixEq(s, i, w)) { matchLen = std::strlen(w); break; }
+            }
+            if (matchLen == 0) matchLen = 1;   // single-letter variable
+
+            if (!firstPiece) {                 // implicit '*' between pieces
+                Token mul;
+                mul.type = TokenType::Operator;
+                mul.op   = OperatorKind::Mul;
+                mul.text = "*";
+                out.push_back(mul);
+            }
+            firstPiece = false;
+
+            Token id;
+            id.type = TokenType::Identifier;
+            id.text = s.substr(i, matchLen).c_str();
+            out.push_back(id);
+            i += matchLen;
+        }
+    }
+    return out;
+}
+
+// Tokenize `expr` and expand juxtaposed single-letter variables (see above).
+// Returns false when the tokenizer itself rejects the input.
+bool GraphModel::tokenizeExpanded(const char* expr, std::vector<Token>& outTokens) {
+    TokenizeResult tr = _tok.tokenize(expr);
+    if (!tr.ok) return false;
+    outTokens = expandImplicitVarMul(tr.tokens);
+    return true;
+}
+
 // ── compileExpr / referencesY ──────────────────────────────────────────────
 
 bool GraphModel::compileExpr(const char* expr, std::vector<Token>& outRpn) {
     outRpn.clear();
     if (!expr || !*expr) return false;
     std::string norm = normalizeLeadingUnary(expr);
-    TokenizeResult tr = _tok.tokenize(norm.c_str());
-    if (!tr.ok) return false;
-    ParseResult pr = _par.toRPN(tr.tokens);
+    std::vector<Token> toks;
+    if (!tokenizeExpanded(norm.c_str(), toks)) return false;
+    ParseResult pr = _par.toRPN(toks);
     if (!pr.ok) return false;
     outRpn = pr.outputRPN;
     return true;
@@ -94,117 +178,260 @@ bool GraphModel::compileExpr(const char* expr, std::vector<Token>& outRpn) {
 
 bool GraphModel::referencesY(const char* expr) {
     if (!expr) return false;
-    TokenizeResult tr = _tok.tokenize(expr);
-    if (!tr.ok) {
+    std::vector<Token> toks;
+    if (!tokenizeExpanded(expr, toks)) {
         // Tokenize failed — fall back to a literal scan so we still classify.
         for (const char* p = expr; *p; ++p)
             if (*p == 'y' || *p == 'Y') return true;
         return false;
     }
-    for (const Token& t : tr.tokens) {
+    for (const Token& t : toks) {
         if (t.type == TokenType::Identifier &&
             (t.text == "y" || t.text == "Y")) return true;
     }
     return false;
 }
 
+bool GraphModel::referencesX(const char* expr) {
+    if (!expr) return false;
+    std::vector<Token> toks;
+    if (!tokenizeExpanded(expr, toks)) {
+        // Tokenize failed — fall back to a literal scan so we still classify.
+        for (const char* p = expr; *p; ++p)
+            if (*p == 'x' || *p == 'X') return true;
+        return false;
+    }
+    for (const Token& t : toks) {
+        if (t.type == TokenType::Identifier &&
+            (t.text == "x" || t.text == "X")) return true;
+    }
+    return false;
+}
+
+// ── dryRunStructural ───────────────────────────────────────────────────────
+
+bool GraphModel::dryRunStructural(const std::vector<Token>& rpn, CartesianFunction& fn) {
+    if (rpn.empty()) return true;
+    _vars.setVar('x', 1.0);
+    _vars.setVar('y', 1.0);
+    EvalResult er = _eval.evaluateRPN(rpn, _vars);
+    if (er.ok) return true;
+
+    // Value-dependent failures at the probe point do not invalidate: the slot
+    // may be perfectly fine elsewhere in its domain (contract §A.3).
+    if (er.errorMessage == "Error: Dominio" ||
+        er.errorMessage == "Error: Div por 0" ||
+        er.errorMessage == "Error: Resultado no finito") {
+        return true;
+    }
+
+    // "Variable no definida: <ident>" → unknown identifier; keep the name so the
+    // user sees exactly what the pipeline could not resolve ("unknown: xy").
+    const char* kUndef = "Variable no definida: ";
+    const char* msg = er.errorMessage.c_str();
+    if (strncmp(msg, kUndef, strlen(kUndef)) == 0) {
+        fn.invalidReason = InvalidReason::UnknownIdent;
+        snprintf(fn.reasonDetail, sizeof(fn.reasonDetail), "%s", msg + strlen(kUndef));
+    } else {
+        fn.invalidReason = InvalidReason::Syntax;
+    }
+    fn.valid = false;
+    return false;
+}
+
 // ── preCacheRPN ────────────────────────────────────────────────────────────
 //
-// Classifies the expression as EXPLICIT (single-valued y = f(x), drawn by the
-// fast adaptive sampler) or IMPLICIT (a general relation F(x,y) = 0, drawn by
-// marching squares over G(x,y) = lhs - rhs). Classification:
+// Classifies the committed expression per the classifier contract
+// (NUMOS_GRAPHER_CLASSIFIER_CONTRACT.md, rules R0-R14; earlier rule wins):
 //
-//   no '='            → explicit y = <expr>      unless <expr> references y,
-//                       in which case implicit G = <expr> (= 0).
-//   "y" = rhs         → explicit y = rhs          (when rhs has no y)
-//   lhs = "y"         → explicit y = lhs          (when lhs has no y)
-//   anything else     → implicit  G = lhs - rhs   (= 0)
+//   pending serialiser verdict  → invalid (TooLong / Unsupported)     [R1]
+//   ≥2 relation operators       → invalid "multiple relations"        [R9]
+//   one '<' '>' '<=' '>='       → inequality region (both sides must
+//                                 be present, compile and dry-run)    [R3,R7,R8,R11]
+//   no operator                 → explicit y=<expr>, or implicit G=<expr>
+//                                 when <expr> references y            [R4]
+//   "y" = f(x) (either side)    → explicit y=f(x)                     [R5]
+//   "x" = f(y) (either side)    → implicit contour + explicit-in-y
+//                                 trace refinement (kind: explicitX)  [R6]
+//   any other single '='        → implicit G = lhs - rhs              [R12]
+//   relation with no x and no y → invalid "constant relation"         [R10]
 //
-// So "y=x^2", bare "x"/"2x"/"sin(x)", and the y= templates stay on the fast
-// path; "x=y^2", "x^2+y^2=1", and "y=x^2+y^2" become implicit contours.
+// Every side that compiles is dry-run at (1,1); structural failures (unknown
+// identifier such as "xy", malformed RPN) invalidate the slot VISIBLY instead
+// of leaving a valid-but-blank plot. One-sided relations ("x=", "=x", "y<")
+// are invalid instead of silently becoming "= 0".
 void GraphModel::preCacheRPN(CartesianFunction& fn) {
     fn.rpnValid  = false;
     fn.rpnLValid = false;
     fn.implicit  = false;
     fn.relation  = Relation::Equal;
+    fn.explicitY = false;
+    fn.rpnYValid = false;
     fn.rpn.clear();
     fn.rpnL.clear();
+    fn.rpnY.clear();
     fn.valid = false;
+    fn.invalidReason  = InvalidReason::None;
+    fn.reasonDetail[0] = '\0';
 
-    if (fn.len <= 0) return;
+    if (fn.len <= 0) return;   // R0: empty — not classified, not invalid
 
-    // ── Inequalities (checked first, before '=') ──────────────────────────
-    // A single '<' or '>' (optionally followed by '=') splits the expression
-    // into lhs/rhs. We compile G(x,y)=lhs-rhs exactly like an implicit equation
-    // and remember the comparison direction; the renderer shades the half-plane
-    // where the relation holds and draws the G=0 boundary. `implicit` is set so
-    // the y=f(x) consumers (trace/table) treat the slot as multi-valued.
-    for (const char* p = fn.text; *p; ++p) {
-        if (*p != '<' && *p != '>') continue;
-        const bool orEqual = (p[1] == '=');
-        if (*p == '<') fn.relation = orEqual ? Relation::LessEqual    : Relation::Less;
-        else           fn.relation = orEqual ? Relation::GreaterEqual : Relation::Greater;
-        std::string lhs = trimSpaces(std::string(fn.text, p - fn.text));
-        std::string rhs = trimSpaces(std::string(p + (orEqual ? 2 : 1)));
-        bool okL = !lhs.empty() && compileExpr(lhs.c_str(), fn.rpnL);
-        bool okR = !rhs.empty() && compileExpr(rhs.c_str(), fn.rpn);
-        fn.rpnLValid = okL;
-        fn.rpnValid  = okR;
-        if (!okL && !okR) { fn.relation = Relation::Equal; return; }  // both sides invalid
-        fn.implicit = true;
-        fn.valid    = true;
+    // R1: the serialiser already rejected this AST (overflow / unsupported node);
+    // the text buffer may be truncated garbage, so never classify it.
+    if (fn.serializeVerdict != InvalidReason::None) {
+        fn.invalidReason = fn.serializeVerdict;
         return;
     }
 
-    const char* eq = strchr(fn.text, '=');
+    // R2: relation-operator census. '<=' / '>=' count as ONE operator; the
+    // position and shape of the first one is kept for the split below.
+    int         opCount   = 0;
+    const char* opPos     = nullptr;
+    char        opChar    = '\0';
+    bool        opOrEqual = false;
+    for (const char* p = fn.text; *p; ++p) {
+        if (*p == '<' || *p == '>') {
+            if (opCount++ == 0) {
+                opPos = p; opChar = *p; opOrEqual = (p[1] == '=');
+            }
+            if (p[1] == '=') ++p;   // consume the '=' of '<=' / '>='
+        } else if (*p == '=') {
+            if (opCount++ == 0) {
+                opPos = p; opChar = '='; opOrEqual = false;
+            }
+        }
+    }
 
-    if (!eq) {
-        // Bare expression. Plain x-function unless it mentions y.
+    // R9: chained/multiple relations have no defined semantics — reject loudly
+    // ("y=x=2", "0<x<1") instead of evaluating to something surprising.
+    if (opCount >= 2) {
+        fn.invalidReason = InvalidReason::MultiRelation;
+        return;
+    }
+
+    // R4: bare expression (no relation operator).
+    if (opCount == 0) {
         const char* rhs = getExprRHS(fn.text);
-        if (!rhs) return;
+        if (!rhs) { fn.invalidReason = InvalidReason::Syntax; return; }
         if (!referencesY(rhs)) {
-            if (!compileExpr(rhs, fn.rpn)) return;
+            // Plain y = f(x).
+            if (!compileExpr(rhs, fn.rpn)) { fn.invalidReason = InvalidReason::Syntax; return; }
+            if (!dryRunStructural(fn.rpn, fn)) return;
             fn.rpnValid = true;
             fn.valid    = true;
             return;
         }
         // Implicit contour with an implicit "= 0": G = <expr>.
-        if (!compileExpr(rhs, fn.rpnL)) return;
+        if (!compileExpr(rhs, fn.rpnL)) { fn.invalidReason = InvalidReason::Syntax; return; }
+        if (!dryRunStructural(fn.rpnL, fn)) return;
         fn.rpnLValid = true;
         fn.implicit  = true;
         fn.valid     = true;
         return;
     }
 
-    std::string lhs = trimSpaces(std::string(fn.text, eq - fn.text));
-    std::string rhs = trimSpaces(std::string(eq + 1));
-    if (rhs.empty() && lhs.empty()) return;
+    // Single relation operator: split into lhs / rhs around it.
+    std::string lhs = trimSpaces(std::string(fn.text, opPos - fn.text));
+    std::string rhs = trimSpaces(std::string(opPos + (opOrEqual ? 2 : 1)));
 
+    // R8: one-sided relations ("x=", "=x", "y<", "<x") are invalid. The old
+    // behaviour compiled the present side and treated the missing one as 0,
+    // silently plotting x=0 / shading y<0 — the flagship silent-wrong bug.
+    if (lhs.empty() || rhs.empty()) {
+        fn.invalidReason = InvalidReason::OneSided;
+        return;
+    }
+
+    // R10 helper: a relation where NEITHER side references x or y ("1=2",
+    // "pi<e") is a constant truth value, not a graph. Checked after compile
+    // (uncompilable input stays "syntax") AND after the dry-run (an unknown
+    // identifier like "xy" reports "unknown: xy", not "constant relation").
+    auto isConstantRelation = [&]() {
+        return !referencesX(lhs.c_str()) && !referencesY(lhs.c_str()) &&
+               !referencesX(rhs.c_str()) && !referencesY(rhs.c_str());
+    };
+
+    // ── Inequality path (R3/R7/R11) ───────────────────────────────────────
+    // Compile G(x,y)=lhs-rhs exactly like an implicit equation and remember the
+    // comparison direction; the renderer shades the half-plane where the
+    // relation holds and draws the G=0 boundary. `implicit` is set so the
+    // y=f(x) consumers (trace/table) treat the slot as multi-valued.
+    if (opChar == '<' || opChar == '>') {
+        if (opChar == '<') fn.relation = opOrEqual ? Relation::LessEqual    : Relation::Less;
+        else               fn.relation = opOrEqual ? Relation::GreaterEqual : Relation::Greater;
+        if (!compileExpr(lhs.c_str(), fn.rpnL) || !compileExpr(rhs.c_str(), fn.rpn)) {
+            fn.relation = Relation::Equal;
+            fn.invalidReason = InvalidReason::Syntax;
+            return;
+        }
+        if (!dryRunStructural(fn.rpnL, fn) || !dryRunStructural(fn.rpn, fn)) {
+            fn.relation = Relation::Equal;
+            return;
+        }
+        if (isConstantRelation()) {
+            fn.relation = Relation::Equal;
+            fn.invalidReason = InvalidReason::ConstantRelation;
+            return;
+        }
+        fn.rpnLValid = true;
+        fn.rpnValid  = true;
+        fn.implicit  = true;
+        fn.valid     = true;
+        return;
+    }
+
+    // ── Equality path ──────────────────────────────────────────────────────
     const bool lhsHasY = referencesY(lhs.c_str());
     const bool rhsHasY = referencesY(rhs.c_str());
 
-    // Explicit "y = f(x)" (either orientation), when the function side has no y.
+    // R5: explicit "y = f(x)" (either orientation), when the function side has
+    // no y. Tested BEFORE the x=f(y) form so "x=y" classifies explicitY.
     if (isJustY(lhs) && !rhsHasY) {
-        if (!compileExpr(rhs.c_str(), fn.rpn)) return;
+        if (!compileExpr(rhs.c_str(), fn.rpn)) { fn.invalidReason = InvalidReason::Syntax; return; }
+        if (!dryRunStructural(fn.rpn, fn)) return;
         fn.rpnValid = true;
         fn.valid    = true;
         return;
     }
     if (isJustY(rhs) && !lhsHasY) {
-        if (!compileExpr(lhs.c_str(), fn.rpn)) return;
+        if (!compileExpr(lhs.c_str(), fn.rpn)) { fn.invalidReason = InvalidReason::Syntax; return; }
+        if (!dryRunStructural(fn.rpn, fn)) return;
         fn.rpnValid = true;
         fn.valid    = true;
         return;
     }
 
-    // General implicit relation: G(x,y) = lhs - rhs.
-    bool okL = compileExpr(lhs.c_str(), fn.rpnL);
-    bool okR = compileExpr(rhs.c_str(), fn.rpn);
-    fn.rpnLValid = okL;
-    fn.rpnValid  = okR;
-    if (!okL && !okR) return;   // neither side compiled → invalid
-    fn.implicit = true;
-    fn.valid    = true;
+    // R12: general implicit relation G(x,y) = lhs - rhs. BOTH sides must
+    // compile (a failed side is no longer silently treated as 0) and pass the
+    // structural dry-run.
+    if (!compileExpr(lhs.c_str(), fn.rpnL) || !compileExpr(rhs.c_str(), fn.rpn)) {
+        fn.invalidReason = InvalidReason::Syntax;
+        return;
+    }
+    if (!dryRunStructural(fn.rpnL, fn) || !dryRunStructural(fn.rpn, fn)) return;
+    if (isConstantRelation()) {
+        fn.invalidReason = InvalidReason::ConstantRelation;
+        return;
+    }
+    fn.rpnLValid = true;
+    fn.rpnValid  = true;
+    fn.implicit  = true;
+    fn.valid     = true;
+
+    // R6: explicit-in-y refinement — "x = f(y)" (either orientation), when one
+    // side is the bare variable x and the other has no x. The contour above
+    // already plots it (pixel-identical to the pre-classifier renderer); here we
+    // additionally compile the single-valued f(y) so the tracer can parametrise
+    // the slot by y. The lhs==y / rhs==y explicit forms returned earlier, so x
+    // can no longer be the dependent variable of a y=f(x) slot. Script-visible
+    // kind for this shape: "explicitX".
+    if (isJustX(lhs) && !referencesX(rhs.c_str())) {
+        fn.explicitY = compileExpr(rhs.c_str(), fn.rpnY);
+        fn.rpnYValid = fn.explicitY;
+    } else if (isJustX(rhs) && !referencesX(lhs.c_str())) {
+        fn.explicitY = compileExpr(lhs.c_str(), fn.rpnY);
+        fn.rpnYValid = fn.explicitY;
+    }
 }
 
 // ── evalAt ─────────────────────────────────────────────────────────────────
@@ -258,6 +485,17 @@ float GraphModel::evalImplicit(CartesianFunction& fn, float x, float y) {
     double g = lv - rv;
     if (std::isnan(g) || std::isinf(g)) return NAN;
     return (float)g;
+}
+
+// ── evalAtY: x = f(y) for an explicit-in-y slot ────────────────────────────
+
+float GraphModel::evalAtY(CartesianFunction& fn, float y) {
+    if (!fn.explicitY || !fn.rpnYValid || fn.rpnY.empty()) return NAN;
+    _vars.setVar('y', (double)y);
+    EvalResult er = _eval.evaluateRPN(fn.rpnY, _vars);
+    if (!er.ok) return NAN;
+    float x = (float)er.value;
+    return (std::isnan(x) || std::isinf(x)) ? NAN : x;
 }
 
 // ── Difference function: f1(x) - f2(x) ────────────────────────────────────

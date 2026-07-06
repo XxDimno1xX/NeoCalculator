@@ -59,6 +59,23 @@ public:
         xMin = _xMin; xMax = _xMax; yMin = _yMin; yMax = _yMax;
     }
 
+#ifdef NATIVE_SIM
+    // ── Emulator-only debug accessors (GR-14 assert hooks) ────────────────
+    // Read-only, allocation-free views of the model state for .numos semantic
+    // asserts (assert_graph_slot_kind etc. in NativeHal). Kind tokens follow
+    // the classifier contract: explicitY (y=f(x)), explicitX (x=f(y)),
+    // implicit, ineqStrict, ineqNonStrict, invalid, empty. Never compiled into
+    // firmware (NATIVE_SIM is defined only by [env:emulator_pc]).
+    int         debugRelationCount() const { return _numFuncs; }
+    const char* debugSlotKind(int i) const;
+    bool        debugSlotValid(int i) const;
+    const char* debugSlotInvalidReason(int i) const;  // "" when valid; static buf
+    const char* debugSlotRelationOp(int i) const;     // eq|lt|gt|le|ge
+    const char* debugSlotExprText(int i) const;       // serialized text[64]
+    const char* debugTraceMode() const;               // idle|navigate|trace
+    int         debugTraceFn() const { return _traceFn; }
+#endif
+
 private:
     // ── Constants ────────────────────────────────────────────────────
     static constexpr int MAX_FUNCS    = 6;
@@ -78,6 +95,8 @@ private:
     static constexpr int BISECTION_ITER = 25; // Bisection iterations for root/POI refinement
     static constexpr float POI_SNAP_THRESHOLD_PX = 8.0f; // Magnetic snap radius in screen pixels
     static constexpr int TBL_HDR_H    = 22;   // Sticky table header height
+    static constexpr float TRACE_IMPLICIT_STEP_PX = 4.0f; // Implicit trace arc-length per arrow (px)
+    static constexpr int   TRACE_NEWTON_ITERS     = 8;    // Corrector iterations onto G(x,y)=0
 
     // Function colours (NumWorks palette)
     static constexpr uint32_t FUNC_COLORS[MAX_FUNCS] = {
@@ -94,6 +113,13 @@ private:
     enum class Focus    : uint8_t { TAB_BAR, TOOLBAR, CONTENT };
     enum class ExprMode : uint8_t { LIST, EDITING };
     enum class GrMode   : uint8_t { IDLE, NAVIGATE, TRACE };
+
+    // How the trace cursor walks the active slot:
+    //   ExplicitX  y = f(x): parameter is x  (LEFT/RIGHT step x; fast sampler).
+    //   ExplicitY  x = f(y): parameter is y  (LEFT/RIGHT step y; exact f(y)).
+    //   Implicit   G(x,y)=0: predictor–corrector along the contour arc-length.
+    //   None       slot is not a traceable curve (inequality / invalid).
+    enum class TraceKind : uint8_t { None, ExplicitX, ExplicitY, Implicit };
 
     // ── Per-function slot (MVC: Model data, stored here for UI access) ──
     using FuncSlot = grapher::CartesianFunction;
@@ -185,17 +211,25 @@ private:
     lv_obj_t*       _calcMenuRows[CALC_MENU_ITEMS]; // Menu option labels
     int             _calcMenuIdx;       // Currently highlighted menu item
     bool            _calcMenuOpen;      // Menu is visible
+    // Per-item availability for the CURRENT traced curve kind. Root/Min/Max/
+    // Integral are single-valued y=f(x) concepts (enabled only for ExplicitX);
+    // Intersection needs a 2nd traceable curve; Tangent works for every kind.
+    // Disabled items render greyed and are skipped by the menu cursor — so the
+    // menu never offers a calculation that would fabricate a wrong result.
+    bool            _calcMenuEnabled[CALC_MENU_ITEMS];
 
     // ── Integral area shading (pixel-buffer based) ───────────────────
     bool            _shadingActive;     // Shading is currently applied to buffer
     int             _shadingFuncIdx;    // Which function is shaded
-    float           _shadingX0;         // Shading left bound (world)
-    float           _shadingX1;         // Shading right bound (world)
+    float           _shadingX0;         // Shading lower bound (world): x-range, or y-range when _shadingAlongY
+    float           _shadingX1;         // Shading upper bound (world)
+    bool            _shadingAlongY;     // true ⇒ x=f(y) integral: horizontal strips over a y-range
 
     // ── Tangent overlay (pixel-buffer based) ─────────────────────────
     bool            _tangentActive;     // Tangent is currently drawn in buffer
     int             _tangentFuncIdx;    // Which function the tangent belongs to
     float           _tangentX;          // Point of tangency (world x)
+    float           _tangentY;          // Point of tangency (world y) — implicit/x=f(y)
 
     // ── Table panel widgets ──────────────────────────────────────────
     static constexpr int TBL_ROWS = 21; // data rows in table
@@ -227,8 +261,13 @@ private:
     GrMode          _grMode;
     int             _toolIdx;           // focused toolbar item (0-3)
     float           _xMin, _xMax, _yMin, _yMax;
-    float           _traceX;            // trace cursor X
+    float           _traceX;            // trace cursor X (authoritative with _traceY)
+    float           _traceY;            // trace cursor Y (authoritative with _traceX)
     int             _traceFn;           // which function to trace
+    bool            _traceValid;        // current trace point is finite & on-curve
+    bool            _traceSeeded;       // initial point computed for current fn/mode
+    float           _traceHeadX;        // implicit: unit tangent, RIGHT direction (x)
+    float           _traceHeadY;        // implicit: unit tangent, RIGHT direction (y)
     bool            _plotDirty;
 
     // Table state
@@ -282,10 +321,24 @@ private:
     // y so circles render circular. Idempotent; applied at the top of replot().
     void normalizeAspect();
 
-    // Find a traceable (valid, visible, single-valued y=f(x)) function index,
-    // scanning from `from` in direction `dir` (+1/-1). Returns -1 if none —
-    // implicit equations and inequalities are multi-valued and never traceable.
+    // Find a traceable curve (valid, visible, relation==Equal — explicit y=f(x),
+    // explicit x=f(y), or implicit equation), scanning from `from` in direction
+    // `dir` (+1/-1). Returns -1 if none. Inequalities are regions, never traceable.
     int  firstTraceableFunc(int from, int dir) const;
+
+    // Find the first single-valued y=f(x) slot (the only kind auto-traced on Graph
+    // tab entry). Implicit/x=f(y) slots are reachable via ENTER and UP/DOWN but do
+    // not auto-start trace, so an implicit-only graph still opens in Pan.
+    int  firstExplicitXFunc(int from, int dir) const;
+
+    // ── Unified trace cursor (explicit-x / explicit-y / implicit contour) ──────
+    TraceKind traceKind(int fi) const;     // classify slot fi for the tracer
+    void ensureTraceSeed();                // compute initial on-curve point (lazy)
+    bool seedImplicitTrace();              // scan viewport for a G=0 seed + heading
+    void traceStep(int dir);               // LEFT(-1)/RIGHT(+1): walk the curve
+    bool gradImplicit(int fi, float x, float y, float& gx, float& gy) const; // ∇G
+    bool correctOntoCurve(int fi, float& x, float& y) const;  // Newton onto G=0
+    void updateImplicitHeading(int fi, float x, float y);     // refresh tangent
 
     // POI (snap-to-point) helpers
     void preCacheFuncRPN(int idx);
@@ -293,12 +346,25 @@ private:
     void snapToPOI();
     void syncViewportToCursor();  // Camera follow: re-center viewport on trace cursor
 
+    // ── Cross-kind intersection finder (purple POI markers for any curve) ─────
+    // residualAt unifies every traceable slot to a single G(x,y)=0 residual:
+    //   y=f(x) → y−f(x);  x=f(y) and general implicit → evalImplicit (lhs−rhs).
+    // A pair of curves intersects where BOTH residuals vanish; a coarse grid scan
+    // seeds a 2×2 Newton (newton2D) that refines the crossing. Pairs that are both
+    // y=f(x) keep using the cheaper exact 1-D bisection in appendPOIsForFunction.
+    float residualAt(int fi, float x, float y);
+    void  appendCrossIntersections(int fi);   // intersections of fi with each j<fi
+    void  find2DIntersections(int a, int b);   // grid-seeded 2-D root pairs
+    bool  newton2D(int a, int b, float& x, float& y);  // refine onto Ga=Gb=0
+
     // Async POI computation (sliced over LVGL timer ticks — keeps UI at 60 FPS)
     void startAsyncPOI(int fi);
     static void poiAsyncTimerCb(lv_timer_t* t);
 
     // ── Tangent overlay ───────────────────────────────────────────────
-    void drawTangentOverlay(int funcIdx, float xTarget);
+    void drawTangentOverlay(int funcIdx, float xTarget);          // y=f(x): dy/dx line
+    void drawImplicitTangent(int funcIdx, float x0, float y0);    // implicit/x=f(y): ⟂∇G line
+    void drawActiveTangent();                                     // redraw by curve kind
     void clearTangent();
 
     // ── Calculate menu helpers ───────────────────────────────────────
@@ -306,9 +372,12 @@ private:
     void closeCalcMenu();
     void handleCalcMenu(const KeyEvent& ev);
     void executeCalcOption(int option);
+    bool calcItemEnabled(TraceKind k, int item) const;  // is menu option valid for kind k?
+    void restyleCalcMenu();                             // apply selected/disabled styling
 
     // ── Integral shading ─────────────────────────────────────────────
-    void drawIntegralShading(int funcIdx, float shadeXMin, float shadeXMax);
+    void drawIntegralShading(int funcIdx, float shadeXMin, float shadeXMax);   // ∫f(x)dx: vertical strips
+    void drawIntegralShadingY(int funcIdx, float shadeYMin, float shadeYMax);  // ∫f(y)dy: horizontal strips
     void clearIntegralShading();
 
     // ── Async POI internal state ──────────────────────────────────────

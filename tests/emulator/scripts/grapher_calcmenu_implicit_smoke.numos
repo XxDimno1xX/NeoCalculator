@@ -1,0 +1,52 @@
+# grapher_calcmenu_implicit_smoke.numos — Phase 10G. Calculate menu on an
+# implicit contour.
+#
+# Commits "x^2+y^2=9" (a circle), enters Trace, and presses ENTER to open the
+# Calculate menu. Proves Phase 10G's adaptive menu: ENTER now opens on ANY
+# traceable curve (not just y=f(x)). For a single implicit contour the menu greys
+# Find Root / Find Minimum / Find Maximum / Find Intersection / Calculate Integral
+# (all single-valued y=f(x) concepts, or needing a 2nd curve) and leaves only
+# "Draw Tangent" selectable — so the calculator never offers a calculation that
+# would fabricate a wrong result on a curve it isn't defined for.
+#
+# Flow (src/apps/GrapherApp.cpp): handleGraphTrace ENTER -> openCalcMenu ->
+# calcItemEnabled(kind,item) builds the enable mask -> restyleCalcMenu greys the
+# disabled rows and starts the cursor on the first enabled item (Draw Tangent).
+#
+# Warning-only: screenshot, NO golden, NOT CI-gated (absent from the
+# generate-emulator-candidates CANDIDATES list and every emulator-build.yml step).
+#
+# Run:
+#   program --headless --deterministic --script tests/emulator/scripts/grapher_calcmenu_implicit_smoke.numos \
+#           --frames 1000 --screenshot out/grapher_calcmenu_implicit_smoke.ppm --quiet
+log "grapher_calcmenu_implicit: start"
+wait 200
+open_app Grapher
+wait 60
+# down -> Add row; enter -> edit slot 0; type "x^2+y^2=9" (right exits each exponent).
+key down
+key enter
+key x
+key ^
+key 2
+key right
+key +
+key y
+key ^
+key 2
+key right
+key =
+key 9
+key enter
+wait 60
+# Phase 10G: the Graph tab opens directly in a centred Trace for an implicit
+# equation; zoom once so the circle is large, then ENTER opens the Calculate menu.
+key graph
+wait 60
+key zoom
+wait 40
+key enter
+wait 80
+screenshot out/grapher_calcmenu_implicit_smoke.ppm
+assert_app Grapher
+log "grapher_calcmenu_implicit: menu open, only Draw Tangent enabled"

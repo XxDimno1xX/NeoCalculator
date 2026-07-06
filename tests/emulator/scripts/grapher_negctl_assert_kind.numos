@@ -1,0 +1,17 @@
+# grapher_negctl_assert_kind — NEGATIVE CONTROL (must exit 4, never 0).
+# Commits "y=x" (explicitY) and then asserts the WRONG kind. If this script
+# ever passes, the assert harness has stopped asserting — the CI step that runs
+# it inverts the check (requires exit code 4 and a FAIL marker).
+wait 200
+open_app Grapher
+wait 60
+key down
+key enter
+key y
+key =
+key x
+key enter
+wait 60
+assert_app Grapher
+assert_graph_slot_kind 0 implicit
+log "negctl: NOT REACHED — the wrong-kind assert above must have failed"

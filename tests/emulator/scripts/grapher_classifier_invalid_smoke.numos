@@ -1,0 +1,44 @@
+# grapher_classifier_invalid_smoke — GR-02: one-sided relations are VISIBLY
+# invalid and never silently plot "= 0".
+#   slot 0: "x="  → invalid "one-sided relation"  (was: plotted line x=0)
+#   slot 1: "y<"  → invalid "one-sided relation"  (was: shaded y<0)
+#   slot 2: "=x"  → invalid "one-sided relation"  (was: plotted x=0)
+# The Graph tab must open with NO curve and NO trace: with zero valid slots the
+# grapher stays in navigate/pan, never fabricating a trace point on a phantom
+# curve. The final screenshot is a warning-only candidate (axes only).
+wait 200
+open_app Grapher
+wait 60
+key down
+key enter
+key x
+key =
+key enter
+wait 40
+key down
+key enter
+key y
+key lt
+key enter
+wait 40
+key down
+key enter
+key =
+key x
+key enter
+wait 60
+assert_app Grapher
+assert_graph_relation_count 3
+assert_graph_slot_kind 0 invalid
+assert_graph_slot_invalid_reason 0 one-sided
+assert_graph_slot_kind 1 invalid
+assert_graph_slot_invalid_reason 1 one-sided
+assert_graph_slot_kind 2 invalid
+assert_graph_slot_invalid_reason 2 one-sided
+screenshot out/grapher_classifier_invalid_expr.ppm
+key graph
+wait 200
+assert_graph_trace_state navigate
+screenshot out/grapher_classifier_invalid_graph.ppm
+assert_app Grapher
+log "classifier_invalid: one-sided relations refuse visibly, no phantom x=0"

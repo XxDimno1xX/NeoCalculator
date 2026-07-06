@@ -140,6 +140,27 @@ CANDIDATES = [
     ("grapher_multifn_graph_smoke", "tests/emulator/scripts/grapher_multifn_graph_smoke.numos", 1400),
     ("grapher_multifn_table_smoke", "tests/emulator/scripts/grapher_multifn_table_smoke.numos", 1400),
     ("grapher_expr_scroll_smoke", "tests/emulator/scripts/grapher_expr_scroll_smoke.numos", 1400),
+    # Phase 10 GR-00: relation/aspect coverage promoted from orphaned scripts to
+    # warning-only candidates (assert-gated in the workflow's Phase-10 step; the
+    # golden compare only WARNS while no golden exists). The three stress
+    # endpoints (breakit / curve_stress / implicit_tabletrace_safe) are
+    # deliberately NOT candidates — a stressed or launcher-final frame must
+    # never be blessed as a golden.
+    ("grapher_implicit_circle_smoke", "tests/emulator/scripts/grapher_implicit_circle_smoke.numos", 1400),
+    ("grapher_implicit_ycircle_smoke", "tests/emulator/scripts/grapher_implicit_ycircle_smoke.numos", 1400),
+    ("grapher_implicit_sideways_smoke", "tests/emulator/scripts/grapher_implicit_sideways_smoke.numos", 1400),
+    ("grapher_ineq_halfplane_smoke", "tests/emulator/scripts/grapher_ineq_halfplane_smoke.numos", 1400),
+    ("grapher_ineq_disk_smoke", "tests/emulator/scripts/grapher_ineq_disk_smoke.numos", 1400),
+    ("grapher_ineq_exterior_smoke", "tests/emulator/scripts/grapher_ineq_exterior_smoke.numos", 1400),
+    ("grapher_ineq_parabola_smoke", "tests/emulator/scripts/grapher_ineq_parabola_smoke.numos", 1400),
+    ("grapher_aspect_circle_smoke", "tests/emulator/scripts/grapher_aspect_circle_smoke.numos", 1400),
+    ("grapher_aspect_small_circle_smoke", "tests/emulator/scripts/grapher_aspect_small_circle_smoke.numos", 1400),
+    ("grapher_aspect_line_smoke", "tests/emulator/scripts/grapher_aspect_line_smoke.numos", 1400),
+    ("grapher_aspect_sin_smoke", "tests/emulator/scripts/grapher_aspect_sin_smoke.numos", 1400),
+    ("grapher_aspect_sideways_parabola_smoke", "tests/emulator/scripts/grapher_aspect_sideways_parabola_smoke.numos", 1400),
+    ("grapher_mixed_relations_smoke", "tests/emulator/scripts/grapher_mixed_relations_smoke.numos", 1400),
+    ("grapher_trace_domain_smoke", "tests/emulator/scripts/grapher_trace_domain_smoke.numos", 1400),
+    ("grapher_explicit_parabola_smoke", "tests/emulator/scripts/grapher_explicit_parabola_smoke.numos", 1400),
 ]
 
 

@@ -539,6 +539,113 @@ jobs:
           if-no-files-found: ignore
 
       # ---------------------------------------------------------------------
+      # Grapher Phase-10 relation/aspect/classifier guard (GR-00 + GR-02/GR-14).
+      #
+      # Assert-only, same contract as Phase 9F: each script must exit 0 and
+      # print at least one "[ASSERT] ... PASS" with no "[ASSERT] ... FAIL".
+      # Covers the previously ORPHANED Phase-10 scripts (implicit/inequality/
+      # aspect/mixed/trace-domain/stress), the Phase-10G calc-menu/tangent/
+      # intersection/trace smokes, and the grapher_classifier_* semantic suite
+      # (one-sided => "one-sided relation", xy=1 => "unknown: xy", x=y^2 =>
+      # explicitX, inequalities strict/non-strict — the silent-wrong-plot bugs).
+      # grapher_negctl_assert_kind is an INVERTED control: it asserts a wrong
+      # kind on purpose and MUST exit 4 with a FAIL marker, proving the assert
+      # harness can actually fail. NO golden is gated here.
+      - name: Grapher Phase-10 relation/aspect/classifier guard (headless deterministic, GR-00)
+        run: |
+          set -euo pipefail
+          BIN=.pio/build/emulator_pc/program
+          mkdir -p out out/grapher_10
+
+          run_grapher10() {
+            script="$1"
+            name="$(basename "$script" .numos)"
+            log="out/grapher_10/${name}.log"
+            echo "=== ${name} ==="
+            rc=0
+            SDL_VIDEODRIVER=dummy timeout 60s "$BIN" \
+              --headless --deterministic --script "$script" \
+              --frames 1400 --quiet > "$log" 2>&1 || rc=$?
+            cat "$log"
+            if [ "$rc" -ne 0 ]; then
+              echo "::error::grapher-10 guard FAILED for ${name} (exit $rc -- hang/timeout or assertion failure)"
+              return 1
+            fi
+            if grep -qE '\[ASSERT\].*: FAIL -' "$log"; then
+              echo "::error::grapher-10 guard: [ASSERT] FAIL present for ${name}"
+              return 1
+            fi
+            if ! grep -qE '\[ASSERT\].*: PASS -' "$log"; then
+              echo "::error::grapher-10 guard: no [ASSERT] PASS marker for ${name}"
+              return 1
+            fi
+          }
+
+          # Orphaned Phase-10 relation/aspect scripts (now candidates too).
+          run_grapher10 tests/emulator/scripts/grapher_implicit_circle_smoke.numos
+          run_grapher10 tests/emulator/scripts/grapher_implicit_ycircle_smoke.numos
+          run_grapher10 tests/emulator/scripts/grapher_implicit_sideways_smoke.numos
+          run_grapher10 tests/emulator/scripts/grapher_ineq_halfplane_smoke.numos
+          run_grapher10 tests/emulator/scripts/grapher_ineq_disk_smoke.numos
+          run_grapher10 tests/emulator/scripts/grapher_ineq_exterior_smoke.numos
+          run_grapher10 tests/emulator/scripts/grapher_ineq_parabola_smoke.numos
+          run_grapher10 tests/emulator/scripts/grapher_aspect_circle_smoke.numos
+          run_grapher10 tests/emulator/scripts/grapher_aspect_small_circle_smoke.numos
+          run_grapher10 tests/emulator/scripts/grapher_aspect_line_smoke.numos
+          run_grapher10 tests/emulator/scripts/grapher_aspect_sin_smoke.numos
+          run_grapher10 tests/emulator/scripts/grapher_aspect_sideways_parabola_smoke.numos
+          run_grapher10 tests/emulator/scripts/grapher_mixed_relations_smoke.numos
+          run_grapher10 tests/emulator/scripts/grapher_trace_domain_smoke.numos
+          run_grapher10 tests/emulator/scripts/grapher_explicit_parabola_smoke.numos
+          # Stress / teardown endpoints — gate-only, NEVER candidates or goldens.
+          run_grapher10 tests/emulator/scripts/grapher_breakit_stress.numos
+          run_grapher10 tests/emulator/scripts/grapher_curve_stress.numos
+          run_grapher10 tests/emulator/scripts/grapher_implicit_tabletrace_safe.numos
+          # Phase-10G trace/calc-menu smokes — gate-only.
+          run_grapher10 tests/emulator/scripts/grapher_trace_explicit_y_smoke.numos
+          run_grapher10 tests/emulator/scripts/grapher_trace_implicit_circle_smoke.numos
+          run_grapher10 tests/emulator/scripts/grapher_tangent_implicit_smoke.numos
+          run_grapher10 tests/emulator/scripts/grapher_intersect_mixed_smoke.numos
+          run_grapher10 tests/emulator/scripts/grapher_calcmenu_implicit_smoke.numos
+          run_grapher10 tests/emulator/scripts/grapher_calcmenu_xfy_smoke.numos
+          # GR-02/GR-14 classifier semantic suite (glob: future scripts auto-gate).
+          shopt -s nullglob
+          classifier=( tests/emulator/scripts/grapher_classifier_*.numos )
+          if [ "${#classifier[@]}" -eq 0 ]; then
+            echo "::error::no grapher_classifier_*.numos scripts found"
+            exit 1
+          fi
+          for s in "${classifier[@]}"; do
+            run_grapher10 "$s"
+          done
+
+          # INVERTED negative control: must FAIL (exit 4 + FAIL marker).
+          neg=tests/emulator/scripts/grapher_negctl_assert_kind.numos
+          nlog=out/grapher_10/grapher_negctl_assert_kind.log
+          rc=0
+          SDL_VIDEODRIVER=dummy timeout 60s "$BIN" \
+            --headless --deterministic --script "$neg" \
+            --frames 1400 --quiet > "$nlog" 2>&1 || rc=$?
+          cat "$nlog"
+          if [ "$rc" -ne 4 ]; then
+            echo "::error::negative control did NOT exit 4 (exit $rc) — assert harness is not asserting"
+            exit 1
+          fi
+          if ! grep -qE '\[ASSERT\].*: FAIL -' "$nlog"; then
+            echo "::error::negative control produced no [ASSERT] FAIL marker"
+            exit 1
+          fi
+          echo "OK: Phase-10 Grapher relation/aspect/classifier guards passed (assert-only, NO gating golden)."
+
+      - name: Upload Phase-10 Grapher guard logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: numos-emulator-grapher-10
+          path: out/grapher_10/
+          if-no-files-found: ignore
+
+      # ---------------------------------------------------------------------
       # Candidate screenshot generation + golden comparison (Phase 4B-A).
       #
       # Additive to the Phase 3A/3B/4A smokes above (kept as-is). This generates

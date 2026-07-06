@@ -1,0 +1,54 @@
+# grapher_tangent_implicit_smoke.numos — Phase 10G. Tangent on an implicit curve.
+#
+# Commits "x^2+y^2=9" (a circle), enters Trace, opens the Calculate menu and runs
+# "Draw Tangent". Proves Phase 10G's implicit tangent: drawTangentOverlay computes
+# dy/dx by finite difference and cannot represent a vertical or multi-valued slope,
+# so it was wrong on a circle. drawImplicitTangent instead draws the line ⟂ to ∇G
+# through the trace point (gradImplicit -> unit tangent), which is correct for any
+# contour. The cursor is NOT teleported to x=0 afterward (Phase 10G also fixed the
+# old bug where Draw Tangent jumped the cursor because res.x defaulted to 0).
+#
+# Flow (src/apps/GrapherApp.cpp): handleCalcMenu ENTER -> executeCalcOption(5) ->
+# drawImplicitTangent (kind != ExplicitX) -> replot -> drawActiveTangent redraws by
+# kind. On an implicit-only graph "Draw Tangent" is the first (only) enabled item,
+# so it is pre-selected and a single ENTER runs it.
+#
+# Warning-only: screenshot, NO golden, NOT CI-gated (absent from the
+# generate-emulator-candidates CANDIDATES list and every emulator-build.yml step).
+#
+# Run:
+#   program --headless --deterministic --script tests/emulator/scripts/grapher_tangent_implicit_smoke.numos \
+#           --frames 1000 --screenshot out/grapher_tangent_implicit_smoke.ppm --quiet
+log "grapher_tangent_implicit: start"
+wait 200
+open_app Grapher
+wait 60
+# down -> Add row; enter -> edit slot 0; type "x^2+y^2=9" (right exits each exponent).
+key down
+key enter
+key x
+key ^
+key 2
+key right
+key +
+key y
+key ^
+key 2
+key right
+key =
+key 9
+key enter
+wait 60
+# Phase 10G: Graph opens directly in a centred Trace; zoom once, then ENTER opens
+# the Calculate menu (Draw Tangent pre-selected) and a second ENTER runs it.
+key graph
+wait 60
+key zoom
+wait 40
+key enter
+wait 40
+key enter
+wait 100
+screenshot out/grapher_tangent_implicit_smoke.ppm
+assert_app Grapher
+log "grapher_tangent_implicit: tangent drawn perpendicular to the radius"

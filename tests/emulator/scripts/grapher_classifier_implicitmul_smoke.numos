@@ -1,0 +1,60 @@
+# grapher_classifier_implicitmul_smoke — GR-02: juxtaposed single-letter
+# variables multiply (the tokenizer reads a letter run as one identifier; the
+# Grapher expands it into a product). Regression guard for the reported bug
+# where "xx" plotted nothing.
+#   slot 0: "xx"    → explicitY, valid   (x*x = x^2)
+#   slot 1: "xxx"   → explicitY, valid   (x*x*x = x^3)
+#   slot 2: "xy=1"  → implicit,  valid   (x*y = 1; a hyperbola — NOT "unknown: xy")
+#   slot 3: "2pi"   → explicitY, valid   (reserved constant "pi" NOT split into p*i)
+#   slot 4: "sin(x)"→ explicitY, valid   (function name "sin" NOT split)
+wait 200
+open_app Grapher
+wait 60
+key down
+key enter
+key x
+key x
+key enter
+wait 40
+key down
+key enter
+key x
+key x
+key x
+key enter
+wait 40
+key down
+key enter
+key x
+key y
+key =
+key 1
+key enter
+wait 40
+key down
+key enter
+key 2
+key pi
+key enter
+wait 40
+key down
+key enter
+key sin
+key x
+key enter
+wait 60
+assert_app Grapher
+assert_graph_relation_count 5
+assert_graph_slot_kind 0 explicitY
+assert_graph_slot_valid 0
+assert_graph_expr_text 0 xx
+assert_graph_slot_kind 1 explicitY
+assert_graph_slot_valid 1
+assert_graph_slot_kind 2 implicit
+assert_graph_slot_valid 2
+assert_graph_expr_text 2 xy=1
+assert_graph_slot_kind 3 explicitY
+assert_graph_slot_valid 3
+assert_graph_slot_kind 4 explicitY
+assert_graph_slot_valid 4
+log "classifier_implicitmul: xx=x^2, xxx=x^3, xy=1 hyperbola; pi/sin preserved"

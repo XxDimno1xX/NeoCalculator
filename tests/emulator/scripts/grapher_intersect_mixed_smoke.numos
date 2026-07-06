@@ -1,0 +1,57 @@
+# grapher_intersect_mixed_smoke.numos — Phase 10G. Cross-kind intersection
+# markers.
+#
+# Commits "y=x" (an explicit line) and "x^2+y^2=9" (an implicit circle), enters
+# Trace and steps once. Proves Phase 10G's cross-kind intersection finder: the
+# legacy POI pass only crossed y=f(x) against y=f(x) (it sampled evalAt, which is
+# NAN for an implicit slot), so a line meeting a circle showed NO purple marker.
+# The unified residual (residualAt: y-f(x) for explicit, evalImplicit for implicit
+# / x=f(y)) plus a grid-seeded 2-D Newton (find2DIntersections / newton2D) now
+# seeds a purple Intersection marker at BOTH crossings (~±2.12, ±2.12).
+#
+# The async POI timer paints the markers on completion (poiAsyncTimerCb replots
+# when done) since GrapherApp has no per-frame update().
+#
+# Warning-only: screenshot, NO golden, NOT CI-gated (absent from the
+# generate-emulator-candidates CANDIDATES list and every emulator-build.yml step).
+#
+# Run:
+#   program --headless --deterministic --script tests/emulator/scripts/grapher_intersect_mixed_smoke.numos \
+#           --frames 1100 --screenshot out/grapher_intersect_mixed_smoke.ppm --quiet
+log "grapher_intersect_mixed: start"
+wait 200
+open_app Grapher
+wait 60
+# Slot 0: y=x (explicit line). down -> Add row; enter -> edit; type; enter commits.
+key down
+key enter
+key y
+key =
+key x
+key enter
+wait 30
+# Slot 1: x^2+y^2=9 (implicit circle).
+key down
+key enter
+key x
+key ^
+key 2
+key right
+key +
+key y
+key ^
+key 2
+key right
+key =
+key 9
+key enter
+wait 40
+# The line auto-traces on Graph entry; one RIGHT step recomputes POIs (the cross-
+# kind finder runs in the async POI pass) and the markers paint on completion.
+key graph
+wait 80
+key right
+wait 220
+screenshot out/grapher_intersect_mixed_smoke.ppm
+assert_app Grapher
+log "grapher_intersect_mixed: two purple line-circle intersection markers"
