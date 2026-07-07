@@ -17,6 +17,7 @@
  * GraphModel.cpp — Grapher MVC: Model implementation
  */
 #include "GraphModel.h"
+#include "../math/AngleModeRuntime.h"
 #include <cstring>
 #include <cstdlib>
 #include <cmath>
@@ -333,6 +334,9 @@ bool GraphModel::dryRunStructural(const std::vector<Token>& rpn, CartesianFuncti
 // of leaving a valid-but-blank plot. One-sided relations ("x=", "=x", "y<")
 // are invalid instead of silently becoming "= 0".
 void GraphModel::preCacheRPN(CartesianFunction& fn) {
+    // Sync the numeric evaluator to the runtime angle mode before the
+    // structural dry-run, so classification and plotting share DEG/RAD truth.
+    _eval.setAngleMode(numos::legacyAngleMode());
     fn.rpnValid  = false;
     fn.rpnLValid = false;
     fn.implicit  = false;
@@ -509,6 +513,7 @@ void GraphModel::preCacheRPN(CartesianFunction& fn) {
 // ── evalAt ─────────────────────────────────────────────────────────────────
 
 float GraphModel::evalAt(CartesianFunction& fn, float x) {
+    _eval.setAngleMode(numos::legacyAngleMode());
     if (!fn.valid) return NAN;
     // Implicit relations are multi-valued in y; they have no single y=f(x).
     // Trace/table/auto-fit call evalAt and gracefully skip a NAN result.
@@ -538,6 +543,7 @@ float GraphModel::evalAt(CartesianFunction& fn, float x) {
 // ── evalImplicit: G(x,y) = lhs(x,y) - rhs(x,y) ─────────────────────────────
 
 float GraphModel::evalImplicit(CartesianFunction& fn, float x, float y) {
+    _eval.setAngleMode(numos::legacyAngleMode());
     if (!fn.implicit) return NAN;
 
     _vars.setVar('x', (double)x);
@@ -562,6 +568,7 @@ float GraphModel::evalImplicit(CartesianFunction& fn, float x, float y) {
 // ── evalAtY: x = f(y) for an explicit-in-y slot ────────────────────────────
 
 float GraphModel::evalAtY(CartesianFunction& fn, float y) {
+    _eval.setAngleMode(numos::legacyAngleMode());
     if (!fn.explicitY || !fn.rpnYValid || fn.rpnY.empty()) return NAN;
     _vars.setVar('y', (double)y);
     EvalResult er = _eval.evaluateRPN(fn.rpnY, _vars);

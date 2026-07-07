@@ -1,0 +1,44 @@
+# grapher_angle_mode_sync_smoke.numos — AM-01: GraphModel's numeric Evaluator
+# syncs to the runtime angle mode when it compiles/evaluates a relation.
+#
+# Assert-only smoke: NO screenshot, NO golden, NO pixel claims.
+# assert_graph_angle_mode reads the Evaluator's LAST-SYNCED mode (the sync
+# happens inside preCacheRPN/evalAt), so each assert follows a commit (ENTER)
+# that forces a re-classification — a set_angle_mode alone is deliberately
+# not enough, which is exactly the truth being tested.
+#
+# Run: program --headless --deterministic --script <this> --frames 1600 --quiet
+# Exit codes: 0 ok · 2 parse · 4 assertion failure.
+
+log "grapher_angle_mode_sync: waiting for launcher"
+wait 200
+
+open_app Grapher
+wait 60
+assert_app Grapher
+
+# DEG set BEFORE the expression is committed: preCacheRPN must pick it up.
+set_angle_mode deg
+assert_angle_mode deg
+key down
+key enter
+key sin
+key x
+key enter
+wait 60
+assert_graph_slot_kind 0 explicitY
+assert_graph_slot_valid 0
+assert_graph_angle_mode deg
+log "grapher_angle_mode_sync: evaluator synced to DEG on commit"
+
+# Switch to RAD and re-commit the slot (ENTER opens the editor, ENTER commits):
+# the evaluator must re-sync to RAD.
+set_angle_mode rad
+assert_angle_mode rad
+key enter
+wait 10
+key enter
+wait 60
+assert_graph_slot_valid 0
+assert_graph_angle_mode rad
+log "grapher_angle_mode_sync: evaluator re-synced to RAD on re-commit"

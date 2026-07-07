@@ -26,6 +26,7 @@
 #include "ui/Icons.h"
 #include "Config.h"
 #include "math/VariableManager.h"
+#include "math/AngleModeRuntime.h"
 #include "input/KeyboardManager.h"
 #include "utils/MemProbe.h"
 
@@ -93,6 +94,10 @@ SystemApp::SystemApp(DisplayDriver &display, Keyboard &keypad)
 // ═════════════════════════════════════════════════
 void SystemApp::begin() {
     _vars.begin();
+    // Angle mode single source of truth: derive the legacy copy from the
+    // runtime (vpam::g_angleMode) instead of a hardcoded DEG that disagreed
+    // with the LVGL StatusBar badge.
+    _angleMode = numos::legacyAngleMode();
     _evaluator.setAngleMode(_angleMode);
     _equationSolver.setAngleMode(_angleMode);
     // Note: GraphView is now owned by GrapherApp as part of MVC refactor
@@ -369,7 +374,7 @@ void SystemApp::drawStatusBar(const String &title) {
 
     // Angle mode indicator
     tft.setTextSize(1);
-    String indicator = (_angleMode == AngleMode::DEG) ? "DEG" : "RAD";
+    String indicator = numos::angleModeIsDeg() ? "DEG" : "RAD";
     int iw = tft.textWidth(indicator);
     tft.drawString(indicator, 270 - iw, 9);
 }

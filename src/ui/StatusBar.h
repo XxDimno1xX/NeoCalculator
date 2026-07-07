@@ -89,6 +89,15 @@ public:
     /** Devuelve la altura del StatusBar (para calcular offsets). */
     static constexpr int height() { return HEIGHT; }
 
+#ifdef NATIVE_SIM
+    /**
+     * Emulator-only (.numos assert_statusbar_angle): text of the DEG/RAD badge
+     * of the most recently created StatusBar (the active app's bar). Returns ""
+     * when no bar is alive. Never compiled into firmware.
+     */
+    static const char* debugActiveAngleText();
+#endif
+
 private:
     // ── Widgets LVGL ─────────────────────────────────────────────────────
     lv_obj_t* _bar        = nullptr;  ///< Contenedor principal
@@ -100,6 +109,10 @@ private:
     lv_obj_t* _separator  = nullptr;  ///< Línea inferior 1 px
 
     uint8_t   _batLevel   = 100;      ///< Porcentaje de batería
+
+#ifdef NATIVE_SIM
+    static StatusBar* s_active;       ///< Última barra creada (debug asserts)
+#endif
 
     // ── Helpers ──────────────────────────────────────────────────────────
     void updateClock();

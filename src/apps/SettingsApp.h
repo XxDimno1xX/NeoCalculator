@@ -17,6 +17,8 @@
  * SettingsApp.h — Settings configuration panel for NumOS.
  *
  * LVGL-native app with clean NumWorks-inspired UI:
+ *   - Angle mode toggle (Radians/Degrees) — writes the runtime source of
+ *     truth (AngleModeRuntime.h); no persistence yet (GS-02)
  *   - Complex roots toggle (ON/OFF)
  *   - Decimal precision selector (6/8/10/12)
  *   - Step-by-step educational mode toggle (ON/OFF)
@@ -44,12 +46,12 @@ public:
     bool isActive() const { return _screen != nullptr; }
 
 private:
-    static constexpr int NUM_ITEMS = 3;
+    static constexpr int NUM_ITEMS = 4;
     static constexpr int SCREEN_W  = 320;
     static constexpr int SCREEN_H  = 240;
     static constexpr int PAD       = 12;
     static constexpr int ROW_H     = 44;
-    static constexpr int ROW_GAP   = 4;
+    static constexpr int ROW_GAP   = 2;   // tightened for the 4th row (Angle unit)
 
     lv_obj_t*       _screen;
     ui::StatusBar   _statusBar;

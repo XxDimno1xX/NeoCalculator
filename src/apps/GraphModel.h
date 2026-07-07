@@ -235,6 +235,16 @@ public:
         int maxIterations = 50
     );
 
+#ifdef NATIVE_SIM
+    /// Emulator-only: angle mode the numeric evaluator is currently set to
+    /// ("deg"/"rad"). Reflects the LAST sync (preCacheRPN/evalAt/...), so a
+    /// set_angle_mode that has not been followed by an evaluation is not yet
+    /// visible here — that is exactly what the sync smoke asserts.
+    const char* debugAngleMode() const {
+        return _eval.angleMode() == AngleMode::DEG ? "deg" : "rad";
+    }
+#endif
+
 private:
     Tokenizer      _tok;
     Parser         _par;

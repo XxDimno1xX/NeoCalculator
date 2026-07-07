@@ -106,6 +106,7 @@
 #include "../apps/RegressionApp.h"        // Phase 7C: LVGL-only, pure-math (no CAS/HW)
 #include "../apps/GrapherApp.h"           // Phase 8G: LVGL-native grapher (RPN pipeline; no Giac/CAS)
 #include "../math/VariableManager.h"      // Phase 8B: assert_variable lee el singleton de variables
+#include "../math/AngleModeRuntime.h"     // AM-01: set/assert_angle_mode (runtime DEG/RAD truth)
 #include "../display/DisplayDriver.h"
 #include "../ui/SplashScreen.h"
 #include "../ui/MainMenu.h"
@@ -1334,6 +1335,10 @@ static bool saveScreenshotPPM(const char* path)
 //   assert_error [TEXT] · (Phase 8B) el resultado ES error; TEXT subcadena opcional
 //   assert_variable N V · (Phase 8B) la variable N (A-F|x|y|z|ans|preans) vale V
 //                         (lee el singleton VariableManager, sin OCR ni pixeles)
+//   set_angle_mode M          · (AM-01) escribe la verdad runtime DEG/RAD (M = deg|rad)
+//   assert_angle_mode M       · (AM-01) aserta la verdad runtime (vpam::g_angleMode)
+//   assert_statusbar_angle M  · (AM-01) aserta el texto REAL del badge de la barra activa
+//   assert_graph_angle_mode M · (AM-01) aserta el modo del Evaluator del GraphModel
 //
 // Modelo de planificacion (determinista): UN comando por frame, ejecutado ANTES
 // de processSdlEvents() para que la tecla sea visible al avance de tick y a
@@ -1371,7 +1376,13 @@ enum class ScriptCmdType : uint8_t {
     AssertGraphRelationOp,     // assert_graph_relation_op SLOT eq|lt|gt|le|ge
     AssertGraphExprText,       // assert_graph_expr_text SLOT TEXT...  (igualdad exacta)
     AssertGraphTraceState,     // assert_graph_trace_state idle|navigate|trace
-    AssertGraphIntersectionCount // assert_graph_intersection_count N  (POIs Intersection, N en waitN)
+    AssertGraphIntersectionCount, // assert_graph_intersection_count N  (POIs Intersection, N en waitN)
+    // AM-01: modo angular runtime (fuente única de verdad = vpam::g_angleMode).
+    // Valores en minúsculas ("deg"/"rad"); DEG/RAD también se aceptan al parsear.
+    SetAngleMode,              // set_angle_mode deg|rad        (escribe la verdad runtime)
+    AssertAngleMode,           // assert_angle_mode deg|rad     (lee la verdad runtime)
+    AssertStatusbarAngle,      // assert_statusbar_angle deg|rad (texto REAL del badge activo)
+    AssertGraphAngleMode       // assert_graph_angle_mode deg|rad (modo del Evaluator del GraphModel)
 };
 
 struct ScriptCmd {
@@ -1715,6 +1726,23 @@ static bool loadScript(const char* path)
             sc.type  = ScriptCmdType::AssertGraphIntersectionCount;
             sc.waitN = n;
         }
+        // ── AM-01: modo angular runtime (set + asserts, deg|rad) ─────────
+        else if (lc == "set_angle_mode" || lc == "assert_angle_mode" ||
+                 lc == "assert_statusbar_angle" || lc == "assert_graph_angle_mode") {
+            std::string mode, extra;
+            if (!(iss >> mode))
+                return scriptErr(path, lineNo, "se requiere deg|rad");
+            if (iss >> extra)
+                return scriptErr(path, lineNo, "demasiados argumentos (solo deg|rad)");
+            for (char& c : mode) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (mode != "deg" && mode != "rad")
+                return scriptErr(path, lineNo, "modo angular desconocido (deg|rad)");
+            sc.type = (lc == "set_angle_mode")         ? ScriptCmdType::SetAngleMode
+                    : (lc == "assert_angle_mode")      ? ScriptCmdType::AssertAngleMode
+                    : (lc == "assert_statusbar_angle") ? ScriptCmdType::AssertStatusbarAngle
+                                                       : ScriptCmdType::AssertGraphAngleMode;
+            sc.strArg = mode;
+        }
         else {
             return scriptErr(path, lineNo, "comando desconocido");
         }
@@ -2053,6 +2081,54 @@ static void scriptStepBegin()
                 }
                 default: break;
             }
+            break;
+        }
+
+        // ── AM-01: modo angular runtime ──────────────────────────────────
+        case ScriptCmdType::SetAngleMode: {
+            numos::setAngleMode(sc.strArg == "deg" ? vpam::AngleMode::DEG
+                                                   : vpam::AngleMode::RAD);
+            std::printf("[SCRIPT] set_angle_mode %s\n", sc.strArg.c_str());
+            break;
+        }
+        case ScriptCmdType::AssertAngleMode: {
+            const char* actual = numos::angleModeName();
+            if (sc.strArg == actual)
+                assertPass(sc.line, "assert_angle_mode " + sc.strArg);
+            else
+                assertFail(sc.line, "assert_angle_mode esperaba '" + sc.strArg +
+                                    "' pero el modo runtime es '" + actual + "'");
+            break;
+        }
+        case ScriptCmdType::AssertStatusbarAngle: {
+            // Texto REAL del badge de la barra activa (no recalculado): prueba
+            // que el badge y el evaluador comparten la misma fuente de verdad.
+            std::string actual = ui::StatusBar::debugActiveAngleText();
+            for (char& c : actual) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (actual.empty()) {
+                assertFail(sc.line, "assert_statusbar_angle: no hay StatusBar activa "
+                                    "(la app actual no tiene barra o aun no se creo)");
+                break;
+            }
+            if (sc.strArg == actual)
+                assertPass(sc.line, "assert_statusbar_angle " + sc.strArg);
+            else
+                assertFail(sc.line, "assert_statusbar_angle esperaba '" + sc.strArg +
+                                    "' pero el badge muestra '" + actual + "'");
+            break;
+        }
+        case ScriptCmdType::AssertGraphAngleMode: {
+            if (g_mode != AppMode::GRAPHER || !g_grapherApp) {
+                assertFail(sc.line, "assert_graph_angle_mode requiere Grapher activo (app actual: '" +
+                                    std::string(activeAppName()) + "')");
+                break;
+            }
+            const char* actual = g_grapherApp->debugAngleMode();
+            if (sc.strArg == actual)
+                assertPass(sc.line, "assert_graph_angle_mode " + sc.strArg);
+            else
+                assertFail(sc.line, "assert_graph_angle_mode esperaba '" + sc.strArg +
+                                    "' pero el Evaluator del GraphModel esta en '" + actual + "'");
             break;
         }
     }

@@ -23,6 +23,7 @@
 
 #include "SettingsApp.h"
 #include "../Config.h"
+#include "../math/AngleModeRuntime.h"
 
 using namespace vpam;
 
@@ -130,13 +131,14 @@ void SettingsApp::createUI() {
     lv_obj_remove_flag(_container, LV_OBJ_FLAG_SCROLLABLE);
 
     const char* labels[NUM_ITEMS] = {
+        "Angle mode",          // row 0 per SET spec §E.3.4 (highest-priority row)
         "Complex numbers",
         "Decimal precision",
         "Step-by-step mode",
     };
 
     for (int i = 0; i < NUM_ITEMS; ++i) {
-        int y = 16 + i * (ROW_H + ROW_GAP);
+        int y = 10 + i * (ROW_H + ROW_GAP);   // 4 rows + bottom hint fit in 215 px
 
         // Row background
         _rows[i] = lv_obj_create(_container);
@@ -209,28 +211,32 @@ void SettingsApp::updateFocus() {
 // ════════════════════════════════════════════════════════════════════════════
 
 void SettingsApp::updateValues() {
+    // Angle mode (runtime source of truth — same value the StatusBar badge shows)
+    lv_label_set_text(_values[0], numos::angleModeIsDeg() ? "Degrees" : "Radians");
+    lv_obj_set_style_text_color(_values[0], lv_color_hex(COL_VALUE), LV_PART_MAIN);
+
     // Complex toggle
     if (setting_complex_enabled) {
-        lv_label_set_text(_values[0], "ON");
-        lv_obj_set_style_text_color(_values[0], lv_color_hex(COL_VALUE_ON), LV_PART_MAIN);
+        lv_label_set_text(_values[1], "ON");
+        lv_obj_set_style_text_color(_values[1], lv_color_hex(COL_VALUE_ON), LV_PART_MAIN);
     } else {
-        lv_label_set_text(_values[0], "OFF");
-        lv_obj_set_style_text_color(_values[0], lv_color_hex(COL_VALUE_OFF), LV_PART_MAIN);
+        lv_label_set_text(_values[1], "OFF");
+        lv_obj_set_style_text_color(_values[1], lv_color_hex(COL_VALUE_OFF), LV_PART_MAIN);
     }
 
     // Decimal precision
     char buf[16];
     snprintf(buf, sizeof(buf), "%d digits", setting_decimal_precision);
-    lv_label_set_text(_values[1], buf);
-    lv_obj_set_style_text_color(_values[1], lv_color_hex(COL_VALUE), LV_PART_MAIN);
+    lv_label_set_text(_values[2], buf);
+    lv_obj_set_style_text_color(_values[2], lv_color_hex(COL_VALUE), LV_PART_MAIN);
 
     // Step-by-step educational mode
     if (setting_edu_steps) {
-        lv_label_set_text(_values[2], "ON");
-        lv_obj_set_style_text_color(_values[2], lv_color_hex(COL_VALUE_ON), LV_PART_MAIN);
+        lv_label_set_text(_values[3], "ON");
+        lv_obj_set_style_text_color(_values[3], lv_color_hex(COL_VALUE_ON), LV_PART_MAIN);
     } else {
-        lv_label_set_text(_values[2], "OFF");
-        lv_obj_set_style_text_color(_values[2], lv_color_hex(COL_VALUE_OFF), LV_PART_MAIN);
+        lv_label_set_text(_values[3], "OFF");
+        lv_obj_set_style_text_color(_values[3], lv_color_hex(COL_VALUE_OFF), LV_PART_MAIN);
     }
 }
 
@@ -240,11 +246,17 @@ void SettingsApp::updateValues() {
 
 void SettingsApp::toggleCurrent() {
     switch (_focus) {
-        case 0:  // Complex numbers toggle
+        case 0:  // Angle mode toggle: writes the runtime truth, badge follows
+            numos::setAngleMode(numos::angleModeIsDeg() ? vpam::AngleMode::RAD
+                                                        : vpam::AngleMode::DEG);
+            _statusBar.update();   // repaint this screen's DEG/RAD badge now (§E.3.4)
+            break;
+
+        case 1:  // Complex numbers toggle
             setting_complex_enabled = !setting_complex_enabled;
             break;
 
-        case 1: {  // Decimal precision cycle: 6 → 8 → 10 → 12 → 6
+        case 2: {  // Decimal precision cycle: 6 → 8 → 10 → 12 → 6
             int idx = 0;
             for (int j = 0; j < NUM_PREC; ++j) {
                 if (PRECISIONS[j] == setting_decimal_precision) {
@@ -257,7 +269,7 @@ void SettingsApp::toggleCurrent() {
             break;
         }
 
-        case 2:  // Step-by-step educational mode toggle
+        case 3:  // Step-by-step educational mode toggle
             setting_edu_steps = !setting_edu_steps;
             break;
     }
@@ -292,8 +304,8 @@ void SettingsApp::handleKey(const KeyEvent& ev) {
             break;
 
         case KeyCode::LEFT:
-            // For precision: cycle backward
-            if (_focus == 1) {
+            // For precision (row 2): cycle backward
+            if (_focus == 2) {
                 int idx = 0;
                 for (int j = 0; j < NUM_PREC; ++j) {
                     if (PRECISIONS[j] == setting_decimal_precision) {
@@ -308,8 +320,8 @@ void SettingsApp::handleKey(const KeyEvent& ev) {
             break;
 
         case KeyCode::RIGHT:
-            // For precision: cycle forward
-            if (_focus == 1) {
+            // For precision (row 2): cycle forward
+            if (_focus == 2) {
                 toggleCurrent();
             }
             break;

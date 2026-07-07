@@ -341,6 +341,10 @@ jobs:
           scripts=( tests/emulator/scripts/calc_semantic_*.numos )
           scripts+=( tests/emulator/scripts/calc_error_div_by_zero.numos )
           scripts+=( tests/emulator/scripts/calc_store_variable.numos )
+          # AM-01: runtime angle-mode truth (assert-only, no goldens).
+          scripts+=( tests/emulator/scripts/angle_mode_settings_toggle_smoke.numos )
+          scripts+=( tests/emulator/scripts/calc_angle_mode_deg_rad_smoke.numos )
+          scripts+=( tests/emulator/scripts/grapher_angle_mode_sync_smoke.numos )
 
           if [ "${#scripts[@]}" -eq 0 ]; then
             echo "::error::no semantic scripts discovered (calc_semantic_*.numos)"

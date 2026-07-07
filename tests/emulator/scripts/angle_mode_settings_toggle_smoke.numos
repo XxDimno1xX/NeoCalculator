@@ -1,0 +1,35 @@
+# angle_mode_settings_toggle_smoke.numos — AM-01: the Settings "Angle mode" row
+# toggles the runtime DEG/RAD source of truth (vpam::g_angleMode) and the
+# StatusBar badge follows immediately.
+#
+# Assert-only smoke: NO screenshot, NO golden. The boot default is RAD (the
+# value every blessed StatusBar badge has always shown); the row is the FIRST
+# Settings item (focus index 0, per SET spec §E.3.4), toggled with ENTER.
+#
+# Run: program --headless --deterministic --script <this> --frames 1000 --quiet
+# Exit codes: 0 ok · 2 parse · 4 assertion failure.
+
+log "angle_mode_settings_toggle: waiting for launcher"
+wait 200
+
+open_app Settings
+wait 60
+assert_app Settings
+
+# Boot default is RAD, both in the runtime truth and on the badge.
+assert_angle_mode rad
+assert_statusbar_angle rad
+
+# Focus starts on row 0 (Angle mode); ENTER toggles RAD -> DEG.
+key enter
+wait 10
+assert_angle_mode deg
+assert_statusbar_angle deg
+log "angle_mode_settings_toggle: RAD -> DEG ok (runtime + badge)"
+
+# Toggle back: DEG -> RAD.
+key enter
+wait 10
+assert_angle_mode rad
+assert_statusbar_angle rad
+log "angle_mode_settings_toggle: DEG -> RAD ok (runtime + badge)"

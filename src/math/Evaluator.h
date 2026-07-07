@@ -45,6 +45,7 @@ public:
     Evaluator();
 
     void setAngleMode(AngleMode mode) { _angleMode = mode; }
+    AngleMode angleMode() const { return _angleMode; }
 
     EvalResult evaluateRPN(const std::vector<Token> &rpn, VariableContext &vars);
 

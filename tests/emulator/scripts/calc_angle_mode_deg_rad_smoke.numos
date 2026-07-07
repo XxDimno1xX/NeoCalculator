@@ -1,0 +1,51 @@
+# calc_angle_mode_deg_rad_smoke.numos — AM-01: CalculationApp's evaluator
+# (vpam::MathEvaluator) follows the runtime angle mode: sin(90) is 1 in DEG
+# and ~0.8939966636 in RAD.
+#
+# Assert-only smoke: NO screenshot, NO golden. set_angle_mode writes the same
+# runtime truth (vpam::g_angleMode) the Settings row toggles; MathEvaluator
+# reads it directly at evaluation time. AC is required between evaluations
+# (clearResult keeps the expression otherwise — Phase 8C quirk).
+#
+# Run: program --headless --deterministic --script <this> --frames 1600 --quiet
+# Exit codes: 0 ok · 2 parse · 4 assertion failure.
+
+log "calc_angle_mode: waiting for launcher"
+wait 200
+
+open_app Calculation
+wait 60
+assert_app Calculation
+
+# Boot default is RAD.
+assert_angle_mode rad
+
+# DEG: sin(90) == 1 exactly.
+set_angle_mode deg
+assert_angle_mode deg
+key sin
+key 9
+key 0
+key right
+key enter
+wait 120
+assert_no_error
+assert_result 1
+log "calc_angle_mode: DEG sin(90) == 1"
+
+# RAD: sin(90) == 0.8939966636... (differs from the DEG result). The vpam
+# evaluator rationalizes the 10-digit decimal, so the canonical assert text is
+# the exact reduced fraction 2234991659/2500000000 (== 0.8939966636).
+key ac
+wait 10
+set_angle_mode rad
+assert_angle_mode rad
+key sin
+key 9
+key 0
+key right
+key enter
+wait 120
+assert_no_error
+assert_result 2234991659/2500000000
+log "calc_angle_mode: RAD sin(90) ~= 0.894 (mode change observed in results)"

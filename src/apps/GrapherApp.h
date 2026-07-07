@@ -75,6 +75,7 @@ public:
     const char* debugTraceMode() const;               // idle|navigate|trace
     int         debugTraceFn() const { return _traceFn; }
     int         debugIntersectionCount() const;       // POIs of type Intersection
+    const char* debugAngleMode() const { return _model.debugAngleMode(); }  // deg|rad (evaluator's last-synced mode)
 #endif
 
 private:

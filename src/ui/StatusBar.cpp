@@ -39,6 +39,16 @@
 
 namespace ui {
 
+#ifdef NATIVE_SIM
+StatusBar* StatusBar::s_active = nullptr;
+
+const char* StatusBar::debugActiveAngleText() {
+    if (s_active && s_active->_angleLabel)
+        return lv_label_get_text(s_active->_angleLabel);
+    return "";
+}
+#endif
+
 // ════════════════════════════════════════════════════════════════════════════
 // create() — Construye la jerarquía de widgets LVGL
 // ════════════════════════════════════════════════════════════════════════════
@@ -141,6 +151,10 @@ void StatusBar::create(lv_obj_t* parent) {
     }
 #endif
 
+#ifdef NATIVE_SIM
+    s_active = this;   // la barra recién creada pertenece a la app activa
+#endif
+
     // Refresco inicial
     update();
 }
@@ -152,6 +166,9 @@ void StatusBar::create(lv_obj_t* parent) {
 void StatusBar::destroy() {
     // Los widgets LVGL son hijos de la pantalla padre;
     // se destruyen con ella. Sólo limpiamos punteros.
+#ifdef NATIVE_SIM
+    if (s_active == this) s_active = nullptr;
+#endif
     _bar        = nullptr;
     _clockLabel = nullptr;
     _titleLabel = nullptr;
