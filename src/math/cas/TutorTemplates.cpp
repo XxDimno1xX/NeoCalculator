@@ -845,19 +845,18 @@ SolveResult solveCubicTutor(const SymEquation& eq, char var,
     
     SolveResult quadRes = solveQuadraticTutor(residualEq, var, log, arena);
     
-    // Merge results
+    // Merge results: 1 Ruffini root + up to 2 residual-quadratic roots.
+    // Count-checked against the SolveResult capacity — never trust the
+    // nested count blindly (NB-5: an unchecked third write overflowed the
+    // old 2-element array).
     result.solutions[0] = rootR.toExactVal();
     result.solutions[0].simplify();
     result.count = 1;
-    
-    if (quadRes.ok && quadRes.count > 0) {
-        if (quadRes.count == 1) {
-            result.solutions[1] = quadRes.solutions[0];
-            result.count = 2;
-        } else if (quadRes.count == 2) {
-            result.solutions[1] = quadRes.solutions[0];
-            result.solutions[2] = quadRes.solutions[1];
-            result.count = 3;
+
+    if (quadRes.ok) {
+        for (uint8_t i = 0; i < quadRes.count &&
+                            result.count < SolveResult::kMaxSolutions; ++i) {
+            result.solutions[result.count++] = quadRes.solutions[i];
         }
     }
     

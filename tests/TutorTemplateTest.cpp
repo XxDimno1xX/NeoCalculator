@@ -25,6 +25,7 @@
 #include "../src/math/cas/SymExprArena.h"
 #include "../src/math/cas/OmniSolver.h"
 #include "../src/math/cas/SystemSolver.h"
+#include "../src/math/cas/TutorTemplates.h"
 #include <cmath>
 
 #ifdef ARDUINO
@@ -330,7 +331,92 @@ void runTutorTests() {
         check("Stress Cubic x³-6x²+11x-6=0 ok", res.ok);
         check("Stress Cubic count == 3", res.count == 3);
         // Roots: 1, 2, 3
+        if (res.count == 3) {
+            bool has1 = false, has2 = false, has3 = false;
+            for (uint8_t i = 0; i < res.count; ++i) {
+                double v = res.solutions[i].toDouble();
+                if (std::abs(v - 1.0) < 0.001) has1 = true;
+                if (std::abs(v - 2.0) < 0.001) has2 = true;
+                if (std::abs(v - 3.0) < 0.001) has3 = true;
+            }
+            check("Cubic roots are {1, 2, 3}", has1 && has2 && has3);
+        }
         check("Cubic has Ruffini steps", res.steps.count() > 10);
+    }
+
+    // ── Test 8b: same cubic, terms pushed in reverse order (NB-5) ──
+    {
+        SymPoly lhs('x');
+        lhs.terms().push_back(SymTerm::constant(vpam::ExactVal::fromInt(-6))); // -6
+        lhs.terms().push_back(SymTerm::variable('x', 11, 1, 1));  // 11x
+        lhs.terms().push_back(SymTerm::variable('x', -6, 1, 2));  // -6x²
+        lhs.terms().push_back(SymTerm::variable('x', 1, 1, 3));   // x³
+        lhs.normalize();
+
+        SymEquation eq(lhs, SymPoly::fromConstant(vpam::ExactVal::fromInt(0)));
+        SymExprArena arena;
+        SingleSolver solver;
+        SolveResult res = solver.solve(eq, 'x', &arena);
+
+        check("Cubic reordered terms ok", res.ok);
+        check("Cubic reordered terms count == 3", res.count == 3);
+    }
+
+    // ── Test 8c: x³ - 1 = 0 — one real root + complex pair (NB-5) ──
+    {
+        SymPoly lhs('x');
+        lhs.terms().push_back(SymTerm::variable('x', 1, 1, 3));   // x³
+        lhs.terms().push_back(SymTerm::constant(vpam::ExactVal::fromInt(-1))); // -1
+        lhs.normalize();
+
+        SymEquation eq(lhs, SymPoly::fromConstant(vpam::ExactVal::fromInt(0)));
+        SymExprArena arena;
+        SingleSolver solver;
+        SolveResult res = solver.solve(eq, 'x', &arena);
+
+        check("Cubic x³-1=0 ok", res.ok);
+        check("Cubic x³-1=0 one real root", res.count == 1);
+        check("Cubic x³-1=0 root ≈ 1",
+              res.count >= 1 && std::abs(res.solutions[0].toDouble() - 1.0) < 0.001);
+        check("Cubic x³-1=0 flags complex pair", res.hasComplexRoots);
+    }
+
+    // ── Test 8d: x³ + x + 11 = 0 — no integer root: honest refusal (NB-5) ──
+    {
+        SymPoly lhs('x');
+        lhs.terms().push_back(SymTerm::variable('x', 1, 1, 3));   // x³
+        lhs.terms().push_back(SymTerm::variable('x', 1, 1, 1));   // +x
+        lhs.terms().push_back(SymTerm::constant(vpam::ExactVal::fromInt(11))); // +11
+        lhs.normalize();
+
+        SymEquation eq(lhs, SymPoly::fromConstant(vpam::ExactVal::fromInt(0)));
+        SymExprArena arena;
+        PedagogicalLogger tutorLog;
+        SolveResult res = solveCubicTutor(eq, 'x', tutorLog, &arena);
+
+        check("Cubic no-integer-root refuses (ok == false)", !res.ok);
+        check("Cubic no-integer-root has typed error", !res.error.empty());
+        check("Cubic no-integer-root returns no fabricated roots", res.count == 0);
+    }
+
+    // ── Test 8e: NB-5 cubic repeated — no lifetime/state leakage ──
+    {
+        bool stable = true;
+        for (int iter = 0; iter < 25 && stable; ++iter) {
+            SymPoly lhs('x');
+            lhs.terms().push_back(SymTerm::variable('x', 1, 1, 3));
+            lhs.terms().push_back(SymTerm::variable('x', -6, 1, 2));
+            lhs.terms().push_back(SymTerm::variable('x', 11, 1, 1));
+            lhs.terms().push_back(SymTerm::constant(vpam::ExactVal::fromInt(-6)));
+            lhs.normalize();
+
+            SymEquation eq(lhs, SymPoly::fromConstant(vpam::ExactVal::fromInt(0)));
+            SymExprArena arena;
+            SingleSolver solver;
+            SolveResult res = solver.solve(eq, 'x', &arena);
+            stable = res.ok && res.count == 3;
+        }
+        check("Cubic NB-5 case stable across 25 repeats", stable);
     }
 
     // ── Test 9: 2x + 3y = 8, x - y = 1 (Stress: 2x2 Cramer) ──────

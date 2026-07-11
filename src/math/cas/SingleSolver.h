@@ -52,10 +52,17 @@ namespace cas {
 // ════════════════════════════════════════════════════════════════════
 
 struct SolveResult {
-    /// Up to 2 exact solutions (linear → 1, quadratic → 0/1/2)
-    vpam::ExactVal solutions[2];
+    /// Capacity of `solutions`. The cubic tutor (TutorTemplates.cpp) merges
+    /// one Ruffini root plus up to two residual-quadratic roots into a
+    /// single result, so this must be at least 3 (NB-5: it was 2, and the
+    /// third write corrupted the stack).
+    static constexpr uint8_t kMaxSolutions = 3;
 
-    /// How many solutions were found (0..2)
+    /// Up to kMaxSolutions exact solutions
+    /// (linear → 1, quadratic → 0..2, cubic tutor → 0..3)
+    vpam::ExactVal solutions[kMaxSolutions];
+
+    /// How many solutions were found (0..kMaxSolutions)
     uint8_t        count    = 0;
 
     /// true if solve completed without error
