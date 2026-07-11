@@ -1,0 +1,15 @@
+# CAS host-suite XFAIL list (CAS-01). Consumed by tests/host/cas_suite_main.cpp.
+# Format: SUITE<TAB>KIND<TAB>match-substring<TAB>ticket/reason
+#   KIND = case    -> substring matched against per-case [FAIL]/FAIL: log lines
+#   KIND = crash   -> substring matched against the crash signal name (SIGSEGV, ...)
+#   KIND = timeout -> suite exceeded the 60 s per-suite timeout
+# An entry that stops failing turns XPASS and FAILS the run — prune it in the
+# same PR that fixes the underlying issue. Initial inventory:
+# docs/specs/NUMOS_CAS_CAS01_CAS02_EXECUTION_PLAN.md §H.
+SymExprTest	case	Arena: blockCount == 1 after init	NB-3 stale expectation vs lazy block 0 (SymExprArena.h:97); fix in PR-2
+SymExprTest	case	Arena: totalAllocated == 1024	NB-3 stale expectation vs lazy block 0 (SymExprArena.h:97); fix in PR-2
+OmniSolverTest	case	B2 two solutions	NB-2 x^2-2=0 misclassified Mixed transcendental, one root -> CAS-06b
+OmniSolverTest	crash	SIGSEGV	NB-1 OmniSolver<->TutorTemplates mutual recursion on ln(x)=1 -> CAS-06b
+TutorTemplateTest	case	QuadTutor keeps x² term before -5x term	NB-4 step-order phrasing triage -> PR-2
+TutorTemplateTest	case	QuadTutor keeps constant after variable terms	NB-4 step-order phrasing triage -> PR-2
+TutorTemplateTest	crash	SIGSEGV	NB-1 mutual recursion (log-tutor section) -> CAS-06b

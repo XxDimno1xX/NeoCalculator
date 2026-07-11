@@ -103,6 +103,35 @@ jobs:
           g++ -std=c++17 -Wall -Wextra tests/host/keycode_digit_test.cpp -o keycode_digit_test
           ./keycode_digit_test
 
+      # ---------------------------------------------------------------------
+      # CAS host suites (CAS-01).
+      #
+      # Revives the dormant tests/*.cpp CAS suites on a standalone g++ host
+      # build (never a PlatformIO env, never Giac/libtommath — see
+      # docs/specs/NUMOS_CAS_HOST_HARNESS_SPEC.md). Each suite runs in an
+      # isolated child process with a 60 s timeout because OmniSolverTest and
+      # TutorTemplateTest crash on known engine bugs (NB-1 solver recursion,
+      # NB-2 misclassification) that are XFAIL'd in tests/host/cas_xfail.list
+      # and NOT fixed by this lane. An XFAIL entry that starts passing is
+      # XPASS and fails the run, so bug-fix PRs must prune the list visibly.
+      # Expected green footer: total suites=6 pass=3 xfail=3 unexpected=0.
+      # Runs before the emulator build so CAS regressions fail in ~30 s.
+      - name: CAS host suites (CAS-01)
+        run: scripts/build-cas-host-tests.sh
+
+      - name: CAS host suites (ASAN variant)
+        run: scripts/build-cas-host-tests.sh --asan
+
+      - name: Upload CAS host test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cas-host-test-logs
+          path: |
+            /tmp/cas-host-tests/*.log
+            /tmp/cas-host-tests/summary.txt
+          if-no-files-found: warn
+
       - name: Build emulator (emulator_pc)
         run: pio run -e emulator_pc
 
