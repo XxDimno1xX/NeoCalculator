@@ -24,6 +24,9 @@
  *   E) Integration — OmniSolver end-to-end (3 tests)
  *   F) NB-1 regression — tutor ↔ solver delegation terminates (no
  *      mutual-recursion stack overflow); honest results or typed refusal
+ *   G) NB-2 regression — supported polynomials (numeric, degree 1..3)
+ *      route to the multi-root polynomial solver, not single-branch
+ *      analytic isolation; transcendental/symbolic forms keep isolation
  *
  * Convention:
  *   · Build SymExpr trees with arena factory helpers
@@ -373,6 +376,165 @@ void runOmniSolverTests() {
         }
         check("F5 x=e^x terminates without fabricated roots",
               !fabricated && r.solutions.empty());
+        arena.reset();
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // G) NB-2 regression: polynomial routing
+    // ════════════════════════════════════════════════════════════════
+    OS_PRINTLN("\n── G) NB-2: polynomial routing ──");
+
+    // G1: x² - 2 = 0 via solve(lhs, rhs) — both roots, exact radicals.
+    {
+        auto* lhs = symPow(arena, symVar(arena, 'x'), symInt(arena, 2));
+        auto* rhs = symInt(arena, 2);
+
+        OmniSolver solver;
+        OmniResult r = solver.solve(lhs, rhs, 'x', arena);
+
+        double sqrt2 = std::sqrt(2.0);
+        check("G1 x²=2 ok", r.ok);
+        check("G1 x²=2 two roots", r.solutions.size() == 2);
+        check("G1 x²=2 has +sqrt(2)", hasSolutionNear(r, sqrt2));
+        check("G1 x²=2 has -sqrt(2)", hasSolutionNear(r, -sqrt2));
+        check("G1 x²=2 classification = Polynomial",
+              r.classification == EquationClass::Polynomial);
+        bool allExact = !r.solutions.empty();
+        for (const auto& s : r.solutions) allExact = allExact && s.isExact;
+        check("G1 x²=2 roots stay exact", allExact);
+        arena.reset();
+    }
+
+    // G2: x² - 4 = 0 → {2, -2} in deterministic order (+branch first).
+    {
+        auto* f = symAdd(arena,
+            symPow(arena, symVar(arena, 'x'), symInt(arena, 2)),
+            symInt(arena, -4));
+
+        OmniSolver solver;
+        OmniResult r = solver.solveExpr(f, 'x', arena);
+
+        check("G2 x²-4=0 two roots", r.ok && r.solutions.size() == 2);
+        check("G2 x²-4=0 order is {+2, -2}",
+              r.solutions.size() == 2 &&
+              approx(r.solutions[0].numeric, 2.0) &&
+              approx(r.solutions[1].numeric, -2.0));
+        arena.reset();
+    }
+
+    // G3: (x - 1)² = 0 → one deduplicated root (double root).
+    {
+        auto* f = symPow(arena,
+            symAdd(arena, symVar(arena, 'x'), symInt(arena, -1)),
+            symInt(arena, 2));
+
+        OmniSolver solver;
+        OmniResult r = solver.solveExpr(f, 'x', arena);
+
+        check("G3 (x-1)²=0 one root", r.ok && r.solutions.size() == 1);
+        check("G3 (x-1)²=0 root = 1",
+              !r.solutions.empty() && approx(r.solutions[0].numeric, 1.0));
+        arena.reset();
+    }
+
+    // G4: x² = 0 → single root 0.
+    {
+        auto* f = symPow(arena, symVar(arena, 'x'), symInt(arena, 2));
+
+        OmniSolver solver;
+        OmniResult r = solver.solveExpr(f, 'x', arena);
+
+        check("G4 x²=0 one root", r.ok && r.solutions.size() == 1);
+        check("G4 x²=0 root = 0",
+              !r.solutions.empty() && approx(r.solutions[0].numeric, 0.0));
+        arena.reset();
+    }
+
+    // G5: x² + 1 = 0 — real-only policy: no real roots, complex pair
+    //     reported through the hasComplexRoots channel, no fabrication.
+    {
+        auto* f = symAdd(arena,
+            symPow(arena, symVar(arena, 'x'), symInt(arena, 2)),
+            symInt(arena, 1));
+
+        OmniSolver solver;
+        OmniResult r = solver.solveExpr(f, 'x', arena);
+
+        check("G5 x²+1=0 ok with zero real roots",
+              r.ok && r.solutions.empty());
+        check("G5 x²+1=0 reports complex pair", r.hasComplexRoots);
+        arena.reset();
+    }
+
+    // G6: 2x + 4 = 0 → single root -2 via the linear path.
+    {
+        auto* f = symAdd(arena,
+            symMul(arena, symInt(arena, 2), symVar(arena, 'x')),
+            symInt(arena, 4));
+
+        OmniSolver solver;
+        OmniResult r = solver.solveExpr(f, 'x', arena);
+
+        check("G6 2x+4=0 one root = -2",
+              r.ok && r.solutions.size() == 1 &&
+              approx(r.solutions[0].numeric, -2.0));
+        arena.reset();
+    }
+
+    // G7: x³ - 6x² + 11x - 6 = 0 → three roots {1, 2, 3} via cubic tutor.
+    {
+        auto* f = symAdd(arena,
+            symAdd(arena,
+                symPow(arena, symVar(arena, 'x'), symInt(arena, 3)),
+                symMul(arena, symInt(arena, -6),
+                    symPow(arena, symVar(arena, 'x'), symInt(arena, 2)))),
+            symAdd(arena,
+                symMul(arena, symInt(arena, 11), symVar(arena, 'x')),
+                symInt(arena, -6)));
+
+        OmniSolver solver;
+        OmniResult r = solver.solveExpr(f, 'x', arena);
+
+        check("G7 cubic three roots", r.ok && r.solutions.size() == 3);
+        check("G7 cubic roots {1,2,3}",
+              hasSolutionNear(r, 1.0) && hasSolutionNear(r, 2.0) &&
+              hasSolutionNear(r, 3.0));
+        arena.reset();
+    }
+
+    // G8: 2·sin(x) - 1 = 0 — transcendental, single occurrence: must still
+    //     use analytic isolation with the single-valued principal inverse
+    //     (exactly one root, arcsin(1/2); no fabricated ± branches).
+    {
+        auto* f = symAdd(arena,
+            symMul(arena, symInt(arena, 2),
+                symFunc(arena, SymFuncKind::Sin, symVar(arena, 'x'))),
+            symInt(arena, -1));
+
+        OmniSolver solver;
+        OmniResult r = solver.solveExpr(f, 'x', arena);
+
+        check("G8 2sin(x)-1=0 one analytic root",
+              r.ok && r.solutions.size() == 1);
+        check("G8 root = arcsin(1/2)",
+              !r.solutions.empty() &&
+              approx(r.solutions[0].numeric, std::asin(0.5), 1e-8));
+        arena.reset();
+    }
+
+    // G9: a·x - 6 = 0 solved for x — symbolic coefficient must NOT enter
+    //     the numeric polynomial path; analytic isolation returns x = 6/a.
+    {
+        auto* f = symAdd(arena,
+            symMul(arena, symVar(arena, 'a'), symVar(arena, 'x')),
+            symInt(arena, -6));
+
+        OmniSolver solver;
+        OmniResult r = solver.solveExpr(f, 'x', arena);
+
+        check("G9 ax-6=0 solves symbolically",
+              r.ok && r.solutions.size() == 1 &&
+              r.solutions[0].symbolic != nullptr);
         arena.reset();
     }
 

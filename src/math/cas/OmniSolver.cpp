@@ -264,6 +264,50 @@ OmniResult OmniSolver::solve(SymExpr* lhs, SymExpr* rhs, char var,
 }
 
 // ════════════════════════════════════════════════════════════════════
+// containsOnlyVar — true if every variable node in the tree is `var`
+//
+// Guards the NB-2 polynomial routing: isPolynomial() admits foreign
+// variables (a·x² is "polynomial"), but toSymPoly/SingleSolver assume
+// numeric coefficients. Symbolic-coefficient equations must keep the
+// analytic isolation path, which divides by them correctly.
+// ════════════════════════════════════════════════════════════════════
+
+static bool containsOnlyVar(const SymExpr* expr, char var) {
+    if (!expr) return true;
+    switch (expr->type) {
+        case SymExprType::Num:
+            return true;
+        case SymExprType::Var:
+            return static_cast<const SymVar*>(expr)->name == var;
+        case SymExprType::Neg:
+            return containsOnlyVar(static_cast<const SymNeg*>(expr)->child, var);
+        case SymExprType::Add: {
+            const auto* add = static_cast<const SymAdd*>(expr);
+            for (uint16_t i = 0; i < add->count; ++i)
+                if (!containsOnlyVar(add->terms[i], var)) return false;
+            return true;
+        }
+        case SymExprType::Mul: {
+            const auto* mul = static_cast<const SymMul*>(expr);
+            for (uint16_t i = 0; i < mul->count; ++i)
+                if (!containsOnlyVar(mul->factors[i], var)) return false;
+            return true;
+        }
+        case SymExprType::Pow: {
+            const auto* pw = static_cast<const SymPow*>(expr);
+            return containsOnlyVar(pw->base, var) &&
+                   containsOnlyVar(pw->exponent, var);
+        }
+        case SymExprType::Func:
+            return containsOnlyVar(static_cast<const SymFunc*>(expr)->argument, var);
+        case SymExprType::Paren:
+            return containsOnlyVar(static_cast<const SymParen*>(expr)->child, var);
+        default:
+            return false;  // display-only nodes — don't route, keep old path
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════
 // solveExpr — Solve f(x) = 0
 // ════════════════════════════════════════════════════════════════════
 
@@ -279,7 +323,27 @@ OmniResult OmniSolver::solveExpr(SymExpr* f, char var, SymExprArena& arena) {
     // Step 0: Simplify the expression first (Phase 3 multi-pass)
     f = SymSimplify::simplify(f, arena);
 
-    // Step 1: Try analytic isolation (var appears exactly once)
+    // Step 1: Supported polynomials go to the multi-root polynomial solver
+    // BEFORE analytic isolation (NB-2): isolation inverts one layer at a
+    // time and takes only the principal branch, so x² = 2 returned +√2 and
+    // silently lost −√2. "Supported" = numeric coefficients only (no other
+    // variables) and degree 1..3 — the exact linear/quadratic/cubic-tutor
+    // paths in SingleSolver. Higher degrees and symbolic coefficients keep
+    // their existing routes.
+    if (f->isPolynomial() && containsOnlyVar(f, var)) {
+        int16_t deg = f->toSymPoly(var).degree();
+        if (deg >= 1 && deg <= 3) {
+            result.steps.logNote(
+                "Polynomial equation of degree " + std::to_string(deg) +
+                ": using the exact polynomial solver.",
+                MethodId::General);
+            result.classification = EquationClass::Polynomial;
+            result.ok = solvePolynomial(f, var, arena, result);
+            return result;
+        }
+    }
+
+    // Step 2: Try analytic isolation (var appears exactly once)
     if (countVar(f, var) == 1) {
         result.steps.logNote(
             "Variable appears exactly once: attempting analytic isolation.",
@@ -288,11 +352,11 @@ OmniResult OmniSolver::solveExpr(SymExpr* f, char var, SymExprArena& arena) {
             return result;
     }
 
-    // Step 2: Classify
+    // Step 3: Classify
     EquationClass cls = classify(f, var);
     result.classification = cls;
 
-    // Step 3: Dispatch
+    // Step 4: Dispatch
     bool solved = false;
     switch (cls) {
         case EquationClass::Polynomial:
