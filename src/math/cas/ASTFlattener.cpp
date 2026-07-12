@@ -632,7 +632,16 @@ FlattenResult ASTFlattener::flattenConstant(const vpam::NodeConstant* node) {
             return FlattenResult::fail("Unknown constant kind");
     }
 
-    return FlattenResult::success(SymPoly::fromConstant(val));
+    // NB-6: SymPoly coefficients are pure CASRational and cannot carry
+    // piMul/eMul — truncating here silently turned π into rational 1.
+    // Route π/e through the SymExpr path (SymNum preserves the tags
+    // exactly) or reject; never produce a rational polynomial constant.
+    if (_arena) {
+        SymExpr* expr = symNum(*_arena, val);
+        if (expr) return FlattenResult::transcendentalSuccess(expr);
+    }
+    return FlattenResult::needsNumeric(
+        "Transcendental constant (pi/e) is not a polynomial coefficient");
 }
 
 // ════════════════════════════════════════════════════════════════════

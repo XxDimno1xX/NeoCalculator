@@ -882,18 +882,18 @@ bool OmniSolver::solveAnalytic(SymExpr* f, char var, SymExprArena& arena,
     omniSol.symbolic = sol;
     omniSol.numeric  = sol->evaluate(0.0);  // Evaluate (var-free expression)
 
-    // Try to extract exact CASRational if result is a pure number
+    // Try to extract an exact value if result is a pure number.
+    // NB-6: use toExactVal() — it carries the SymNum radical/π/e metadata
+    // (x + π = 0 must report x = −π exactly, not the bare rational −1).
     if (sol->type == SymExprType::Num) {
         auto* num = static_cast<SymNum*>(sol);
-        omniSol.exact   = vpam::ExactVal::fromFrac(
-            num->_coeff.num().toInt64(), num->_coeff.den().toInt64());
-        omniSol.isExact = true;
+        omniSol.exact   = num->toExactVal();
+        omniSol.isExact = omniSol.exact.ok;
     } else if (sol->type == SymExprType::Neg &&
                static_cast<SymNeg*>(sol)->child->type == SymExprType::Num) {
         auto* inner = static_cast<SymNum*>(static_cast<SymNeg*>(sol)->child);
-        omniSol.exact   = vpam::ExactVal::fromFrac(
-            -inner->_coeff.num().toInt64(), inner->_coeff.den().toInt64());
-        omniSol.isExact = true;
+        omniSol.exact   = vpam::exactNeg(inner->toExactVal());
+        omniSol.isExact = omniSol.exact.ok;
     } else {
         // Symbolic result (e.g., arcsin(1/2), e^3, ln(5)/ln(2))
         omniSol.isExact = false;

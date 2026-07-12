@@ -191,7 +191,11 @@ public:
     SymExpr*    clone(SymExprArena& arena) const override;
     std::string toString() const override;
     bool        containsVar(char) const override { return false; }
-    bool        isPolynomial() const override { return true; }
+    // NB-6: toSymPoly() coefficients are pure CASRational — a tagged
+    // SymNum (π/e/radical) admitted to the polynomial path would be
+    // truncated to its rational part (π → 1). Same guard SymPow already
+    // applies to exponents.
+    bool        isPolynomial() const override { return isPureRational(); }
 
     // ── Static hash computation ──
     static size_t computeHashStatic(const CASRational& c,

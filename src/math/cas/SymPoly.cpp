@@ -29,6 +29,18 @@
 
 namespace cas {
 
+// NB-6: legacy ExactVal→CASRational bridge. CASRational cannot carry
+// piMul/eMul, so a π/e-tagged constant maps to the error coefficient
+// (den==0) instead of silently truncating to its rational part (π → 1).
+// Error terms survive normalize() (isZero() is false on error) and
+// propagate through CASRational arithmetic. Radical (outer√inner) and
+// approximate values keep the historical truncation — display-only
+// callers (solver step logs) rely on it.
+static CASRational exactValToCoeff(const vpam::ExactVal& c) {
+    if (!c.ok || c.piMul != 0 || c.eMul != 0) return CASRational::makeError();
+    return CASRational(c.num, c.den);
+}
+
 // ════════════════════════════════════════════════════════════════════
 // SymTerm Implementation
 // ════════════════════════════════════════════════════════════════════
@@ -41,16 +53,14 @@ SymTerm::SymTerm(CASRational c, char v, int16_t p)
 
 // Legacy bridge constructor
 SymTerm::SymTerm(vpam::ExactVal c, char v, int16_t p)
-    : coeff(c.ok ? CASRational(c.num, c.den) : CASRational::makeError()),
-      var(v), power(p) {}
+    : coeff(exactValToCoeff(c)), var(v), power(p) {}
 
 SymTerm SymTerm::constant(CASRational c) {
     return SymTerm(c, '\0', 0);
 }
 
 SymTerm SymTerm::constant(vpam::ExactVal c) {
-    return SymTerm(c.ok ? CASRational(c.num, c.den) : CASRational::makeError(),
-                   '\0', 0);
+    return SymTerm(exactValToCoeff(c), '\0', 0);
 }
 
 SymTerm SymTerm::variable(char v, int64_t coeffNum, int64_t coeffDen, int16_t p) {
@@ -169,8 +179,7 @@ SymPoly SymPoly::fromConstant(CASRational c) {
 }
 
 SymPoly SymPoly::fromConstant(vpam::ExactVal c) {
-    return fromConstant(c.ok ? CASRational(c.num, c.den)
-                             : CASRational::makeError());
+    return fromConstant(exactValToCoeff(c));
 }
 
 SymPoly SymPoly::fromTerm(const SymTerm& t) {
@@ -334,8 +343,7 @@ SymPoly SymPoly::mulScalar(const CASRational& scalar) const {
 }
 
 SymPoly SymPoly::mulScalar(const vpam::ExactVal& scalar) const {
-    return mulScalar(scalar.ok ? CASRational(scalar.num, scalar.den)
-                               : CASRational::makeError());
+    return mulScalar(exactValToCoeff(scalar));
 }
 
 SymPoly SymPoly::mul(const SymPoly& rhs) const {
@@ -395,8 +403,7 @@ SymPoly SymPoly::divScalar(const CASRational& scalar) const {
 }
 
 SymPoly SymPoly::divScalar(const vpam::ExactVal& scalar) const {
-    return divScalar(scalar.ok ? CASRational(scalar.num, scalar.den)
-                               : CASRational::makeError());
+    return divScalar(exactValToCoeff(scalar));
 }
 
 // ── Display ────────────────────────────────────────────────────────

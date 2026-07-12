@@ -33,6 +33,9 @@
 #include "../src/math/cas/CASStepLogger.h"
 #include "../src/math/cas/SingleSolver.h"
 #include "../src/math/cas/SystemSolver.h"
+#include "../src/math/cas/OmniSolver.h"
+#include "../src/math/cas/SymExpr.h"
+#include "../src/math/cas/SymExprArena.h"
 #include "../src/math/MathAST.h"
 #include <cmath>
 
@@ -554,14 +557,215 @@ void runCASTests() {
         check("flatten(sin(x)) transcendental", r.transcendental);
     }
 
-    // ── Test 30: ASTFlattener — Constants (π, e) ───────────────
+    // ── Test 30: ASTFlattener — Constants (π, e) are not polynomial
+    //    coefficients (NB-6). Without an arena the flattener must reject;
+    //    with an arena it must take the SymExpr path with the piMul/eMul
+    //    tags intact. It must never yield a rational SymPoly constant.
     {
-        ASTFlattener flat;
         auto piNode = vpam::makeConstant(vpam::ConstKind::Pi);
-        auto r = flat.flatten(piNode.get());
-        check("flatten(π) ok", r.ok);
-        check("flatten(π) is constant", r.poly.isConstant());
-        check("flatten(π) piMul == 1", r.poly.coeffAtExact(0).piMul == 1);
+        auto eNode  = vpam::makeConstant(vpam::ConstKind::E);
+
+        // No arena → explicit typed rejection, not rational 1
+        ASTFlattener flat;
+        auto rp = flat.flatten(piNode.get());
+        check("flatten(π) rejected without arena", !rp.ok && rp.transcendental);
+        check("flatten(π) has error reason", !rp.error.empty());
+        auto re = flat.flatten(eNode.get());
+        check("flatten(e) rejected without arena", !re.ok && re.transcendental);
+
+        // Arena → SymExpr path, tags preserved exactly
+        SymExprArena arena;
+        ASTFlattener flatA;
+        flatA.setArena(&arena);
+        auto rpa = flatA.flatten(piNode.get());
+        check("flatten(π) arena → SymExpr", rpa.ok && rpa.transcendental &&
+                                            rpa.exprTree != nullptr);
+        if (rpa.exprTree) {
+            check("flatten(π) SymExpr is Num",
+                  rpa.exprTree->type == SymExprType::Num);
+            vpam::ExactVal ev =
+                static_cast<SymNum*>(rpa.exprTree)->toExactVal();
+            check("flatten(π) piMul preserved",
+                  ev.ok && ev.piMul == 1 && ev.num == 1 && ev.den == 1);
+            check("flatten(π) not polynomial-routable",
+                  !rpa.exprTree->isPolynomial());
+        }
+        auto rea = flatA.flatten(eNode.get());
+        check("flatten(e) arena → SymExpr", rea.ok && rea.transcendental &&
+                                            rea.exprTree != nullptr);
+        if (rea.exprTree) {
+            vpam::ExactVal ev =
+                static_cast<SymNum*>(rea.exprTree)->toExactVal();
+            check("flatten(e) eMul preserved",
+                  ev.ok && ev.eMul == 1 && ev.num == 1 && ev.den == 1);
+        }
+    }
+
+    // ── Test 30b: NB-6 regression — tagged multiples of π ────────
+    //    2π, π/2 and −π must reject (no arena) or preserve the tag via
+    //    SymExpr (arena); the evaluated magnitude proves nothing was
+    //    truncated to its bare rational part.
+    {
+        auto make2Pi = []() {
+            auto row = vpam::makeRow();
+            auto* r = static_cast<vpam::NodeRow*>(row.get());
+            r->appendChild(vpam::makeNumber("2"));
+            r->appendChild(vpam::makeConstant(vpam::ConstKind::Pi));
+            return row;
+        };
+        auto makeNegPi = []() {
+            auto row = vpam::makeRow();
+            auto* r = static_cast<vpam::NodeRow*>(row.get());
+            r->appendChild(vpam::makeOperator(vpam::OpKind::Sub));
+            r->appendChild(vpam::makeConstant(vpam::ConstKind::Pi));
+            return row;
+        };
+
+        ASTFlattener flat;  // no arena
+        auto n2pi = make2Pi();
+        auto r1 = flat.flatten(n2pi.get());
+        check("flatten(2π) rejected without arena", !r1.ok && r1.transcendental);
+        auto fracPi2 = vpam::makeFraction(
+            vpam::makeConstant(vpam::ConstKind::Pi), vpam::makeNumber("2"));
+        auto r2 = flat.flatten(fracPi2.get());
+        check("flatten(π/2) rejected without arena", !r2.ok && r2.transcendental);
+        auto negPi = makeNegPi();
+        auto r3 = flat.flatten(negPi.get());
+        check("flatten(−π) rejected without arena", !r3.ok && r3.transcendental);
+
+        SymExprArena arena;
+        ASTFlattener flatA;
+        flatA.setArena(&arena);
+        auto a1 = flatA.flatten(n2pi.get());
+        check("flatten(2π) arena → SymExpr", a1.ok && a1.exprTree != nullptr);
+        if (a1.exprTree)
+            check("flatten(2π) value ≈ 2π",
+                  std::abs(a1.exprTree->evaluate(0.0) - 2.0 * M_PI) < 1e-9);
+        auto a2 = flatA.flatten(fracPi2.get());
+        check("flatten(π/2) arena → SymExpr", a2.ok && a2.exprTree != nullptr);
+        if (a2.exprTree)
+            check("flatten(π/2) value ≈ π/2",
+                  std::abs(a2.exprTree->evaluate(0.0) - M_PI / 2.0) < 1e-9);
+        auto a3 = flatA.flatten(negPi.get());
+        check("flatten(−π) arena → SymExpr", a3.ok && a3.exprTree != nullptr);
+        if (a3.exprTree)
+            check("flatten(−π) value ≈ −π",
+                  std::abs(a3.exprTree->evaluate(0.0) + M_PI) < 1e-9);
+
+        // Ordinary constants still flatten on the polynomial path
+        auto frac34 = vpam::makeFraction(
+            vpam::makeNumber("3"), vpam::makeNumber("4"));
+        auto rc = flat.flatten(frac34.get());
+        check("flatten(3/4) still ok", rc.ok && !rc.transcendental);
+        check("flatten(3/4) exact", rc.poly.coeffAtExact(0).num == 3 &&
+                                    rc.poly.coeffAtExact(0).den == 4);
+        auto n42 = vpam::makeNumber("42");
+        auto ri = flat.flatten(n42.get());
+        check("flatten(42) still ok", ri.ok &&
+              ri.poly.coeffAtExact(0).num == 42);
+    }
+
+    // ── Test 30c: NB-6 regression — legacy ExactVal→SymPoly bridge ──
+    //    Tagged transcendental constants map to the error coefficient,
+    //    never to a fabricated rational (and never vanish to 0).
+    {
+        vpam::ExactVal piVal = vpam::ExactVal::fromPi(1, 1, 1);
+        SymPoly p = SymPoly::fromConstant(piVal);
+        check("fromConstant(π) error coeff", p.coeffAt(0).hasError());
+        check("fromConstant(π) not rational 1", !p.coeffAt(0).isOne());
+        check("fromConstant(π) not silently 0", !p.isZero());
+
+        vpam::ExactVal eVal = vpam::ExactVal::fromE(1, 1, 1);
+        SymPoly pe = SymPoly::fromConstant(eVal);
+        check("fromConstant(e) error coeff", pe.coeffAt(0).hasError());
+
+        // Both tags set (unreachable today, must still be rejected)
+        vpam::ExactVal both = vpam::ExactVal::fromPi(3, 2, 1);
+        both.eMul = 1;
+        SymPoly pb = SymPoly::fromConstant(both);
+        check("fromConstant(πe) error coeff", pb.coeffAt(0).hasError());
+
+        // Error-tagged input keeps mapping to the error coefficient
+        vpam::ExactVal bad = vpam::ExactVal::makeError("boom");
+        SymPoly pErr = SymPoly::fromConstant(bad);
+        check("fromConstant(error) error coeff", pErr.coeffAt(0).hasError());
+
+        // Pure rationals are unaffected
+        SymPoly pr = SymPoly::fromConstant(vpam::ExactVal::fromFrac(3, 4));
+        check("fromConstant(3/4) intact", !pr.coeffAt(0).hasError() &&
+              pr.coeffAtExact(0).num == 3 && pr.coeffAtExact(0).den == 4);
+
+        // SymTerm bridges take the same guard
+        SymTerm t = SymTerm::constant(piVal);
+        check("SymTerm::constant(π) error coeff", t.coeff.hasError());
+        SymTerm t2(piVal, 'x', 1);
+        check("SymTerm(π,x,1) error coeff", t2.coeff.hasError());
+    }
+
+    // ── Test 30d: NB-6 regression — equations with π/e solve honestly ─
+    //    x + π = 0 → −π, πx − 1 = 0 → 1/π, x + e = 0 → −e. Never the
+    //    fabricated rational roots −1 / 1 / −1.
+    {
+        SymExprArena arena;
+        ASTFlattener flat;
+        flat.setArena(&arena);
+
+        auto solveEq = [&](vpam::NodePtr lhs, const char* name,
+                           double expected) {
+            SymExpr* le = flat.flattenToExpr(lhs.get());
+            auto zero = vpam::makeNumber("0");
+            SymExpr* re = flat.flattenToExpr(zero.get());
+            bool honest = false;
+            if (le && re) {
+                OmniSolver solver;
+                OmniResult res = solver.solve(le, re, 'x', arena);
+                if (!res.ok || res.solutions.empty()) {
+                    // Explicit rejection is honest too
+                    honest = !res.ok;
+                } else {
+                    honest = true;
+                    for (const auto& s : res.solutions) {
+                        double v = s.isExact ? s.exact.toDouble() : s.numeric;
+                        if (std::abs(v - expected) > 1e-4) honest = false;
+                    }
+                }
+            }
+            check(name, honest);
+        };
+
+        {   // x + π = 0
+            auto lhs = vpam::makeRow();
+            auto* l = static_cast<vpam::NodeRow*>(lhs.get());
+            l->appendChild(vpam::makeVariable('x'));
+            l->appendChild(vpam::makeOperator(vpam::OpKind::Add));
+            l->appendChild(vpam::makeConstant(vpam::ConstKind::Pi));
+            solveEq(std::move(lhs), "x + π = 0 honest (x = −π)", -M_PI);
+        }
+        {   // πx − 1 = 0
+            auto lhs = vpam::makeRow();
+            auto* l = static_cast<vpam::NodeRow*>(lhs.get());
+            l->appendChild(vpam::makeConstant(vpam::ConstKind::Pi));
+            l->appendChild(vpam::makeVariable('x'));
+            l->appendChild(vpam::makeOperator(vpam::OpKind::Sub));
+            l->appendChild(vpam::makeNumber("1"));
+            solveEq(std::move(lhs), "πx − 1 = 0 honest (x = 1/π)", 1.0 / M_PI);
+        }
+        {   // x + e = 0
+            auto lhs = vpam::makeRow();
+            auto* l = static_cast<vpam::NodeRow*>(lhs.get());
+            l->appendChild(vpam::makeVariable('x'));
+            l->appendChild(vpam::makeOperator(vpam::OpKind::Add));
+            l->appendChild(vpam::makeConstant(vpam::ConstKind::E));
+            solveEq(std::move(lhs), "x + e = 0 honest (x = −e)", -M_E);
+        }
+        {   // Control: plain polynomial equation still solves exactly
+            auto lhs = vpam::makeRow();
+            auto* l = static_cast<vpam::NodeRow*>(lhs.get());
+            l->appendChild(vpam::makeVariable('x'));
+            l->appendChild(vpam::makeOperator(vpam::OpKind::Add));
+            l->appendChild(vpam::makeNumber("1"));
+            solveEq(std::move(lhs), "x + 1 = 0 still exact (x = −1)", -1.0);
+        }
     }
 
     // ── Test 31: ASTFlattener — Unary minus: -3x + 7 ───────────

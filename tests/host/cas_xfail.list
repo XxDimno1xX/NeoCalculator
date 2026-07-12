@@ -6,4 +6,6 @@
 # An entry that stops failing turns XPASS and FAILS the run — prune it in the
 # same PR that fixes the underlying issue. Initial inventory:
 # docs/specs/NUMOS_CAS_CAS01_CAS02_EXECUTION_PLAN.md §H.
-CASTest	case	flatten(π) piMul == 1	NB-6: SymPoly::fromConstant(vpam::ExactVal) legacy bridge (SymPoly.cpp:171) drops piMul/eMul, so flatten(π) silently becomes rational 1 (ok=true); reachable via EquationsApp flattenEquation (EquationsApp.cpp:1320, :2240)
+# (empty — NB-6 fixed 2026-07-12: flattenConstant routes π/e to the SymExpr
+#  path, SymNum::isPolynomial() requires pure-rational, and the legacy
+#  ExactVal→CASRational bridges map tagged constants to the error coefficient.)
