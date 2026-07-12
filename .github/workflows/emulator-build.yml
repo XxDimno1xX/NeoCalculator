@@ -168,11 +168,15 @@ jobs:
         run: |
           set -euo pipefail
           BIN=.pio/build/emulator_pc/program
+          # Artifacts go under gitignored out/ci-smoke/ (never the repo root:
+          # the final dirty-tree guard rejects untracked files) and must
+          # outlive this step for the always() upload below.
+          mkdir -p out/ci-smoke
           echo "Launch: $BIN --headless --run-for-ms 5000 --quiet"
           SDL_VIDEODRIVER=dummy timeout 30s "$BIN" \
-            --headless --run-for-ms 5000 --quiet | tee emu-smoke.log
+            --headless --run-for-ms 5000 --quiet | tee "out/ci-smoke/emu-smoke.log"
           echo "--- asserting boot reached the launcher ---"
-          grep -q "Launcher cargado" emu-smoke.log
+          grep -q "Launcher cargado" "out/ci-smoke/emu-smoke.log"
           echo "OK: emulator booted to MainMenu and exited cleanly."
 
       - name: Upload smoke log
@@ -180,7 +184,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: numos-emulator-smoke-log
-          path: emu-smoke.log
+          path: out/ci-smoke/emu-smoke.log
           if-no-files-found: ignore
 
       # ---------------------------------------------------------------------
@@ -198,17 +202,20 @@ jobs:
         run: |
           set -euo pipefail
           BIN=.pio/build/emulator_pc/program
-          echo "Launch: $BIN --headless --frames 600 --deterministic --screenshot smoke.ppm --quiet"
+          # Same policy as the wall-clock smoke: artifacts live in gitignored
+          # out/ci-smoke/, kept for the always() upload below.
+          mkdir -p out/ci-smoke
+          echo "Launch: $BIN --headless --frames 600 --deterministic --screenshot out/ci-smoke/smoke.ppm --quiet"
           SDL_VIDEODRIVER=dummy timeout 30s "$BIN" \
-            --headless --frames 600 --deterministic --screenshot smoke.ppm --quiet \
-            2>&1 | tee emu-det-smoke.log
+            --headless --frames 600 --deterministic --screenshot "out/ci-smoke/smoke.ppm" --quiet \
+            2>&1 | tee "out/ci-smoke/emu-det-smoke.log"
           echo "--- asserting boot reached the launcher ---"
-          grep -q "Launcher cargado" emu-det-smoke.log
+          grep -q "Launcher cargado" "out/ci-smoke/emu-det-smoke.log"
           echo "--- asserting deterministic tick was used ---"
-          grep -q "tick = determinista" emu-det-smoke.log
+          grep -q "tick = determinista" "out/ci-smoke/emu-det-smoke.log"
           echo "--- asserting screenshot exists, is non-empty and 320x240 ---"
-          test -s smoke.ppm
-          head -c 32 smoke.ppm | tr '\n' ' ' | grep -q "P6 320 240"
+          test -s "out/ci-smoke/smoke.ppm"
+          head -c 32 "out/ci-smoke/smoke.ppm" | tr '\n' ' ' | grep -q "P6 320 240"
           echo "OK: deterministic boot + 320x240 PPM screenshot generated."
 
       - name: Upload deterministic smoke log + screenshot
@@ -217,8 +224,8 @@ jobs:
         with:
           name: numos-emulator-smoke
           path: |
-            emu-det-smoke.log
-            smoke.ppm
+            out/ci-smoke/emu-det-smoke.log
+            out/ci-smoke/smoke.ppm
           if-no-files-found: ignore
 
       # ---------------------------------------------------------------------
