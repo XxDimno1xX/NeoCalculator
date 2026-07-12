@@ -123,10 +123,10 @@ jobs:
       # Expected green footer: total suites=8 pass=7 xfail=1 unexpected=0.
       # Runs before the emulator build so CAS regressions fail in ~30 s.
       - name: CAS host suites (CAS-01)
-        run: scripts/build-cas-host-tests.sh
+        run: bash scripts/build-cas-host-tests.sh
 
       - name: CAS host suites (ASAN variant)
-        run: scripts/build-cas-host-tests.sh --asan
+        run: bash scripts/build-cas-host-tests.sh --asan
 
       - name: Upload CAS host test logs
         if: always()
