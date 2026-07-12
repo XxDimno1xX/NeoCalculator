@@ -65,30 +65,30 @@ static void stCheck(const char* name, bool cond) {
 
 // Build: a*x^n
 static SymExpr* buildMonomial(SymExprArena& a, double coeff, int power) {
-    SymExpr* x = a.symVar('x');
+    SymExpr* x = symVar(a, 'x');
     SymExpr* term;
     if (power == 0) {
-        term = a.symNum(ExactVal::fromInt((int)coeff));
+        term = symInt(a, (int64_t)coeff);
     } else if (power == 1) {
         if (coeff == 1.0) {
             term = x;
         } else {
-            SymExpr* parts[] = { a.symNum(ExactVal::fromInt((int)coeff)), x };
-            term = a.symMul(parts, 2);
+            term = symMul(a, symInt(a, (int64_t)coeff), x);
         }
     } else {
-        SymExpr* xn = a.symPow(x, a.symInt(power));
+        SymExpr* xn = symPow(a, x, symInt(a, power));
         if (coeff == 1.0) {
             term = xn;
         } else {
-            SymExpr* parts[] = { a.symNum(ExactVal::fromInt((int)coeff)), xn };
-            term = a.symMul(parts, 2);
+            term = symMul(a, symInt(a, (int64_t)coeff), xn);
         }
     }
     return term;
 }
 
 // Build polynomial: c0 + c1*x + c2*x^2 + ...
+// symAddN keeps the terms-array pointer inside the SymAdd node, so the
+// array must live in the arena — a stack array would dangle.
 static SymExpr* buildPoly(SymExprArena& a, const int* coeffs, int degree) {
     SymExpr* terms[10];
     int count = 0;
@@ -97,123 +97,116 @@ static SymExpr* buildPoly(SymExprArena& a, const int* coeffs, int degree) {
             terms[count++] = buildMonomial(a, coeffs[i], i);
         }
     }
-    if (count == 0) return a.symInt(0);
+    if (count == 0) return symInt(a, 0);
     if (count == 1) return terms[0];
-    return a.symAdd(terms, count);
+    auto** arr = static_cast<SymExpr**>(a.allocRaw(count * sizeof(SymExpr*)));
+    if (!arr) return nullptr;
+    for (int i = 0; i < count; ++i) arr[i] = terms[i];
+    return symAddN(a, arr, static_cast<uint16_t>(count));
 }
 
 // ── Test expressions ───────────────────────────────────────────────
 // Returns a new expression for each iteration index (0..49)
 
 static SymExpr* buildTestExpr(SymExprArena& arena, int idx) {
-    SymExpr* x = arena.symVar('x');
+    SymExpr* x = symVar(arena, 'x');
 
     switch (idx % 25) {
         case 0: {  // x^2
-            return arena.symPow(x, arena.symInt(2));
+            return symPow(arena, x, symInt(arena, 2));
         }
         case 1: {  // 3x^3 + 2x^2 - x + 5
             int c[] = {5, -1, 2, 3};
             return buildPoly(arena, c, 3);
         }
         case 2: {  // sin(x)
-            return arena.symFunc(SymFuncKind::Sin, x);
+            return symFunc(arena, SymFuncKind::Sin, x);
         }
         case 3: {  // cos(x)
-            return arena.symFunc(SymFuncKind::Cos, x);
+            return symFunc(arena, SymFuncKind::Cos, x);
         }
         case 4: {  // tan(x)
-            return arena.symFunc(SymFuncKind::Tan, x);
+            return symFunc(arena, SymFuncKind::Tan, x);
         }
         case 5: {  // ln(x)
-            return arena.symFunc(SymFuncKind::Ln, x);
+            return symFunc(arena, SymFuncKind::Ln, x);
         }
         case 6: {  // e^x
-            return arena.symFunc(SymFuncKind::Exp, x);
+            return symFunc(arena, SymFuncKind::Exp, x);
         }
         case 7: {  // x^5 - 3x^4 + 2x^3
             int c[] = {0, 0, 0, 2, -3, 1};
             return buildPoly(arena, c, 5);
         }
         case 8: {  // sin(x^2) — chain rule
-            return arena.symFunc(SymFuncKind::Sin,
-                arena.symPow(x, arena.symInt(2)));
+            return symFunc(arena, SymFuncKind::Sin,
+                symPow(arena, x, symInt(arena, 2)));
         }
         case 9: {  // x * sin(x) — product rule
-            SymExpr* parts[] = { x, arena.symFunc(SymFuncKind::Sin, x) };
-            return arena.symMul(parts, 2);
+            return symMul(arena, x, symFunc(arena, SymFuncKind::Sin, x));
         }
         case 10: { // e^(x^2) — chain rule
-            return arena.symFunc(SymFuncKind::Exp,
-                arena.symPow(x, arena.symInt(2)));
+            return symFunc(arena, SymFuncKind::Exp,
+                symPow(arena, x, symInt(arena, 2)));
         }
         case 11: { // ln(x^2 + 1)
-            SymExpr* addTerms[] = {
-                arena.symPow(x, arena.symInt(2)),
-                arena.symInt(1)
-            };
-            return arena.symFunc(SymFuncKind::Ln,
-                arena.symAdd(addTerms, 2));
+            return symFunc(arena, SymFuncKind::Ln,
+                symAdd(arena,
+                    symPow(arena, x, symInt(arena, 2)),
+                    symInt(arena, 1)));
         }
         case 12: { // x^10
-            return arena.symPow(x, arena.symInt(10));
+            return symPow(arena, x, symInt(arena, 10));
         }
         case 13: { // sin(x) * cos(x) — product rule
-            SymExpr* parts[] = {
-                arena.symFunc(SymFuncKind::Sin, x),
-                arena.symFunc(SymFuncKind::Cos, x)
-            };
-            return arena.symMul(parts, 2);
+            return symMul(arena,
+                symFunc(arena, SymFuncKind::Sin, x),
+                symFunc(arena, SymFuncKind::Cos, x));
         }
         case 14: { // (x^2 + 1)^3 — chain + power rule
-            SymExpr* addTerms[] = {
-                arena.symPow(x, arena.symInt(2)),
-                arena.symInt(1)
-            };
-            return arena.symPow(
-                arena.symAdd(addTerms, 2),
-                arena.symInt(3));
+            return symPow(arena,
+                symAdd(arena,
+                    symPow(arena, x, symInt(arena, 2)),
+                    symInt(arena, 1)),
+                symInt(arena, 3));
         }
         case 15: { // arcsin(x)
-            return arena.symFunc(SymFuncKind::ArcSin, x);
+            return symFunc(arena, SymFuncKind::ArcSin, x);
         }
         case 16: { // arccos(x)
-            return arena.symFunc(SymFuncKind::ArcCos, x);
+            return symFunc(arena, SymFuncKind::ArcCos, x);
         }
         case 17: { // arctan(x)
-            return arena.symFunc(SymFuncKind::ArcTan, x);
+            return symFunc(arena, SymFuncKind::ArcTan, x);
         }
         case 18: { // log10(x)
-            return arena.symFunc(SymFuncKind::Log10, x);
+            return symFunc(arena, SymFuncKind::Log10, x);
         }
         case 19: { // x^(1/2) = sqrt(x)
-            return arena.symPow(x,
-                arena.symNum(ExactVal(1, 2)));
+            return symPow(arena, x, symFrac(arena, 1, 2));
         }
         case 20: { // -x^3 — negation
-            return arena.symNeg(arena.symPow(x, arena.symInt(3)));
+            return symNeg(arena, symPow(arena, x, symInt(arena, 3)));
         }
         case 21: { // sin(cos(x)) — nested chain rule
-            return arena.symFunc(SymFuncKind::Sin,
-                arena.symFunc(SymFuncKind::Cos, x));
+            return symFunc(arena, SymFuncKind::Sin,
+                symFunc(arena, SymFuncKind::Cos, x));
         }
         case 22: { // e^(sin(x)) — chain rule
-            return arena.symFunc(SymFuncKind::Exp,
-                arena.symFunc(SymFuncKind::Sin, x));
+            return symFunc(arena, SymFuncKind::Exp,
+                symFunc(arena, SymFuncKind::Sin, x));
         }
         case 23: { // x^2 * ln(x) — product rule + log
-            SymExpr* parts[] = {
-                arena.symPow(x, arena.symInt(2)),
-                arena.symFunc(SymFuncKind::Ln, x)
-            };
-            return arena.symMul(parts, 2);
+            return symMul(arena,
+                symPow(arena, x, symInt(arena, 2)),
+                symFunc(arena, SymFuncKind::Ln, x));
         }
         case 24: { // 7x^6 - 4x^3 + x
             int c[] = {0, 1, 0, -4, 0, 0, 7};
             return buildPoly(arena, c, 6);
         }
     }
-    return arena.symInt(1); // fallback
+    return symInt(arena, 1); // fallback
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -290,10 +283,12 @@ void runCalculusStressTest() {
         }
     }
 
-    // Final arena reset — verify complete cleanup
+    // Final arena reset — verify cleanup. reset() keeps block 0 for warm
+    // re-use (MT-04 lazy-first-block contract), so a used arena settles at
+    // exactly one block, not zero.
     arena.reset();
     stCheck("final_arena_clean", arena.currentUsed() == 0);
-    stCheck("final_arena_zero_blocks", arena.blockCount() == 0);
+    stCheck("final_arena_one_warm_block", arena.blockCount() <= 1);
 
     ST_PRINTLN("-------------------------------------------");
     ST_PRINT("  Iterations: %d/%d succeeded\n", successCount, ITERATIONS);

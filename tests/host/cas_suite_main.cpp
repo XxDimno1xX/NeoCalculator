@@ -14,14 +14,13 @@
  */
 
 /**
- * cas_suite_main.cpp — CAS host suite driver (CAS-01, PR-1).
+ * cas_suite_main.cpp — CAS host suite driver (CAS-01, PR-1 + PR-2).
  *
- * Runs the dormant CAS test suites on a host build. Each suite executes in
- * an ISOLATED child process with a 60 s timeout: OmniSolverTest and
- * TutorTemplateTest are known to crash (NB-1, unguarded OmniSolver ↔
- * TutorTemplates mutual recursion), and in-process sequencing would lose
- * every suite after the first crash plus the buffered stdout of suites that
- * already passed.
+ * Runs the formerly dormant CAS test suites on a host build. Each suite
+ * executes in an ISOLATED child process with a 60 s timeout so one crashing
+ * suite can never take out the driver or the buffered stdout of suites that
+ * already passed (PR-1 shipped six suites; PR-2 revived CASTest and
+ * CalculusStressTest after fixing their API bitrot).
  *
  * Failure detection parses per-case markers ("[FAIL]" / "FAIL: ") from each
  * suite's log — the run*Tests() entry points return void and print
@@ -54,6 +53,8 @@
 
 #include "../ASTFlatExprTest.h"
 #include "../BigIntTest.h"
+#include "../CASTest.h"
+#include "../CalculusStressTest.h"
 #include "../OmniSolverTest.h"
 #include "../SymDiffTest.h"
 #include "../SymExprTest.h"
@@ -85,15 +86,15 @@ struct Suite {
     void (*run)();
 };
 
-// PR-2 appends CASTest / CalculusStressTest here once their API bitrot is
-// fixed (they do not compile today — harness spec §B.2).
 const Suite kSuites[] = {
-    {"BigIntTest",        &cas::runBigIntTests},
-    {"SymExprTest",       &cas::runSymExprTests},
-    {"SymDiffTest",       &cas::runSymDiffTests},
-    {"ASTFlatExprTest",   &cas::runASTFlatExprTests},
-    {"OmniSolverTest",    &cas::runOmniSolverTests},
-    {"TutorTemplateTest", &cas::runTutorTests},
+    {"BigIntTest",          &cas::runBigIntTests},
+    {"SymExprTest",         &cas::runSymExprTests},
+    {"SymDiffTest",         &cas::runSymDiffTests},
+    {"ASTFlatExprTest",     &cas::runASTFlatExprTests},
+    {"OmniSolverTest",      &cas::runOmniSolverTests},
+    {"TutorTemplateTest",   &cas::runTutorTests},
+    {"CASTest",             &cas::runCASTests},
+    {"CalculusStressTest",  &cas::runCalculusStressTest},
 };
 constexpr int kSuiteCount = static_cast<int>(sizeof(kSuites) / sizeof(kSuites[0]));
 constexpr int kTimeoutSec = 60;
@@ -399,18 +400,18 @@ int main(int argc, char** argv) {
         if (sr.outcome == Outcome::Completed) {
             if (failedLines.empty()) {
                 std::snprintf(line, sizeof(line),
-                              "[CAS-HOST] suite=%-17s status=%-6s cases_failed=0",
+                              "[CAS-HOST] suite=%-19s status=%-6s cases_failed=0",
                               s.name, "pass");
                 passCount++;
             } else if (unmatchedCases == 0) {
                 std::snprintf(line, sizeof(line),
-                              "[CAS-HOST] suite=%-17s status=%-6s cases_failed=%d xfail=%d",
+                              "[CAS-HOST] suite=%-19s status=%-6s cases_failed=%d xfail=%d",
                               s.name, "xfail", static_cast<int>(failedLines.size()),
                               matchedCases);
                 xfailCount++;
             } else {
                 std::snprintf(line, sizeof(line),
-                              "[CAS-HOST] suite=%-17s status=%-6s cases_failed=%d unexpected=%d",
+                              "[CAS-HOST] suite=%-19s status=%-6s cases_failed=%d unexpected=%d",
                               s.name, "fail", static_cast<int>(failedLines.size()),
                               unmatchedCases);
                 unexpected += unmatchedCases;
@@ -430,13 +431,13 @@ int main(int argc, char** argv) {
             unexpected += unmatchedCases;  // unexpected pre-crash case failures still count
             if (isCrash) {
                 std::snprintf(line, sizeof(line),
-                              "[CAS-HOST] suite=%-17s status=%s signal=%s xfail=%d pre_crash_failed=%d",
+                              "[CAS-HOST] suite=%-19s status=%s signal=%s xfail=%d pre_crash_failed=%d",
                               s.name, covered ? "xfail-crash" : "crash",
                               sr.signalName.c_str(), covered ? 1 : 0,
                               static_cast<int>(failedLines.size()));
             } else {
                 std::snprintf(line, sizeof(line),
-                              "[CAS-HOST] suite=%-17s status=%s timeout=%ds xfail=%d pre_crash_failed=%d",
+                              "[CAS-HOST] suite=%-19s status=%s timeout=%ds xfail=%d pre_crash_failed=%d",
                               s.name, covered ? "xfail-timeout" : "timeout",
                               kTimeoutSec, covered ? 1 : 0,
                               static_cast<int>(failedLines.size()));

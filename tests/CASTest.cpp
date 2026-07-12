@@ -80,8 +80,8 @@ void runCASTests() {
     // ── Test 1: SymTerm construction ──────────────────────────────
     {
         auto t = SymTerm::variable('x', 3, 1, 2);  // 3x²
-        check("SymTerm(3x²) coeff.num", t.coeff.num == 3);
-        check("SymTerm(3x²) coeff.den", t.coeff.den == 1);
+        check("SymTerm(3x²) coeff.num", t.coeff.num().toInt64() == 3);
+        check("SymTerm(3x²) coeff.den", t.coeff.den().toInt64() == 1);
         check("SymTerm(3x²) power", t.power == 2);
         check("SymTerm(3x²) not constant", !t.isConstant());
     }
@@ -90,14 +90,14 @@ void runCASTests() {
     {
         auto t = SymTerm::constant(vpam::ExactVal::fromInt(-5));
         check("SymTerm(-5) is constant", t.isConstant());
-        check("SymTerm(-5) coeff.num", t.coeff.num == -5);
+        check("SymTerm(-5) coeff.num", t.coeff.num().toInt64() == -5);
     }
 
     // ── Test 3: SymTerm fraction coefficient ──────────────────────
     {
         auto t = SymTerm::variable('x', 2, 3, 1);  // (2/3)x
-        check("SymTerm(2/3 x) coeff.num", t.coeff.num == 2);
-        check("SymTerm(2/3 x) coeff.den", t.coeff.den == 3);
+        check("SymTerm(2/3 x) coeff.num", t.coeff.num().toInt64() == 2);
+        check("SymTerm(2/3 x) coeff.den", t.coeff.den().toInt64() == 3);
     }
 
     // ── Test 4: SymTerm negative power (2/x = 2·x⁻¹) ────────────
@@ -129,13 +129,13 @@ void runCASTests() {
         check("Poly degree == 2", p.degree() == 2);
         // After sort: first term should be 3x²
         check("First term power == 2", p.terms()[0].power == 2);
-        check("First term coeff == 3", p.terms()[0].coeff.num == 3);
+        check("First term coeff == 3", p.terms()[0].coeff.num().toInt64() == 3);
         // Second term: 2x
         check("Second term power == 1", p.terms()[1].power == 1);
-        check("Second term coeff == 2", p.terms()[1].coeff.num == 2);
+        check("Second term coeff == 2", p.terms()[1].coeff.num().toInt64() == 2);
         // Third term: -5 (constant)
         check("Third term is constant", p.terms()[2].isConstant());
-        check("Third term coeff == -5", p.terms()[2].coeff.num == -5);
+        check("Third term coeff == -5", p.terms()[2].coeff.num().toInt64() == -5);
 
         PRINT("  toString: ");
         PRINTLN(p.toString().c_str());
@@ -150,7 +150,7 @@ void runCASTests() {
         p.normalize();
 
         check("3x²+5x² → 1 term", p.terms().size() == 1);
-        check("Combined coeff == 8", p.terms()[0].coeff.num == 8);
+        check("Combined coeff == 8", p.terms()[0].coeff.num().toInt64() == 8);
     }
 
     // ── Test 8: Remove zero terms ────────────────────────────────
@@ -244,8 +244,8 @@ void runCASTests() {
     // (4/6)x should simplify to (2/3)x
     {
         auto t = SymTerm(vpam::ExactVal::fromFrac(4, 6), 'x', 1);
-        check("4/6 simplifies to num=2", t.coeff.num == 2);
-        check("4/6 simplifies to den=3", t.coeff.den == 3);
+        check("4/6 simplifies to num=2", t.coeff.num().toInt64() == 2);
+        check("4/6 simplifies to den=3", t.coeff.den().toInt64() == 3);
     }
 
     // ── Test 14: SymEquation ─────────────────────────────────────

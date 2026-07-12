@@ -100,21 +100,27 @@ jobs:
           python scripts/check-keycode-digit-patterns.py --selftest
           python scripts/check-keycode-digit-patterns.py
           echo "--- host unit test (keyCodeDigitValue) ---"
-          g++ -std=c++17 -Wall -Wextra tests/host/keycode_digit_test.cpp -o keycode_digit_test
-          ./keycode_digit_test
+          # Build OUTSIDE the repo: a binary in the repo root would trip the
+          # CI-01 dirty-tree guard. trap guarantees cleanup even if the
+          # compile or the test itself fails (set -e exits through EXIT).
+          KDT_TMP="$(mktemp -d)"
+          trap 'rm -rf "$KDT_TMP"' EXIT
+          g++ -std=c++17 -Wall -Wextra tests/host/keycode_digit_test.cpp -o "$KDT_TMP/keycode_digit_test"
+          "$KDT_TMP/keycode_digit_test"
 
       # ---------------------------------------------------------------------
       # CAS host suites (CAS-01).
       #
-      # Revives the dormant tests/*.cpp CAS suites on a standalone g++ host
-      # build (never a PlatformIO env, never Giac/libtommath — see
+      # Runs the formerly dormant tests/*.cpp CAS suites on a standalone g++
+      # host build (never a PlatformIO env, never Giac/libtommath — see
       # docs/specs/NUMOS_CAS_HOST_HARNESS_SPEC.md). Each suite runs in an
-      # isolated child process with a 60 s timeout because OmniSolverTest and
-      # TutorTemplateTest crash on known engine bugs (NB-1 solver recursion,
-      # NB-2 misclassification) that are XFAIL'd in tests/host/cas_xfail.list
-      # and NOT fixed by this lane. An XFAIL entry that starts passing is
-      # XPASS and fails the run, so bug-fix PRs must prune the list visibly.
-      # Expected green footer: total suites=6 pass=3 xfail=3 unexpected=0.
+      # isolated child process with a 60 s timeout so a crashing suite can
+      # never take out the driver. Known pre-existing engine bugs are XFAIL'd
+      # per-case in tests/host/cas_xfail.list (currently NB-6: SymPoly
+      # ExactVal bridge drops piMul) and NOT fixed by this lane. An XFAIL
+      # entry that starts passing is XPASS and fails the run, so bug-fix PRs
+      # must prune the list visibly.
+      # Expected green footer: total suites=8 pass=7 xfail=1 unexpected=0.
       # Runs before the emulator build so CAS regressions fail in ~30 s.
       - name: CAS host suites (CAS-01)
         run: scripts/build-cas-host-tests.sh

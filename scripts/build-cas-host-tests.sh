@@ -6,7 +6,6 @@
 # The TU list below is the empirically verified link closure (spec §C.1) and is
 # the single source of truth for what the host lane compiles. Giac/libtommath
 # must NEVER be added here (native Giac is known-broken; spec §C.3).
-# PR-2 appends tests/CASTest.cpp and tests/CalculusStressTest.cpp.
 set -euo pipefail
 cd "$(dirname "$0")/.."                      # repo root
 OUT="${CAS_HOST_OUT:-/tmp/cas-host-tests}"   # all artifacts out-of-tree
@@ -26,6 +25,7 @@ $CXX $FLAGS -o "$OUT/cas_host_tests" \
   tests/host/cas_suite_main.cpp \
   tests/SymExprTest.cpp tests/SymDiffTest.cpp tests/ASTFlatExprTest.cpp \
   tests/OmniSolverTest.cpp tests/BigIntTest.cpp tests/TutorTemplateTest.cpp \
+  tests/CASTest.cpp tests/CalculusStressTest.cpp \
   src/math/cas/*.cpp \
   src/math/MathAST.cpp src/math/MathEvaluator.cpp src/math/VariableManager.cpp \
   src/math/font/MathGlyphAssembly.cpp src/hal/FileSystem.cpp
