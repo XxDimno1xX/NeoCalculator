@@ -600,6 +600,20 @@ FlattenResult ASTFlattener::flattenRoot(const vpam::NodeRoot* node) {
         return FlattenResult::fail("Square root error");
     }
 
+    // NB-7: an irrational radical (inner>1) cannot live in a CASRational
+    // polynomial coefficient — truncating dropped the whole radical factor
+    // (√2 → 1, √8 → 1). Emit an exact SymNum (outer/inner preserved,
+    // exactSqrt already canonicalizes √8 → 2√2) or reject with a
+    // radical-specific reason. Perfect squares stay on the rational path.
+    if (result.hasRadical()) {
+        if (_arena) {
+            SymExpr* expr = symNum(*_arena, result);
+            if (expr) return FlattenResult::transcendentalSuccess(expr);
+        }
+        return FlattenResult::needsNumeric(
+            "Exact radical is not representable as a rational polynomial coefficient");
+    }
+
     return FlattenResult::success(SymPoly::fromConstant(result));
 }
 
@@ -953,6 +967,18 @@ SymExpr* ASTFlattener::flattenRootToExpr(const vpam::NodeRoot* node) {
         // x^(1/n) = x^(n^(-1))
         exp = symPow(*_arena, deg, symInt(*_arena, -1));
     } else {
+        // NB-7: √(pure-rational constant) → exact SymNum. The SymPow(c, 1/2)
+        // form was later constant-folded through exactPow, which approximates
+        // half-integer exponents to a decimal fraction — losing the exact
+        // radical (x + √2 = 0 stopped being −√2). SymNum carries outer√inner
+        // exactly and exactSqrt canonicalizes (√8 → 2√2, √4 → 2).
+        if (rad->type == SymExprType::Num) {
+            const auto* num = static_cast<const SymNum*>(rad);
+            if (num->isPureRational()) {
+                vpam::ExactVal r = vpam::exactSqrt(num->toExactVal());
+                if (r.ok && !r.approximate) return symNum(*_arena, r);
+            }
+        }
         // Square root: x^(1/2)
         exp = symFrac(*_arena, 1, 2);
     }

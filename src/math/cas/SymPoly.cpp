@@ -29,15 +29,17 @@
 
 namespace cas {
 
-// NB-6: legacy ExactVal→CASRational bridge. CASRational cannot carry
-// piMul/eMul, so a π/e-tagged constant maps to the error coefficient
-// (den==0) instead of silently truncating to its rational part (π → 1).
-// Error terms survive normalize() (isZero() is false on error) and
-// propagate through CASRational arithmetic. Radical (outer√inner) and
-// approximate values keep the historical truncation — display-only
-// callers (solver step logs) rely on it.
+// NB-6/NB-7: legacy ExactVal→CASRational bridge. CASRational cannot carry
+// piMul/eMul (NB-6) or the outer√inner radical factor (NB-7), so tagged
+// transcendental and irrational-radical constants map to the error
+// coefficient (den==0) instead of silently truncating to their rational
+// part (π → 1, √2 → 1). Error terms survive normalize() (isZero() is
+// false on error) and propagate through CASRational arithmetic.
+// approximate==true values keep the historical num/den truncation —
+// their policy is a distinct follow-up (see NB-8 report).
 static CASRational exactValToCoeff(const vpam::ExactVal& c) {
-    if (!c.ok || c.piMul != 0 || c.eMul != 0) return CASRational::makeError();
+    if (!c.ok || c.piMul != 0 || c.eMul != 0 || c.inner != 1 || c.outer != 1)
+        return CASRational::makeError();
     return CASRational(c.num, c.den);
 }
 

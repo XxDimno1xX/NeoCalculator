@@ -259,6 +259,13 @@ ExactVal exactAdd(const ExactVal& a, const ExactVal& b) {
     if (!checkOk(a, b))
         return ExactVal::makeError(a.ok ? b.error : a.error);
 
+    // NB-7: exact zero identities. Without them, 0 + √2 fell through to
+    // the decimal-approximation fallback below and destroyed exact
+    // radicals during solver isolation (x + √2 = 0 → x ≈ −1.41 instead
+    // of −√2). isZero() is only true for exact (non-approximate) zeros.
+    if (a.isZero()) return b;
+    if (b.isZero()) return a;
+
     // If either operand is an approximate large double, use double arithmetic
     if (a.approximate || b.approximate)
         return ExactVal::fromDouble(a.toDouble() + b.toDouble());

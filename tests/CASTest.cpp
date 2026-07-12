@@ -768,6 +768,209 @@ void runCASTests() {
         }
     }
 
+    // ── Test 30e: NB-7 regression — radical constants never truncate ─
+    //    √2, −√2, 2√3, √8 must reject (no arena, radical-specific reason)
+    //    or preserve the exact radical via SymExpr (arena). Perfect
+    //    squares and rationals stay on the polynomial path.
+    {
+        const double SQRT2 = std::sqrt(2.0);
+        const double SQRT3 = std::sqrt(3.0);
+
+        auto sqrt2 = vpam::makeRoot(vpam::makeNumber("2"));
+        ASTFlattener flat;  // no arena
+        auto r = flat.flatten(sqrt2.get());
+        check("flatten(√2) rejected without arena", !r.ok && r.transcendental);
+        check("flatten(√2) radical-specific reason",
+              r.error.find("radical") != std::string::npos);
+
+        SymExprArena arena;
+        ASTFlattener flatA;
+        flatA.setArena(&arena);
+        auto ra = flatA.flatten(sqrt2.get());
+        check("flatten(√2) arena → SymExpr", ra.ok && ra.exprTree != nullptr);
+        if (ra.exprTree) {
+            check("flatten(√2) is exact radical SymNum",
+                  ra.exprTree->type == SymExprType::Num &&
+                  static_cast<SymNum*>(ra.exprTree)->toExactVal().inner == 2);
+            check("flatten(√2) value ≈ √2, never 1",
+                  std::abs(ra.exprTree->evaluate(0.0) - SQRT2) < 1e-9);
+        }
+
+        auto negSqrt2 = vpam::makeRow();
+        {   auto* n = static_cast<vpam::NodeRow*>(negSqrt2.get());
+            n->appendChild(vpam::makeOperator(vpam::OpKind::Sub));
+            n->appendChild(vpam::makeRoot(vpam::makeNumber("2"))); }
+        auto rn = flat.flatten(negSqrt2.get());
+        check("flatten(−√2) rejected without arena", !rn.ok && rn.transcendental);
+        auto rna = flatA.flatten(negSqrt2.get());
+        check("flatten(−√2) arena preserves sign",
+              rna.ok && rna.exprTree &&
+              std::abs(rna.exprTree->evaluate(0.0) + SQRT2) < 1e-9);
+
+        auto twoSqrt3 = vpam::makeRow();
+        {   auto* n = static_cast<vpam::NodeRow*>(twoSqrt3.get());
+            n->appendChild(vpam::makeNumber("2"));
+            n->appendChild(vpam::makeRoot(vpam::makeNumber("3"))); }
+        auto r23 = flat.flatten(twoSqrt3.get());
+        check("flatten(2√3) rejected without arena", !r23.ok && r23.transcendental);
+        auto r23a = flatA.flatten(twoSqrt3.get());
+        check("flatten(2√3) arena preserves magnitude",
+              r23a.ok && r23a.exprTree &&
+              std::abs(r23a.exprTree->evaluate(0.0) - 2.0 * SQRT3) < 1e-9);
+
+        auto sqrt8 = vpam::makeRoot(vpam::makeNumber("8"));
+        auto r8a = flatA.flatten(sqrt8.get());
+        check("flatten(√8) arena → canonical 2√2",
+              r8a.ok && r8a.exprTree &&
+              r8a.exprTree->type == SymExprType::Num &&
+              static_cast<SymNum*>(r8a.exprTree)->toExactVal().outer == 2 &&
+              static_cast<SymNum*>(r8a.exprTree)->toExactVal().inner == 2);
+
+        // Perfect square and rational controls stay rational
+        auto sqrt4 = vpam::makeRoot(vpam::makeNumber("4"));
+        auto r4 = flat.flatten(sqrt4.get());
+        check("flatten(√4) still rational 2", r4.ok && !r4.transcendental &&
+              r4.poly.coeffAtExact(0).num == 2 &&
+              r4.poly.coeffAtExact(0).inner == 1);
+        auto n42 = vpam::makeNumber("42");
+        auto r42 = flat.flatten(n42.get());
+        check("flatten(42) still ok (NB-7)", r42.ok &&
+              r42.poly.coeffAtExact(0).num == 42);
+    }
+
+    // ── Test 30f: NB-7 regression — bridge and exactAdd honesty ──────
+    {
+        // Legacy ExactVal→SymPoly bridge: radicals map to the error
+        // coefficient, never to the bare rational part and never to 0.
+        vpam::ExactVal sqrt2 = vpam::exactSqrt(vpam::ExactVal::fromInt(2));
+        SymPoly p = SymPoly::fromConstant(sqrt2);
+        check("fromConstant(√2) error coeff", p.coeffAt(0).hasError());
+        check("fromConstant(√2) not rational 1", !p.coeffAt(0).isOne());
+        check("fromConstant(√2) not silently 0", !p.isZero());
+
+        SymPoly p23 = SymPoly::fromConstant(vpam::ExactVal::fromRadical(2, 3));
+        check("fromConstant(2√3) error coeff", p23.coeffAt(0).hasError());
+
+        // outer≠1 with inner==1 also multiplies the value — must reject too
+        vpam::ExactVal outerOnly = vpam::ExactVal::fromInt(1);
+        outerOnly.outer = 2;
+        check("fromConstant(outer=2) error coeff",
+              SymPoly::fromConstant(outerOnly).coeffAt(0).hasError());
+
+        SymTerm t = SymTerm::constant(sqrt2);
+        check("SymTerm::constant(√2) error coeff", t.coeff.hasError());
+
+        // exactAdd zero identities keep radicals exact (isolation path)
+        vpam::ExactVal zero = vpam::ExactVal::fromInt(0);
+        vpam::ExactVal s1 = vpam::exactAdd(zero, sqrt2);
+        check("exactAdd(0, √2) stays exact radical",
+              s1.ok && !s1.approximate && s1.inner == 2);
+        vpam::ExactVal s2 = vpam::exactAdd(sqrt2, zero);
+        check("exactAdd(√2, 0) stays exact radical",
+              s2.ok && !s2.approximate && s2.inner == 2);
+        vpam::ExactVal s3 = vpam::exactAdd(
+            vpam::ExactVal::fromFrac(1, 2), vpam::ExactVal::fromFrac(1, 3));
+        check("exactAdd(1/2, 1/3) == 5/6", s3.ok && s3.num == 5 && s3.den == 6);
+    }
+
+    // ── Test 30g: NB-7 regression — equations with radicals solve honestly ─
+    {
+        const double SQRT2 = std::sqrt(2.0);
+        SymExprArena arena;
+        ASTFlattener flat;
+        flat.setArena(&arena);
+
+        // Helper: solve lhs = rhs, require every solution near one of the
+        // expected values and every expected value hit (order-independent).
+        auto solveAndCheck = [&](vpam::NodePtr lhs, vpam::NodePtr rhs,
+                                 const char* name,
+                                 const double* expected, int nExpected) {
+            SymExpr* le = flat.flattenToExpr(lhs.get());
+            SymExpr* re = flat.flattenToExpr(rhs.get());
+            bool honest = false;
+            if (le && re) {
+                OmniSolver solver;
+                OmniResult res = solver.solve(le, re, 'x', arena);
+                if (res.ok && (int)res.solutions.size() == nExpected) {
+                    honest = true;
+                    bool hit[4] = {false, false, false, false};
+                    for (const auto& s : res.solutions) {
+                        double v = s.isExact ? s.exact.toDouble() : s.numeric;
+                        bool matched = false;
+                        for (int i = 0; i < nExpected; ++i) {
+                            if (std::abs(v - expected[i]) < 1e-4) {
+                                hit[i] = true; matched = true;
+                            }
+                        }
+                        if (!matched) honest = false;
+                    }
+                    for (int i = 0; i < nExpected; ++i)
+                        if (!hit[i]) honest = false;
+                }
+            }
+            check(name, honest);
+        };
+
+        {   // x + √2 = 0 → −√2 exactly (SymNum radical supported end-to-end)
+            auto lhs = vpam::makeRow();
+            auto* l = static_cast<vpam::NodeRow*>(lhs.get());
+            l->appendChild(vpam::makeVariable('x'));
+            l->appendChild(vpam::makeOperator(vpam::OpKind::Add));
+            l->appendChild(vpam::makeRoot(vpam::makeNumber("2")));
+            SymExpr* le = flat.flattenToExpr(lhs.get());
+            auto zero = vpam::makeNumber("0");
+            SymExpr* re = flat.flattenToExpr(zero.get());
+            bool exactNegSqrt2 = false;
+            if (le && re) {
+                OmniSolver solver;
+                OmniResult res = solver.solve(le, re, 'x', arena);
+                if (res.ok && res.solutions.size() == 1) {
+                    const auto& s = res.solutions[0];
+                    exactNegSqrt2 = s.isExact && s.exact.ok &&
+                                    !s.exact.approximate &&
+                                    s.exact.inner == 2 && s.exact.num == -1;
+                }
+            }
+            check("x + √2 = 0 → exact −√2", exactNegSqrt2);
+        }
+        {   // √2·x − 1 = 0 → 1/√2, never x = 1 (√2 treated as 1)
+            auto lhs = vpam::makeRow();
+            auto* l = static_cast<vpam::NodeRow*>(lhs.get());
+            l->appendChild(vpam::makeRoot(vpam::makeNumber("2")));
+            l->appendChild(vpam::makeVariable('x'));
+            l->appendChild(vpam::makeOperator(vpam::OpKind::Sub));
+            l->appendChild(vpam::makeNumber("1"));
+            double exp[] = {1.0 / SQRT2};
+            solveAndCheck(std::move(lhs), vpam::makeNumber("0"),
+                          "√2·x − 1 = 0 → 1/√2, not 1", exp, 1);
+        }
+        {   // x² − 2 = 0 → both ±√2 roots
+            auto lhs = vpam::makeRow();
+            auto* l = static_cast<vpam::NodeRow*>(lhs.get());
+            l->appendChild(vpam::makePower(vpam::makeVariable('x'),
+                                           vpam::makeNumber("2")));
+            l->appendChild(vpam::makeOperator(vpam::OpKind::Sub));
+            l->appendChild(vpam::makeNumber("2"));
+            double exp[] = {SQRT2, -SQRT2};
+            solveAndCheck(std::move(lhs), vpam::makeNumber("0"),
+                          "x² − 2 = 0 → both ±√2 roots", exp, 2);
+        }
+        {   // x² = 2 → both ±√2 roots
+            double exp[] = {SQRT2, -SQRT2};
+            solveAndCheck(vpam::makePower(vpam::makeVariable('x'),
+                                          vpam::makeNumber("2")),
+                          vpam::makeNumber("2"),
+                          "x² = 2 → both ±√2 roots", exp, 2);
+        }
+        {   // Control: x² = 4 → exact ±2 unchanged
+            double exp[] = {2.0, -2.0};
+            solveAndCheck(vpam::makePower(vpam::makeVariable('x'),
+                                          vpam::makeNumber("2")),
+                          vpam::makeNumber("4"),
+                          "x² = 4 still exact ±2", exp, 2);
+        }
+    }
+
     // ── Test 31: ASTFlattener — Unary minus: -3x + 7 ───────────
     {
         ASTFlattener flat;
