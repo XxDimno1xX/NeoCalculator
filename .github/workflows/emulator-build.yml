@@ -138,6 +138,29 @@ jobs:
             /tmp/cas-host-tests/summary.txt
           if-no-files-found: warn
 
+      # ---------------------------------------------------------------------
+      # Giac engine host harness (GIAC-A01).
+      #
+      # Builds the vendored embedded Giac natively (the old "native Giac is
+      # broken / SIZEOF_INT" verdict was a missing -DHAVE_CONFIG_H — see
+      # docs/GIAC_FEASIBILITY_SPIKE.md) and runs the PRODUCTION GiacEngine
+      # seam (src/math/giac/GiacEngine.cpp) through the 24-expression suite,
+      # context/reset/DEG-RAD lifecycle checks and the compiled-expression
+      # Grapher sweeps. Artifacts stay in /tmp (dirty-tree guard safe).
+      # Expected green footer: FOOTER|pass=53|fail=0.
+      - name: Giac engine host harness (GIAC-A01)
+        run: |
+          mkdir -p /tmp/giac-host-harness
+          bash scripts/build-giac-host-harness.sh 2>&1 | tee /tmp/giac-host-harness/run.log
+
+      - name: Upload Giac engine harness log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: giac-engine-harness-log
+          path: /tmp/giac-host-harness/run.log
+          if-no-files-found: warn
+
       - name: Build emulator (emulator_pc)
         run: pio run -e emulator_pc
 

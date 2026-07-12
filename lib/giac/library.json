@@ -3,6 +3,7 @@
   "version": "1.9.0",
   "description": "Giac CAS engine for NumOS",
   "build": {
+    "extraScript": "extra_script.py",
     "flags": [
       "-DGIAC_KHICAS",
       "-DNO_GUI",

@@ -32,17 +32,18 @@
 #include "series.h"
 
 #include "math/giac/GiacBridge.h"
+#include "math/giac/GiacEngineInternal.h"
 #include "ui/MathSymbols.h"
 #include "utils/MemProbe.h"
 
 using namespace giac;
 
-namespace giac {
-  void check_browser_functions();
-  void lexer_localization(int lang, const context * contextptr);
+// GIAC-A01: this TU no longer owns a giac::context. The single context in
+// the system belongs to numos::GiacEngine; the UART path borrows it through
+// the transition accessor below and keeps its historical semantics.
+static giac::context* bridgeContext() {
+  return numos::giacinternal::sharedContext();
 }
-
-static giac::context global_context;
 
 static std::string trimCopy(const std::string &s);
 
@@ -144,12 +145,12 @@ static std::string mapPresentationCommandAliases(const std::string &expr) {
 }
 
 static giac::gen evalInBridgeContext(const std::string &expr) {
-  giac::gen g(expr, &global_context);
-  return giac::eval(g, giac::eval_level(&global_context), &global_context);
+  giac::gen g(expr, bridgeContext());
+  return giac::eval(g, giac::eval_level(bridgeContext()), bridgeContext());
 }
 
 static giac::gen prettifyRootofIfNeeded(const giac::gen &input) {
-  std::string printed = input.print(&global_context);
+  std::string printed = input.print(bridgeContext());
   if (!containsRootofText(printed)) return input;
 
   giac::gen best = input;
@@ -158,7 +159,7 @@ static giac::gen prettifyRootofIfNeeded(const giac::gen &input) {
     giac::gen candidate = evalInBridgeContext("normal(" + printed + ")");
     if (!is_undef(candidate)) {
       best = candidate;
-      printed = best.print(&global_context);
+      printed = best.print(bridgeContext());
     }
   } catch (...) {
     // Keep original if normalization fails.
@@ -169,7 +170,7 @@ static giac::gen prettifyRootofIfNeeded(const giac::gen &input) {
       giac::gen candidate = evalInBridgeContext("radsimp(" + printed + ")");
       if (!is_undef(candidate)) {
         best = candidate;
-        printed = best.print(&global_context);
+        printed = best.print(bridgeContext());
       }
     } catch (...) {
       // Keep last valid representation.
@@ -178,7 +179,7 @@ static giac::gen prettifyRootofIfNeeded(const giac::gen &input) {
 
   if (containsRootofText(printed)) {
     try {
-      giac::gen candidate = giac::evalf(best, 1, &global_context);
+      giac::gen candidate = giac::evalf(best, 1, bridgeContext());
       if (!is_undef(candidate)) {
         best = candidate;
       }
@@ -191,24 +192,13 @@ static giac::gen prettifyRootofIfNeeded(const giac::gen &input) {
 }
 
 static void initGiac() {
-  static bool initialized = false;
-  if (!initialized) {
-    giac::xcas_mode(0, &global_context);
-    giac::approx_mode(false, &global_context);
-    giac::complex_mode(false, &global_context);
-    giac::complex_variables(false, &global_context);
-    giac::i_sqrt_minus1(1, &global_context);
-    giac::withsqrt(true, &global_context);
-    giac::eval_level(&global_context) = 1;
-    giac::step_infolevel(&global_context) = 0;
-    // This Giac snapshot does not expose symbolic_mode(...); keep symbolic behavior
-    // via exact evaluation level and approx_mode(false).
-    giac::language(0, &global_context);
-    giac::check_browser_functions();
-    giac::lexer_localization(0, &global_context);
-    giac::cas_setup(giac::makevecteur(0, 0, 0, 1, 0), &global_context);
-    initialized = true;
-  }
+  // Context creation + configuration moved to numos::GiacEngine (GIAC-A01);
+  // this now only ensures the shared context exists and re-pins radians.
+  // The UART path predates DEG/RAD synchronization and must keep answering
+  // in radians even after an app flips vpam::g_angleMode through the engine
+  // API (engine entry points re-sync the shared context for themselves).
+  giac::context* ctx = bridgeContext();
+  if (ctx) giac::angle_radian(true, ctx);
 }
 
 static std::string trimCopy(const std::string &s) {
@@ -380,7 +370,7 @@ static giac::gen diagonalToVector(const giac::gen &g) {
   for (size_t i = 0; i < n; ++i) {
     const giac::vecteur &row = *(*g._VECTptr)[i]._VECTptr;
     for (size_t j = 0; j < n; ++j) {
-      if (i != j && !is_zero(row[j], &global_context)) return g;
+      if (i != j && !is_zero(row[j], bridgeContext())) return g;
     }
     diag.push_back(row[i]);
   }
@@ -394,6 +384,9 @@ String solveWithGiac(String expr) {
   NUMOS_MEM_PROBE("giac-pre");
   try {
     initGiac();
+    if (!bridgeContext()) {
+      return String("Error: Giac context unavailable");
+    }
     std::string std_expr = expr.c_str();
 
     // Serial commands may come prefixed with ':'; strip it for semantic parsing.
@@ -410,11 +403,11 @@ String solveWithGiac(String expr) {
       // Capture textual traces from cout/cerr and Giac logptr.
       std::streambuf* old_cout = std::cout.rdbuf(step_buf.rdbuf());
       std::streambuf* old_cerr = std::cerr.rdbuf(step_buf.rdbuf());
-      std::ostream *old_log = giac::logptr(&global_context);
-      giac::logptr(&step_buf, &global_context);
+      std::ostream *old_log = giac::logptr(bridgeContext());
+      giac::logptr(&step_buf, bridgeContext());
 
-      g = giac::gen(std_expr, &global_context);
-      g = giac::eval(g, giac::eval_level(&global_context), &global_context);
+      g = giac::gen(std_expr, bridgeContext());
+      g = giac::eval(g, giac::eval_level(bridgeContext()), bridgeContext());
 
       g = prettifyRootofIfNeeded(g);
 
@@ -423,12 +416,12 @@ String solveWithGiac(String expr) {
         g = diagonalToVector(g);
       }
 
-      giac::logptr(old_log, &global_context);
+      giac::logptr(old_log, bridgeContext());
       std::cout.rdbuf(old_cout);
       std::cerr.rdbuf(old_cerr);
     }
 
-    std::string result = g.print(&global_context);
+    std::string result = g.print(bridgeContext());
     applyDisplaySymbolMap(result);
     std::string steps = step_buf.str();
     if (!steps.empty()) {

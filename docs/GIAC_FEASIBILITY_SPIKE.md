@@ -1,5 +1,14 @@
 # GIAC-FEAS-01 — Giac as Primary Engine: Feasibility Spike
 
+> **Status (2026-07-13, GIAC-A01):** promoted to production. The spike
+> adapter (`GiacFeasibility.*`), its harness and
+> `scripts/build-giac-feasibility-host.sh` are gone; the production seam is
+> `src/math/giac/GiacEngine.h/.cpp` (single `giac::context` owner, legacy
+> GiacBridge delegates), tested by `tests/host/giac_engine_suite_main.cpp`
+> via `scripts/build-giac-host-harness.sh`, and `emulator_pc` now links the
+> same in-process Giac. The measurements below remain the original
+> feasibility evidence.
+
 Date: 2026-07-12 · Branch: `main` · HEAD: `80aeead` · Author: spike run (no app code modified)
 
 Working tree at spike time additionally carried in-progress NB-work edits to

@@ -52,6 +52,12 @@ bool setting_edu_steps = false;
 #include "fonts/StixMathFont.h"
 #endif
 
+// GIAC-A01 engine diagnostics (enable via -DNUMOS_GIAC_DIAGNOSTICS,
+// pio run -e esp32s3_n16r8_giacdiag). No-op in normal firmware.
+#ifdef NUMOS_GIAC_DIAGNOSTICS
+#include "math/giac/GiacDiagnostics.h"
+#endif
+
 // CAS tests (enable via -DCAS_RUN_TESTS in platformio.ini)
 #ifdef CAS_RUN_TESTS
   #include "../tests/CASTest.h"
@@ -111,6 +117,11 @@ void setup() {
     cas::runCalculusStressTest();
     cas::runBigIntTests();
     cas::runTutorTests();
+#endif
+
+    // -- GIAC-A01 engine diagnostics (opt-in build only) --
+#ifdef NUMOS_GIAC_DIAGNOSTICS
+    numos::runGiacDiagnostics();
 #endif
 
     // -- 1. PSRAM --
