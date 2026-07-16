@@ -527,7 +527,7 @@ numOS/
 │   ├── PROJECT_BIBLE.md              # Master software architecture
 │   ├── MATH_ENGINE.md                # Math engine + CAS in detail
 │   ├── HARDWARE.md                   # ESP32-S3 pinout, wiring, and bring-up
-│   ├── CONSTRUCCION.md               # Physical assembly guide
+│   ├── CONSTRUCTION.md               # Physical assembly guide
 │   └── DIMENSIONES_DISEÑO.md         # 3D chassis specifications
 ├── platformio.ini                    # PlatformIO configuration
 ├── wokwi.toml                        # Wokwi simulator (optional)
